@@ -1,0 +1,253 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-primary: #22c55e;
+  --color-secondary: #84cc16;
+  --color-accent: #16a34a;
+  --color-offer: #f97316;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--cream-bg) !important;
+    color: var(--cream-text-main) !important;
+  }
+  
+  /* Keep inputs and select text visible */
+  input, select, textarea, button {
+    font-family: var(--font-sans);
+  }
+}
+
+/* --- FRESH GREEN & LIME THEME STYLING --- */
+:root {
+  --cream-bg: #ffffff; /* White background */
+  --cream-card: #f0fdf4; /* Soft Green Tint for Cards */
+  --cream-panel: #f0fdf4; /* Soft Green Tint for Panels */
+  --cream-border: #bbf7d0; /* bg-green-200 crisp border */
+  --cream-border-subtle: #dcfce7; /* bg-green-100 subtle border */
+  --cream-text-main: #1f2937; /* Slate Gray Text */
+  --cream-text-muted: #4b5563; /* Slate Gray Muted */
+  --cream-input-bg: #ffffff; /* bg-white inputs */
+  --cream-highlight: #dcfce7; /* bg-green-100 hover / list highlights */
+  
+  --color-primary: #22c55e; /* Fresh Green */
+  --color-secondary: #84cc16; /* Lime Green */
+  --color-accent: #16a34a; /* Leaf Green */
+  --color-offer: #f97316; /* Orange */
+}
+
+/* Background overrides: Main Shell & Generic Page Backdrops as substring attributes */
+body,
+[id="crm-shell"],
+[id="login-portal-root"],
+[class*="bg-[#0a0a0c]"],
+[class*="bg-[#08080a]"],
+[class*="bg-[#070709]"],
+[class*="bg-black"],
+[class*="bg-slate-950"] {
+  background-color: var(--cream-bg) !important;
+}
+
+/* Sidebars, navigation containers, headers, overlays */
+[id="desktop-sidebar"],
+[id="mobile-navbar"],
+[id="mobile-overlay-menu"],
+[class*="bg-[#0d0d10]"],
+[class*="bg-[#0b0b0e]"],
+[class*="bg-[#0c0c0f]"],
+[class*="bg-[#0d0d11]"],
+[class*="bg-[#f5efe4]"],
+[class*="bg-slate-900"] {
+  background-color: var(--cream-card) !important;
+}
+
+/* Cards, active content panels, bento grids, dropdown grids, dialog panels */
+[id="view-renderer-panel"],
+[id="role-selector-card"],
+[class*="bg-[#141418]"],
+[class*="bg-[#101014]"],
+[class*="bg-[#111114]"],
+[class*="bg-[#1a1a24]"],
+[class*="bg-[#121216]"],
+[class*="bg-[#FAF7F2]"],
+[class*="bg-[#09090d]"] {
+  background-color: var(--cream-panel) !important;
+}
+
+/* Filter controls, inputs, select options, text areas */
+[class*="bg-[#121215]"],
+[class*="bg-[#16161a]"],
+[class*="bg-[#0e0e11]"],
+[class*="bg-[#0e0e12]"] {
+  background-color: var(--cream-input-bg) !important;
+}
+
+/* Ensure inputs, placeholders and select lists are dark elegant text on light bg */
+input, select, textarea, option {
+  color: var(--cream-text-main) !important;
+  background-color: var(--cream-input-bg) !important;
+  border-color: var(--cream-border) !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* All dark backgrounds targeted for text must have their text color inverted to be dark slate */
+[class*="text-slate-100"],
+[class*="text-slate-150"],
+[class*="text-slate-205"],
+[class*="text-slate-200"],
+[class*="text-slate-250"],
+[class*="text-slate-300"],
+[class*="text-slate-350"],
+[class*="text-white"],
+[class*="text-slate-550"],
+[class*="text-[#2b251a]"],
+[class*="text-slate-900"],
+[class*="text-[#e2e8f0]"],
+[class*="text-[color:#e2e8f0]"],
+h1, h2, h3, h4, h5, h6, th, td, label {
+  color: var(--cream-text-main) !important;
+}
+
+/* Muted colors changed to legible slate-600 */
+[class*="text-slate-405"],
+[class*="text-slate-400"],
+[class*="text-slate-450"],
+[class*="text-slate-500"],
+[class*="text-slate-550"],
+[class*="text-slate-650"],
+[class*="text-slate-600"],
+[class*="text-[#6b5d49]"],
+[class*="text-[#5c4f3d]"] {
+  color: var(--cream-text-muted) !important;
+}
+
+/* Clean, crisp lime-300 / lime-200 border separation */
+[class*="border-slate-800"],
+[class*="border-slate-850"],
+[class*="border-slate-900"],
+[class*="border-slate-750"],
+[class*="border-slate-700"],
+[class*="border-slate-705"],
+[class*="border-[#e3d3be]"],
+[class*="border-[#ebdcb9]"],
+[class*="border-red-900/30"] {
+  border-color: var(--cream-border) !important;
+}
+
+/* Legend Accents for readability on light backgrounds */
+[class*="text-indigo-400"], [class*="text-indigo-505"] { color: #22c55e !important; } /* Primary text: Fresh Green */
+[class*="text-emerald-400"], [class*="text-emerald-450"], [class*="text-green-500"] { color: #16a34a !important; } /* Accent text: Leaf Green */
+[class*="text-[#2b251a]"] { color: #1f2937 !important; } /* Slate text: Slate Gray */
+[class*="text-rose-400"], [class*="text-rose-500"] { color: #b91c1c !important; } /* Red Crimson */
+[class*="text-teal-400"] { color: #16a34a !important; } /* Accent text: Leaf Green */
+
+/* Select Tab & Green Button colors */
+[class*="bg-indigo-600"],
+[class*="bg-[#2b251a]"],
+[class*="bg-green-600"],
+[class*="bg-emerald-600"] {
+  background-color: var(--color-accent) !important;
+  color: #ffffff !important;
+}
+[class*="bg-indigo-600"] *,
+[class*="bg-[#2b251a]"] *,
+[class*="bg-green-600"] *,
+[class*="bg-emerald-600"] * {
+  color: #ffffff !important;
+}
+
+/* Standard icon inherits the text color properly */
+svg {
+  stroke: currentColor;
+}
+
+/* Highlight Hover elements */
+[class*="hover:bg-[#141418]"]:hover,
+[class*="hover:bg-[#1b1b22]"]:hover,
+[class*="hover:bg-slate-900/40"]:hover,
+[class*="hover:text-white"]:hover,
+[class*="hover:bg-[#111114]/50"]:hover,
+[class*="hover:bg-[#1a1a1f]/30"]:hover,
+[class*="hover:bg-[#2b251a]"]:hover,
+[class*="hover:bg-[#1c1c21]"]:hover {
+  background-color: var(--cream-highlight) !important;
+  color: var(--cream-text-main) !important;
+}
+
+/* Custom micro-animations for high-fidelity transitions */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom scrollbars for dashboard widgets */
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+}
+.scrollbar-none {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* --- PRINTABLE STYLES FOR ORDER INVOICE / DETAILS --- */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .printable-order-modal,
+  .printable-order-modal * {
+    visibility: visible !important;
+  }
+  .printable-order-modal {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 24px !important;
+    box-shadow: none !important;
+    border: none !important;
+    z-index: 99999 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

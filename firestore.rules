@@ -1,0 +1,183 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Users Collection (Allow creation during registration and authenticated read/write)
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() || request.auth.uid == userId || true;
+      allow delete: if isSignedIn();
+    }
+
+    // Settings Collection
+    match /settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    // Permissions Collection
+    match /permissions/{roleId} {
+      allow read, write: if true;
+    }
+
+    // Payouts Collection
+    match /payouts/{payoutId} {
+      allow read, write: if true;
+    }
+
+    // Leads Collection
+    match /leads/{leadId} {
+      allow read, write: if true;
+    }
+
+    // Deals Collection
+    match /deals/{dealId} {
+      allow read, write: if true;
+    }
+
+    // Tasks Collection
+    match /tasks/{taskId} {
+      allow read, write: if true;
+    }
+
+    // Calendar Events Collection
+    match /calendar_events/{eventId} {
+      allow read, write: if true;
+    }
+
+    // Products Collection
+    match /products/{productId} {
+      allow read, write: if true;
+    }
+
+    // Product Categories Collection (name + picture metadata)
+    match /product_categories/{categoryId} {
+      allow read, write: if true;
+    }
+
+    // Customers Collection
+    match /customers/{customerId} {
+      allow read, write: if true;
+    }
+
+    // Campaigns Collection
+    match /campaigns/{campaignId} {
+      allow read, write: if true;
+    }
+
+    // WhatsApp Templates
+    match /whatsapp_templates/{templateId} {
+      allow read, write: if true;
+    }
+
+    // WhatsApp Sequences
+    match /whatsapp_sequences/{sequenceId} {
+      allow read, write: if true;
+    }
+
+    // WhatsApp Messages
+    match /whatsapp_messages/{messageId} {
+      allow read, write: if true;
+    }
+
+    // Referrals
+    match /referrals/{referralId} {
+      allow read, write: if true;
+    }
+
+    // Sales Orders
+    match /sales_orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    // Influencers
+    match /influencers/{influencerId} {
+      allow read, write: if true;
+    }
+
+    // Influencer Campaigns
+    match /influencer_campaigns/{campaignId} {
+      allow read, write: if true;
+    }
+
+    // Influencer Collaborations
+    match /influencer_collaborations/{collaborationId} {
+      allow read, write: if true;
+    }
+
+    // Influencer Dispatches
+    match /influencer_dispatches/{dispatchId} {
+      allow read, write: if true;
+    }
+
+    // Influencer Payments
+    match /influencer_payments/{paymentId} {
+      allow read, write: if true;
+    }
+
+    // Influencer Contents
+    match /influencer_contents/{contentId} {
+      allow read, write: if true;
+    }
+
+    // Shopping Cart Collection
+    match /shopping_cart/{itemId} {
+      allow read, write: if true;
+    }
+
+    // Wishlist Collection
+    match /wishlist/{itemId} {
+      allow read, write: if true;
+    }
+
+    // Product Reviews Collection
+    match /product_reviews/{reviewId} {
+      allow read, write: if true;
+    }
+
+    // Customer Addresses Collection
+    match /customer_delivery_addresses/{addressId} {
+      allow read, write: if true;
+    }
+
+    // Coupons Collection
+    match /coupons/{couponId} {
+      allow read, write: if true;
+    }
+
+    // Order Delivery Tracking Collection
+    match /order_delivery_tracking/{trackingId} {
+      allow read, write: if true;
+    }
+
+    // Order Return Requests Collection
+    match /order_return_requests/{requestId} {
+      allow read, write: if true;
+    }
+
+    // Order Refunds Collection
+    match /order_refunds/{refundId} {
+      allow read, write: if true;
+    }
+
+    // Payment Gateway Settings Collection
+    match /payment_gateway_settings/{configId} {
+      allow read, write: if true;
+    }
+
+    // Delivery Charges Collection
+    match /delivery_charges/{chargeId} {
+      allow read, write: if true;
+    }
+
+    // Audit Logs
+    match /audit_logs/{logId} {
+      allow read, create: if true;
+      allow update, delete: if false;
+    }
+  }
+}

@@ -1,0 +1,55 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validImage() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp|gif)')
+        && request.resource.size <= 10 * 1024 * 1024;
+    }
+
+    match /products/{productId}/main.jpg {
+      allow read: if true;
+      allow write: if signedIn() && validImage();
+    }
+
+    match /products/{productId}/images/{imageId} {
+      allow read: if true;
+      allow write: if signedIn() && validImage();
+    }
+
+    match /products/{productId}/videos/{videoId} {
+      allow read: if true;
+      allow write: if signedIn()
+        && request.resource.contentType.matches('video/.*')
+        && request.resource.size <= 50 * 1024 * 1024;
+    }
+
+    match /categories/{categoryId}/main.jpg {
+      allow read: if true;
+      allow write: if signedIn() && validImage();
+    }
+
+    match /banners/{bannerId}/{fileName} {
+      allow read: if true;
+      allow write: if signedIn() && validImage();
+    }
+
+    match /attachments/{entityId}/{fileId} {
+      allow read: if signedIn();
+      allow write: if signedIn() && request.resource.size <= 50 * 1024 * 1024;
+    }
+
+    match /users/{userId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn() && validImage();
+    }
+
+    match /reviews/{productId}/{fileName} {
+      allow read: if true;
+      allow write: if signedIn() && request.resource.size <= 50 * 1024 * 1024;
+    }
+  }
+}

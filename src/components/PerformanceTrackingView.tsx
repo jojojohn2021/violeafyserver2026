@@ -3,6 +3,7 @@ import { useCRM } from '../store';
 import { ProductPerformance, CustomerPerformance } from '../types';
 import ProductReviewsSection from './ProductReviewsSection';
 import { uploadFileToStorage, uploadProductImage } from '../utils/storageUpload';
+import { auth } from '../firebase';
 import { 
   LineChart, ShoppingBag, Heart, BarChart3, TrendingUp, Grid, 
   Trash2, Plus, Edit, DollarSign, HelpCircle, Check, Award,
@@ -874,7 +875,7 @@ export default function PerformanceTrackingView() {
   };
 
   // Handle custom product creation
-  const handleCreateProduct = (e: React.FormEvent) => {
+  const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasAccess('Products & Clients', 'create')) return;
 
@@ -898,7 +899,7 @@ export default function PerformanceTrackingView() {
     const parsedProdImages = prodImagesText.split(',').map(s => s.trim()).filter(Boolean);
     const parsedProdVideos = prodVideosText.split(',').map(s => s.trim()).filter(Boolean);
 
-    // If a file has been selected, use multipart upload to /api/products
+    // If a file has been selected, try multipart upload to /api/products with Auth token
     if (prodImageFile) {
       const fd = new FormData();
       fd.append('image', prodImageFile);
@@ -938,16 +939,162 @@ export default function PerformanceTrackingView() {
       fd.append('rating', String(prodRating));
       fd.append('reviewsCount', String(prodReviewsCount));
 
-      fetch('/api/products', { method: 'POST', body: fd }).then(async (res) => {
-        if (!res.ok) throw new Error(`Upload failed ${res.status}`);
-        const data = await res.json();
-        if (data && data.product) {
-          addProduct(data.product);
+      try {
+        const token = auth?.currentUser ? await auth.currentUser.getIdToken().catch(() => null) : null;
+        const res = await fetch('/api/products', {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          body: fd,
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.product) {
+            await addProduct(data.product);
+          }
+        } else {
+          // If server upload fails or 401s, fallback to uploading file via client storage and creating product
+          const uploadRes = await uploadFileToStorage(prodImageFile, `products/${prodUploadId}/main.jpg`);
+          await addProduct({
+            name: prodName,
+            sku: prodSku,
+            hsnCode: prodHsnCode.trim(),
+            packingSize: prodPackingSize,
+            unit: prodUnit,
+            onlinePrice: prodOnlinePrice,
+            shopPrice: prodShopPrice,
+            gstPercentage: prodGstPercentage,
+            notes: prodNotes,
+            unitsSold: Math.round((prodOnlinePrice * 110 + prodShopPrice * 10) / (prodOnlinePrice || 1)),
+            revenue: Math.round(prodOnlinePrice * 40) + Math.round(prodOnlinePrice * 30) + Math.round(prodOnlinePrice * 20) + Math.round(prodOnlinePrice * 10) + Math.round(prodOnlinePrice * 10) + Math.round(prodShopPrice * 10),
+            growthRate: 15.0,
+            stock: Math.max(0, prodStockIn - prodStockOut),
+            stockIn: prodStockIn,
+            stockOut: prodStockOut,
+            amazonSales: Math.round(prodOnlinePrice * 40),
+            flipkartSales: Math.round(prodOnlinePrice * 30),
+            meeshoSales: Math.round(prodOnlinePrice * 20),
+            vamjoSales: Math.round(prodOnlinePrice * 10),
+            whatsappSales: Math.round(prodOnlinePrice * 10),
+            countersaleSales: Math.round(prodShopPrice * 10),
+            vamjoWeblink: prodVamjoWeblink,
+            amazonWeblink: prodAmazonWeblink,
+            flipkartWeblink: prodFlipkartWeblink,
+            meeshoWeblink: prodMeeshoWeblink,
+            category: prodCategory,
+            brand: prodBrand,
+            brandOwner: prodBrandOwner,
+            imageUrl: uploadRes.downloadUrl,
+            storagePath: uploadRes.storagePath,
+            images: parsedProdImages,
+            videos: parsedProdVideos,
+            description: prodDescription || prodNotes,
+            ingredients: prodIngredients,
+            specifications: prodSpecifications,
+            variants: prodVariants,
+            stockAvailability: prodStockAvailability,
+            offerPrice: prodOfferPrice || prodOnlinePrice,
+            mrp: prodMrp || prodShopPrice,
+            discount: prodDiscount || (prodShopPrice && prodOnlinePrice ? Math.max(0, Math.round(((prodShopPrice - prodOnlinePrice) / prodShopPrice) * 100)) : 0),
+            rating: prodRating,
+            reviewsCount: prodReviewsCount
+          });
         }
-      }).catch(err => {
-        console.error('Product upload failed', err);
-        alert('Failed to upload product. Please try again.');
-      });
+      } catch (err) {
+        console.error('Product upload API failed, falling back to client storage upload', err);
+        try {
+          const uploadRes = await uploadFileToStorage(prodImageFile, `products/${prodUploadId}/main.jpg`);
+          await addProduct({
+            name: prodName,
+            sku: prodSku,
+            hsnCode: prodHsnCode.trim(),
+            packingSize: prodPackingSize,
+            unit: prodUnit,
+            onlinePrice: prodOnlinePrice,
+            shopPrice: prodShopPrice,
+            gstPercentage: prodGstPercentage,
+            notes: prodNotes,
+            unitsSold: Math.round((prodOnlinePrice * 110 + prodShopPrice * 10) / (prodOnlinePrice || 1)),
+            revenue: Math.round(prodOnlinePrice * 40) + Math.round(prodOnlinePrice * 30) + Math.round(prodOnlinePrice * 20) + Math.round(prodOnlinePrice * 10) + Math.round(prodOnlinePrice * 10) + Math.round(prodShopPrice * 10),
+            growthRate: 15.0,
+            stock: Math.max(0, prodStockIn - prodStockOut),
+            stockIn: prodStockIn,
+            stockOut: prodStockOut,
+            amazonSales: Math.round(prodOnlinePrice * 40),
+            flipkartSales: Math.round(prodOnlinePrice * 30),
+            meeshoSales: Math.round(prodOnlinePrice * 20),
+            vamjoSales: Math.round(prodOnlinePrice * 10),
+            whatsappSales: Math.round(prodOnlinePrice * 10),
+            countersaleSales: Math.round(prodShopPrice * 10),
+            vamjoWeblink: prodVamjoWeblink,
+            amazonWeblink: prodAmazonWeblink,
+            flipkartWeblink: prodFlipkartWeblink,
+            meeshoWeblink: prodMeeshoWeblink,
+            category: prodCategory,
+            brand: prodBrand,
+            brandOwner: prodBrandOwner,
+            imageUrl: uploadRes.downloadUrl,
+            storagePath: uploadRes.storagePath,
+            images: parsedProdImages,
+            videos: parsedProdVideos,
+            description: prodDescription || prodNotes,
+            ingredients: prodIngredients,
+            specifications: prodSpecifications,
+            variants: prodVariants,
+            stockAvailability: prodStockAvailability,
+            offerPrice: prodOfferPrice || prodOnlinePrice,
+            mrp: prodMrp || prodShopPrice,
+            discount: prodDiscount || (prodShopPrice && prodOnlinePrice ? Math.max(0, Math.round(((prodShopPrice - prodOnlinePrice) / prodShopPrice) * 100)) : 0),
+            rating: prodRating,
+            reviewsCount: prodReviewsCount
+          });
+        } catch (fallbackErr) {
+          console.error('Fallback upload failed', fallbackErr);
+          alert('Failed to upload product image. Creating product without image.');
+          await addProduct({
+            name: prodName,
+            sku: prodSku,
+            hsnCode: prodHsnCode.trim(),
+            packingSize: prodPackingSize,
+            unit: prodUnit,
+            onlinePrice: prodOnlinePrice,
+            shopPrice: prodShopPrice,
+            gstPercentage: prodGstPercentage,
+            notes: prodNotes,
+            unitsSold: Math.round((prodOnlinePrice * 110 + prodShopPrice * 10) / (prodOnlinePrice || 1)),
+            revenue: Math.round(prodOnlinePrice * 40) + Math.round(prodOnlinePrice * 30) + Math.round(prodOnlinePrice * 20) + Math.round(prodOnlinePrice * 10) + Math.round(prodOnlinePrice * 10) + Math.round(prodShopPrice * 10),
+            growthRate: 15.0,
+            stock: Math.max(0, prodStockIn - prodStockOut),
+            stockIn: prodStockIn,
+            stockOut: prodStockOut,
+            amazonSales: Math.round(prodOnlinePrice * 40),
+            flipkartSales: Math.round(prodOnlinePrice * 30),
+            meeshoSales: Math.round(prodOnlinePrice * 20),
+            vamjoSales: Math.round(prodOnlinePrice * 10),
+            whatsappSales: Math.round(prodOnlinePrice * 10),
+            countersaleSales: Math.round(prodShopPrice * 10),
+            vamjoWeblink: prodVamjoWeblink,
+            amazonWeblink: prodAmazonWeblink,
+            flipkartWeblink: prodFlipkartWeblink,
+            meeshoWeblink: prodMeeshoWeblink,
+            category: prodCategory,
+            brand: prodBrand,
+            brandOwner: prodBrandOwner,
+            images: parsedProdImages,
+            videos: parsedProdVideos,
+            description: prodDescription || prodNotes,
+            ingredients: prodIngredients,
+            specifications: prodSpecifications,
+            variants: prodVariants,
+            stockAvailability: prodStockAvailability,
+            offerPrice: prodOfferPrice || prodOnlinePrice,
+            mrp: prodMrp || prodShopPrice,
+            discount: prodDiscount || (prodShopPrice && prodOnlinePrice ? Math.max(0, Math.round(((prodShopPrice - prodOnlinePrice) / prodShopPrice) * 100)) : 0),
+            rating: prodRating,
+            reviewsCount: prodReviewsCount
+          });
+        }
+      }
     } else {
       // No file selected — create product without image
       addProduct({

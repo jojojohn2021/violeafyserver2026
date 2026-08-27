@@ -1,8 +1,0 @@
-{
-  "status": "Failed",
-  "error": "Invalid scheme, expected connection string to start with \"mongodb://\" or \"mongodb+srv://\"",
-  "uriUsed": "",
-  "env": {
-    "FIREBASE_API_KEY": "AIzaSyC0..._kOc"
-  }
-}

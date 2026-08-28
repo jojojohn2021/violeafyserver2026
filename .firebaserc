@@ -2,6 +2,14 @@
   "projects": {
     "default": "violeafybasket"
   },
-  "targets": {},
+  "targets": {
+    "violeafybasket": {
+      "hosting": {
+        "server-site": [
+          "violeafybasket"
+        ]
+      }
+    }
+  },
   "etags": {}
 }

@@ -1993,7 +1993,6 @@ async function startServer() {
   const isProduction =
     process.env.NODE_ENV === "production" ||
     Boolean(process.env.K_SERVICE) ||
-    Boolean(process.env.FIREBASE_CONFIG) ||
     Boolean(process.argv[1]?.includes("dist"));
 
   if (!isProduction) {

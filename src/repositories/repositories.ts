@@ -29,7 +29,8 @@ import {
   FormatInvoice,
   Category,
   Brand,
-  BrandOwner
+  BrandOwner,
+  UnitMaster
 } from '../types';
 
 export class UserRepository extends BaseRepository<User> {
@@ -302,6 +303,12 @@ export class BrandOwnerRepository extends BaseRepository<BrandOwner> {
   }
 }
 
+export class UnitMasterRepository extends BaseRepository<UnitMaster> {
+  constructor() {
+    super('product_units');
+  }
+}
+
 export const userRepository = new UserRepository();
 export const productRepository = new ProductRepository();
 export const shoppingRepository = new ShoppingRepository();
@@ -334,5 +341,6 @@ export const formatInvoiceRepository = new FormatInvoiceRepository();
 export const categoryRepository = new CategoryRepository();
 export const brandRepository = new BrandRepository();
 export const brandOwnerRepository = new BrandOwnerRepository();
+export const unitMasterRepository = new UnitMasterRepository();
 
 

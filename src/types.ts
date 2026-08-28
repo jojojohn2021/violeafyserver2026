@@ -307,6 +307,14 @@ export interface BrandOwner {
   updatedAt?: string;
 }
 
+export interface UnitMaster {
+  id: string;
+  desc: string;
+  uqc: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface ReferralChain {
   id: string; // unique ID ('chainId_partnerId_levelNo')
   chainId: string; // Represents the owner's partner ID

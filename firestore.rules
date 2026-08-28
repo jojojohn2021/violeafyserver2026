@@ -59,6 +59,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Product Units Collection (Unit Master)
+    match /product_units/{unitId} {
+      allow read, write: if true;
+    }
+
     // Customers Collection
     match /customers/{customerId} {
       allow read, write: if true;

@@ -8,7 +8,7 @@ import {
   InfluencerPayment, InfluencerContent,
   ShoppingCartItem, WishlistItem, ProductReview, CustomerAddress, CustomerDeliveryAddress, Coupon, 
   OrderDeliveryTracking, OrderReturnRequest, OrderRefund, PaymentTransaction, PaymentGatewaySetting, DeliveryCharge,
-  PartnerLevel, CommissionRule, CommissionTransaction, Category, Brand, BrandOwner
+  PartnerLevel, CommissionRule, CommissionTransaction, Category, Brand, BrandOwner, UnitMaster
 } from './types';
 import { db, auth, initError } from './firebase';
 import { 
@@ -52,8 +52,31 @@ import {
   formatInvoiceRepository,
   categoryRepository,
   brandRepository,
-  brandOwnerRepository
+  brandOwnerRepository,
+  unitMasterRepository
 } from './repositories/repositories';
+
+export const DEFAULT_UNITS: UnitMaster[] = [
+  { id: 'unit_bag', desc: 'BAG', uqc: 'BAG' },
+  { id: 'unit_bdl', desc: 'Bundles', uqc: 'BDL' },
+  { id: 'unit_bal', desc: 'Bale', uqc: 'BAL' },
+  { id: 'unit_bkl', desc: 'Buckles', uqc: 'BKL' },
+  { id: 'unit_box', desc: 'Box', uqc: 'BOX' },
+  { id: 'unit_btl', desc: 'Bottles', uqc: 'BTL' },
+  { id: 'unit_bun', desc: 'Bunches', uqc: 'BUN' },
+  { id: 'unit_can', desc: 'Cans', uqc: 'CAN' },
+  { id: 'unit_ctn', desc: 'Cartons', uqc: 'CTN' },
+  { id: 'unit_doz', desc: 'Dozen', uqc: 'DOZ' },
+  { id: 'unit_drm', desc: 'Drum', uqc: 'DRM' },
+  { id: 'unit_grs', desc: 'Gross', uqc: 'GRS' },
+  { id: 'unit_nos', desc: 'Numbers', uqc: 'NOS' },
+  { id: 'unit_pac', desc: 'Packs', uqc: 'PAC' },
+  { id: 'unit_pcs', desc: 'Pieces', uqc: 'PCS' },
+  { id: 'unit_prs', desc: 'Pairs', uqc: 'PRS' },
+  { id: 'unit_rol', desc: 'Rolls', uqc: 'ROL' },
+  { id: 'unit_set', desc: 'Sets', uqc: 'SET' },
+  { id: 'unit_tbs', desc: 'Tablets', uqc: 'TBS' }
+];
 
 export interface CRMContextType {
   currentUser: User;
@@ -197,6 +220,10 @@ export interface CRMContextType {
   setCustomBrands: React.Dispatch<React.SetStateAction<{name: string, owner: string}[]>>;
   customBrandOwners: string[];
   setCustomBrandOwners: React.Dispatch<React.SetStateAction<string[]>>;
+  units: UnitMaster[];
+  createUnit: (desc: string, uqc: string) => Promise<UnitMaster>;
+  updateUnit: (id: string, desc: string, uqc: string) => Promise<UnitMaster>;
+  deleteUnit: (id: string) => Promise<void>;
 
   // General Shopping Platform State & Methods
   shoppingCart: ShoppingCartItem[];
@@ -403,6 +430,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [brandOwners, setBrandOwners] = useState<BrandOwner[]>([]);
   const [customBrands, setCustomBrands] = useState<{name: string, owner: string}[]>([]);
   const [customBrandOwners, setCustomBrandOwners] = useState<string[]>([]);
+  const [units, setUnits] = useState<UnitMaster[]>(DEFAULT_UNITS);
 
   const [shoppingCart, setShoppingCart] = useState<ShoppingCartItem[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
@@ -599,6 +627,20 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       } catch (e) {
         // Brand owners optional initialization
+      }
+
+      try {
+        const fetchedUnits = await unitMasterRepository.getAll();
+        if (fetchedUnits && fetchedUnits.length > 0) {
+          setUnits(fetchedUnits);
+        } else {
+          setUnits(DEFAULT_UNITS);
+          for (const u of DEFAULT_UNITS) {
+            await unitMasterRepository.create(u).catch(() => {});
+          }
+        }
+      } catch (e) {
+        // Units optional initialization
       }
 
       setLastSyncedAt(new Date().toISOString());
@@ -2077,6 +2119,102 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [brandOwners]);
 
+  // Unit Master Persistence Handlers (writes to product_units collection)
+  const createUnit = useCallback(async (desc: string, uqc: string) => {
+    const cleanDesc = desc.trim();
+    const cleanUqc = uqc.trim().toUpperCase();
+
+    if (!cleanDesc || !cleanUqc) {
+      throw new Error('Both Desc and UQC fields are mandatory.');
+    }
+
+    const duplicate = units.find(u => u.uqc.toUpperCase() === cleanUqc);
+    if (duplicate) {
+      throw new Error(`UQC must be unique. '${cleanUqc}' is already in use.`);
+    }
+
+    const newUnitDoc: UnitMaster = {
+      id: `unit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      desc: cleanDesc,
+      uqc: cleanUqc,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await unitMasterRepository.create(newUnitDoc);
+      setUnits(prev => [...prev, newUnitDoc]);
+      return newUnitDoc;
+    } catch (err: any) {
+      setFirestoreError({
+        hasError: true,
+        message: err.message,
+        collectionName: 'product_units',
+        operationType: 'create',
+        timestamp: new Date().toISOString()
+      });
+      throw err;
+    }
+  }, [units]);
+
+  const updateUnit = useCallback(async (id: string, desc: string, uqc: string) => {
+    const cleanDesc = desc.trim();
+    const cleanUqc = uqc.trim().toUpperCase();
+
+    if (!cleanDesc || !cleanUqc) {
+      throw new Error('Both Desc and UQC fields are mandatory.');
+    }
+
+    const duplicate = units.find(u => u.id !== id && u.uqc.toUpperCase() === cleanUqc);
+    if (duplicate) {
+      throw new Error(`UQC must be unique. '${cleanUqc}' is already in use by another unit.`);
+    }
+
+    const updates = {
+      desc: cleanDesc,
+      uqc: cleanUqc,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await unitMasterRepository.update(id, updates);
+      let updatedDoc: UnitMaster | null = null;
+      setUnits(prev => prev.map(u => {
+        if (u.id === id) {
+          updatedDoc = { ...u, ...updates };
+          return updatedDoc;
+        }
+        return u;
+      }));
+      return updatedDoc || ({ id, ...updates } as UnitMaster);
+    } catch (err: any) {
+      setFirestoreError({
+        hasError: true,
+        message: err.message,
+        collectionName: 'product_units',
+        operationType: 'update',
+        timestamp: new Date().toISOString()
+      });
+      throw err;
+    }
+  }, [units]);
+
+  const deleteUnit = useCallback(async (id: string) => {
+    try {
+      await unitMasterRepository.delete(id);
+      setUnits(prev => prev.filter(u => u.id !== id));
+    } catch (err: any) {
+      setFirestoreError({
+        hasError: true,
+        message: err.message,
+        collectionName: 'product_units',
+        operationType: 'delete',
+        timestamp: new Date().toISOString()
+      });
+      throw err;
+    }
+  }, []);
+
   // Shopping Platform State Handlers
   const addToCart = useCallback((productId: string, quantity: number) => {
     setShoppingCart(prev => {
@@ -2476,6 +2614,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCustomBrands,
     customBrandOwners,
     setCustomBrandOwners,
+    units,
+    createUnit,
+    updateUnit,
+    deleteUnit,
     shoppingCart,
     addToCart,
     removeFromCart,

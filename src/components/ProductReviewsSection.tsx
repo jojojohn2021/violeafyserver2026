@@ -174,7 +174,7 @@ export default function ProductReviewsSection({
                 <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{rev.comment}</p>
 
                 {/* Attached photos */}
-                {rev.photos && rev.photos.length > 0 && (
+                {rev.photos && Array.isArray(rev.photos) && rev.photos.length > 0 && (
                   <div className="space-y-1">
                     <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Attached Photos:</span>
                     <div className="flex flex-wrap gap-2">
@@ -192,7 +192,7 @@ export default function ProductReviewsSection({
                 )}
 
                 {/* Attached videos */}
-                {rev.videos && rev.videos.length > 0 && (
+                {rev.videos && Array.isArray(rev.videos) && rev.videos.length > 0 && (
                   <div className="space-y-1">
                     <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Attached Short Videos:</span>
                     <div className="flex flex-wrap gap-3">

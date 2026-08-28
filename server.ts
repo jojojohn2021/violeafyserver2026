@@ -1946,6 +1946,129 @@ app.post("/api/brand-owners/:id/picture", upload.single("image"), handleUploadBr
 app.post("/api/v1/brand-owners/:id/picture", upload.single("image"), handleUploadBrandOwnerPicture);
 app.post("/api/brand-owners/picture", upload.single("image"), handleUploadBrandOwnerPicture);
 
+// Unit Master API Endpoints
+const DEFAULT_SERVER_UNITS = [
+  { id: 'unit_bag', desc: 'BAG', uqc: 'BAG' },
+  { id: 'unit_bdl', desc: 'Bundles', uqc: 'BDL' },
+  { id: 'unit_bal', desc: 'Bale', uqc: 'BAL' },
+  { id: 'unit_bkl', desc: 'Buckles', uqc: 'BKL' },
+  { id: 'unit_box', desc: 'Box', uqc: 'BOX' },
+  { id: 'unit_btl', desc: 'Bottles', uqc: 'BTL' },
+  { id: 'unit_bun', desc: 'Bunches', uqc: 'BUN' },
+  { id: 'unit_can', desc: 'Cans', uqc: 'CAN' },
+  { id: 'unit_ctn', desc: 'Cartons', uqc: 'CTN' },
+  { id: 'unit_doz', desc: 'Dozen', uqc: 'DOZ' },
+  { id: 'unit_drm', desc: 'Drum', uqc: 'DRM' },
+  { id: 'unit_grs', desc: 'Gross', uqc: 'GRS' },
+  { id: 'unit_nos', desc: 'Numbers', uqc: 'NOS' },
+  { id: 'unit_pac', desc: 'Packs', uqc: 'PAC' },
+  { id: 'unit_pcs', desc: 'Pieces', uqc: 'PCS' },
+  { id: 'unit_prs', desc: 'Pairs', uqc: 'PRS' },
+  { id: 'unit_rol', desc: 'Rolls', uqc: 'ROL' },
+  { id: 'unit_set', desc: 'Sets', uqc: 'SET' },
+  { id: 'unit_tbs', desc: 'Tablets', uqc: 'TBS' }
+];
+
+const handleGetUnits = async (req: express.Request, res: express.Response) => {
+  try {
+    let units = await getCollectionDocs("product_units");
+    if (!units || units.length === 0) {
+      for (const u of DEFAULT_SERVER_UNITS) {
+        await saveCollectionDoc("product_units", {
+          ...u,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      units = await getCollectionDocs("product_units");
+    }
+    return res.json({ success: true, units, docs: units });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to fetch units" });
+  }
+};
+app.get("/api/units", handleGetUnits);
+app.get("/api/v1/units", handleGetUnits);
+
+const handleCreateOrUpdateUnit = async (req: express.Request, res: express.Response) => {
+  try {
+    const { id, desc, uqc } = req.body || {};
+    const cleanDesc = (desc || '').trim();
+    const cleanUqc = (uqc || '').trim().toUpperCase();
+
+    if (!cleanDesc || !cleanUqc) {
+      return res.status(400).json({ error: "Both Desc and UQC fields are mandatory." });
+    }
+
+    const existingUnits = await getCollectionDocs("product_units");
+    const duplicate = existingUnits.find(u => String(u.id) !== String(id) && String(u.uqc).toUpperCase() === cleanUqc);
+    if (duplicate) {
+      return res.status(400).json({ error: `UQC must be unique. '${cleanUqc}' is already in use.` });
+    }
+
+    const unitId = id || `unit_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const unitDoc = {
+      id: unitId,
+      desc: cleanDesc,
+      uqc: cleanUqc,
+      updatedAt: new Date().toISOString(),
+      ...(id ? {} : { createdAt: new Date().toISOString() })
+    };
+    await saveCollectionDoc("product_units", unitDoc);
+    return res.json({ success: true, doc: unitDoc, unit: unitDoc });
+  } catch (error: any) {
+    return res.status(400).json({ error: error?.message || "Failed to save unit" });
+  }
+};
+app.post("/api/units", handleCreateOrUpdateUnit);
+app.post("/api/v1/units", handleCreateOrUpdateUnit);
+
+const handleUpdateUnitById = async (req: express.Request, res: express.Response) => {
+  try {
+    const unitId = req.params.id;
+    const { desc, uqc } = req.body || {};
+    const cleanDesc = (desc || '').trim();
+    const cleanUqc = (uqc || '').trim().toUpperCase();
+
+    if (!cleanDesc || !cleanUqc) {
+      return res.status(400).json({ error: "Both Desc and UQC fields are mandatory." });
+    }
+
+    const existingUnits = await getCollectionDocs("product_units");
+    const duplicate = existingUnits.find(u => String(u.id) !== String(unitId) && String(u.uqc).toUpperCase() === cleanUqc);
+    if (duplicate) {
+      return res.status(400).json({ error: `UQC must be unique. '${cleanUqc}' is already in use by another unit.` });
+    }
+
+    const existing = existingUnits.find((u) => String(u.id) === String(unitId));
+    const unitDoc = {
+      ...(existing || {}),
+      id: unitId,
+      desc: cleanDesc,
+      uqc: cleanUqc,
+      updatedAt: new Date().toISOString(),
+    };
+    await saveCollectionDoc("product_units", unitDoc);
+    return res.json({ success: true, doc: unitDoc, unit: unitDoc });
+  } catch (error: any) {
+    return res.status(400).json({ error: error?.message || "Failed to update unit" });
+  }
+};
+app.put("/api/units/:id", handleUpdateUnitById);
+app.put("/api/v1/units/:id", handleUpdateUnitById);
+
+const handleDeleteUnitById = async (req: express.Request, res: express.Response) => {
+  try {
+    const unitId = req.params.id;
+    await deleteCollectionDoc("product_units", unitId);
+    return res.json({ success: true, message: `Unit '${unitId}' deleted successfully` });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to delete unit" });
+  }
+};
+app.delete("/api/units/:id", handleDeleteUnitById);
+app.delete("/api/v1/units/:id", handleDeleteUnitById);
+
 // GENERIC DATABASE PROXY ROUTE (Supports BaseRepository proxy fallbacks)
 app.get("/api/db/:collection", async (req, res) => {
   try {

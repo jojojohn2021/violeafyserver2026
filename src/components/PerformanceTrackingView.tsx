@@ -8,8 +8,31 @@ import {
   LineChart, ShoppingBag, Heart, BarChart3, TrendingUp, Grid, 
   Trash2, Plus, Edit, DollarSign, HelpCircle, Check, Award,
   Users, Tag, Building2, Search, FolderKanban, Sparkles,
-  ChevronDown, X, ArrowUpDown, Filter, RefreshCw
+  ChevronDown, X, ArrowUpDown, Filter, RefreshCw, AlertTriangle, Shield
 } from 'lucide-react';
+
+export const normalizeStringArray = (val: any): string[] => {
+  if (!val) return [];
+  if (Array.isArray(val)) {
+    return val.map(item => String(item).trim()).filter(Boolean);
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map(item => String(item).trim()).filter(Boolean);
+        }
+      } catch {
+        // Fall back to comma-separated
+      }
+    }
+    return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+};
 
 export default function PerformanceTrackingView() {
   const { 
@@ -19,14 +42,15 @@ export default function PerformanceTrackingView() {
     brands, createBrand, updateBrand, deleteBrand, uploadBrandPicture,
     brandOwners, createBrandOwner, updateBrandOwner, deleteBrandOwner, uploadBrandOwnerPicture,
     customBrands, setCustomBrands,
-    customBrandOwners, setCustomBrandOwners
+    customBrandOwners, setCustomBrandOwners,
+    units, createUnit, updateUnit, deleteUnit
   } = useCRM();
 
   // Selected sub-view
   const [panelTab, setPanelTab] = useState<'products' | 'customers' | 'stock' | 'analytics'>('products');
 
   // Sub-tab selection for Product portfolio master records
-  const [productsSubTab, setProductsSubTab] = useState<'all' | 'categories' | 'brands' | 'owners'>('all');
+  const [productsSubTab, setProductsSubTab] = useState<'all' | 'categories' | 'brands' | 'owners' | 'units'>('all');
 
   // State for performance analytics sorting & sub-tabs
   const [analyticsSubTab, setAnalyticsSubTab] = useState<'products' | 'customers' | 'ledger' | 'channels' | 'couriers'>('products');
@@ -44,10 +68,19 @@ export default function PerformanceTrackingView() {
   const [masterSearchQuery, setMasterSearchQuery] = useState<string>('');
 
   // Modals / forms for adding master records
-  const [showAddMasterModal, setShowAddMasterModal] = useState<'category' | 'brand' | 'owner' | null>(null);
+  const [showAddMasterModal, setShowAddMasterModal] = useState<'category' | 'brand' | 'owner' | 'unit' | null>(null);
   const [newMasterName, setNewMasterName] = useState('');
   const [newMasterOwner, setNewMasterOwner] = useState('');
   const [isRecalculating, setIsRecalculating] = useState(false);
+
+  // Unit Master state
+  const [newUnitDesc, setNewUnitDesc] = useState('');
+  const [newUnitUqc, setNewUnitUqc] = useState('');
+  const [unitError, setUnitError] = useState<string | null>(null);
+  const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
+  const [editUnitDescVal, setEditUnitDescVal] = useState('');
+  const [editUnitUqcVal, setEditUnitUqcVal] = useState('');
+  const [deletingUnitId, setDeletingUnitId] = useState<string | null>(null);
 
   // Interactive inline editing variables for product matrices
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -122,7 +155,7 @@ export default function PerformanceTrackingView() {
   const [prodSku, setProdSku] = useState('');
   const [prodHsnCode, setProdHsnCode] = useState('');
   const [prodPackingSize, setProdPackingSize] = useState('500ml Bottle');
-  const [prodUnit, setProdUnit] = useState('Nos');
+  const [prodUnit, setProdUnit] = useState('NOS');
   const [prodOnlinePrice, setProdOnlinePrice] = useState<number>(12);
   const [prodShopPrice, setProdShopPrice] = useState<number>(15);
   const [prodGstPercentage, setProdGstPercentage] = useState<number>(18);
@@ -832,7 +865,7 @@ export default function PerformanceTrackingView() {
     setEditSku(p.sku);
     setEditHsnCode(p.hsnCode || '');
     setEditPackingSize(p.packingSize || '500ml Bottle');
-    setEditUnit(p.unit || 'Nos');
+    setEditUnit(p.unit || 'NOS');
     setEditOnlinePrice(p.onlinePrice || 0);
     setEditShopPrice(p.shopPrice || 0);
     setEditGstPercentage(p.gstPercentage ?? 18);
@@ -857,11 +890,13 @@ export default function PerformanceTrackingView() {
       setEditPicture('https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=80&auto=format&fit=crop&q=60');
     }
     
-    // Set other fields
-    setEditImages(p.images || []);
-    setEditImagesText((p.images || []).join(', '));
-    setEditVideos(p.videos || []);
-    setEditVideosText((p.videos || []).join(', '));
+    // Set other fields safely
+    const parsedImages = normalizeStringArray(p.images);
+    setEditImages(parsedImages);
+    setEditImagesText(parsedImages.join(', '));
+    const parsedVideos = normalizeStringArray(p.videos);
+    setEditVideos(parsedVideos);
+    setEditVideosText(parsedVideos.join(', '));
     setEditDescription(p.description || p.notes || '');
     setEditIngredients(p.ingredients || '');
     setEditSpecifications(p.specifications || '');
@@ -1148,7 +1183,7 @@ export default function PerformanceTrackingView() {
     setProdSku('');
     setProdHsnCode('');
     setProdPackingSize('500ml Bottle');
-    setProdUnit('Nos');
+    setProdUnit('NOS');
     setProdOnlinePrice(12);
     setProdShopPrice(15);
     setProdGstPercentage(18);
@@ -1716,6 +1751,18 @@ export default function PerformanceTrackingView() {
                 <Building2 className="w-3.5 h-3.5 text-emerald-400" />
                 Brand Owner Masters ({dynamicBrandOwners.length})
               </button>
+              <button
+                onClick={() => { setProductsSubTab('units'); setMasterSearchQuery(''); setUnitError(null); }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                  productsSubTab === 'units' 
+                    ? 'bg-indigo-600 text-white shadow-sm font-extrabold' 
+                    : 'bg-[#141418] border border-slate-800/80 text-slate-400 hover:text-white'
+                }`}
+                id="unit-master-tab-btn"
+              >
+                <Grid className="w-3.5 h-3.5 text-purple-400" />
+                Unit Masters ({units.length})
+              </button>
             </div>
 
             {productsSubTab !== 'all' && (
@@ -1726,7 +1773,7 @@ export default function PerformanceTrackingView() {
                   </span>
                   <input
                     type="text"
-                    placeholder={`Search ${productsSubTab === 'categories' ? 'categories' : productsSubTab === 'brands' ? 'brands' : 'brand owners'}...`}
+                    placeholder={`Search ${productsSubTab === 'categories' ? 'categories' : productsSubTab === 'brands' ? 'brands' : productsSubTab === 'owners' ? 'brand owners' : 'units (Desc or UQC)'}...`}
                     value={masterSearchQuery}
                     onChange={(e) => setMasterSearchQuery(e.target.value)}
                     className="block w-full pl-9 pr-3 py-1.5 bg-[#141418] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -1737,9 +1784,13 @@ export default function PerformanceTrackingView() {
                     onClick={() => {
                       setNewMasterName('');
                       setNewMasterOwner('');
-                      setShowAddMasterModal(productsSubTab === 'categories' ? 'category' : productsSubTab === 'brands' ? 'brand' : 'owner');
+                      setNewUnitDesc('');
+                      setNewUnitUqc('');
+                      setUnitError(null);
+                      setShowAddMasterModal(productsSubTab === 'categories' ? 'category' : productsSubTab === 'brands' ? 'brand' : productsSubTab === 'owners' ? 'owner' : 'unit');
                     }}
                     className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1"
+                    id="add-new-master-btn"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Add New
@@ -1825,15 +1876,24 @@ export default function PerformanceTrackingView() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">UNIT:</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. Bottle, Pack, Box" 
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">UNIT (UQC):</label>
+                  <select 
                     value={prodUnit}
                     onChange={e => setProdUnit(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-indigo-300 font-mono font-bold rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                     required
-                  />
+                  >
+                    {units.map(u => (
+                      <option key={u.id} value={u.uqc} className="bg-[#0d0d10] text-slate-200 font-sans">
+                        {u.uqc} ({u.desc})
+                      </option>
+                    ))}
+                    {prodUnit && !units.some(u => u.uqc.toUpperCase() === prodUnit.toUpperCase()) && (
+                      <option value={prodUnit} className="bg-[#0d0d10] text-slate-200 font-sans">
+                        {prodUnit}
+                      </option>
+                    )}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-rose-400 mb-1.5 uppercase tracking-wider">MRP (₹):</label>
@@ -2764,15 +2824,27 @@ export default function PerformanceTrackingView() {
                         {/* 4b. UNIT */}
                         <td className="p-4 text-slate-300 font-medium">
                           {isEditing ? (
-                            <input 
-                              type="text" 
+                            <select 
                               value={editUnit}
                               onChange={e => setEditUnit(e.target.value)}
-                              className="w-20 p-1 bg-[#0d0d10] border border-slate-800 text-xs text-white rounded-md focus:outline-none"
+                              className="w-24 p-1 bg-[#0d0d10] border border-slate-800 text-xs font-mono font-bold text-indigo-300 rounded-md focus:outline-none cursor-pointer"
                               required
-                            />
+                            >
+                              {units.map(u => (
+                                <option key={u.id} value={u.uqc} className="bg-[#0d0d10] text-slate-200 font-sans">
+                                  {u.uqc} ({u.desc})
+                                </option>
+                              ))}
+                              {editUnit && !units.some(u => u.uqc.toUpperCase() === editUnit.toUpperCase()) && (
+                                <option value={editUnit} className="bg-[#0d0d10] text-slate-200 font-sans">
+                                  {editUnit}
+                                </option>
+                              )}
+                            </select>
                           ) : (
-                            <span>{p.unit || 'Bottle'}</span>
+                            <span className="inline-flex items-center px-2 py-0.5 bg-indigo-950/60 border border-indigo-800/40 text-indigo-300 text-[11px] font-mono font-bold rounded">
+                              {p.unit || 'NOS'}
+                            </span>
                           )}
                         </td>
 
@@ -3159,23 +3231,27 @@ export default function PerformanceTrackingView() {
                                       </div>
                                     </div>
 
-                                    {p.images && p.images.length > 0 && (
-                                      <div>
-                                        <h5 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Additional Product Images</h5>
-                                        <div className="flex gap-2 flex-wrap">
-                                          {p.images.map((imgUrl, idx) => (
-                                            <img 
-                                              key={idx}
-                                              src={imgUrl} 
-                                              alt={`Alt ${idx}`} 
-                                              referrerPolicy="no-referrer"
-                                              className="w-12 h-12 object-cover rounded-lg border border-slate-800 hover:border-slate-700 transition cursor-help bg-[#0d0d10]"
-                                              title={`Product image #${idx + 1}`}
-                                            />
-                                          ))}
+                                    {(() => {
+                                      const additionalImgs = normalizeStringArray(p.images);
+                                      if (additionalImgs.length === 0) return null;
+                                      return (
+                                        <div>
+                                          <h5 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Additional Product Images</h5>
+                                          <div className="flex gap-2 flex-wrap">
+                                            {additionalImgs.map((imgUrl, idx) => (
+                                              <img 
+                                                key={idx}
+                                                src={imgUrl} 
+                                                alt={`Alt ${idx}`} 
+                                                referrerPolicy="no-referrer"
+                                                className="w-12 h-12 object-cover rounded-lg border border-slate-800 hover:border-slate-700 transition cursor-help bg-[#0d0d10]"
+                                                title={`Product image #${idx + 1}`}
+                                              />
+                                            ))}
+                                          </div>
                                         </div>
-                                      </div>
-                                    )}
+                                      );
+                                    })()}
                                   </div>
 
                                   {/* CUSTOMER REVIEWS SECTION */}
@@ -3276,14 +3352,24 @@ export default function PerformanceTrackingView() {
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">UNIT:</label>
-                        <input 
-                          type="text" 
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">UNIT (UQC):</label>
+                        <select 
                           value={editUnit}
                           onChange={e => setEditUnit(e.target.value)}
-                          className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-indigo-300 font-mono font-bold rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                           required
-                        />
+                        >
+                          {units.map(u => (
+                            <option key={u.id} value={u.uqc} className="bg-[#0d0d10] text-slate-200 font-sans">
+                              {u.uqc} ({u.desc})
+                            </option>
+                          ))}
+                          {editUnit && !units.some(u => u.uqc.toUpperCase() === editUnit.toUpperCase()) && (
+                            <option value={editUnit} className="bg-[#0d0d10] text-slate-200 font-sans">
+                              {editUnit}
+                            </option>
+                          )}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold text-rose-400 mb-1.5 uppercase tracking-wider">MRP (₹):</label>
@@ -3774,7 +3860,8 @@ export default function PerformanceTrackingView() {
                                     Array.from(e.target.files).forEach((file: any) => {
                                       handleImageUploadAsync(file, (downloadUrl) => {
                                         setEditImages(prev => {
-                                          const updated = [...prev, downloadUrl];
+                                          const current = Array.isArray(prev) ? prev : [];
+                                          const updated = [...current, downloadUrl];
                                           setEditImagesText(updated.join(', '));
                                           return updated;
                                         });
@@ -3787,7 +3874,7 @@ export default function PerformanceTrackingView() {
                             </div>
                             
                             {/* Thumbnail Gallery */}
-                            {editImages.length > 0 && (
+                            {Array.isArray(editImages) && editImages.length > 0 && (
                               <div className="flex flex-wrap gap-2 p-2 bg-[#0d0d10] border border-slate-800 rounded-lg">
                                 {editImages.map((img, idx) => (
                                   <div key={idx} className="relative group w-12 h-12">
@@ -3795,7 +3882,7 @@ export default function PerformanceTrackingView() {
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        const updated = editImages.filter((_, i) => i !== idx);
+                                        const updated = (Array.isArray(editImages) ? editImages : []).filter((_, i) => i !== idx);
                                         setEditImages(updated);
                                         setEditImagesText(updated.join(', '));
                                       }}
@@ -3837,7 +3924,8 @@ export default function PerformanceTrackingView() {
                                     Array.from(e.target.files).forEach((file: any) => {
                                       handleVideoUploadAsync(file, (downloadUrl) => {
                                         setEditVideos(prev => {
-                                          const updated = [...prev, downloadUrl];
+                                          const current = Array.isArray(prev) ? prev : [];
+                                          const updated = [...current, downloadUrl];
                                           setEditVideosText(updated.join(', '));
                                           return updated;
                                         });
@@ -3850,7 +3938,7 @@ export default function PerformanceTrackingView() {
                             </div>
                             
                             {/* Video Preview Gallery */}
-                            {editVideos.length > 0 && (
+                            {Array.isArray(editVideos) && editVideos.length > 0 && (
                               <div className="flex flex-wrap gap-2 p-2 bg-[#0d0d10] border border-slate-800 rounded-lg">
                                 {editVideos.map((vid, idx) => (
                                   <div key={idx} className="relative group w-32 h-20">
@@ -3858,7 +3946,7 @@ export default function PerformanceTrackingView() {
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        const updated = editVideos.filter((_, i) => i !== idx);
+                                        const updated = (Array.isArray(editVideos) ? editVideos : []).filter((_, i) => i !== idx);
                                         setEditVideos(updated);
                                         setEditVideosText(updated.join(', '));
                                       }}
@@ -4709,6 +4797,245 @@ export default function PerformanceTrackingView() {
         accept="image/*"
         className="hidden"
       />
+      {/* Unit Master Table View */}
+      {productsSubTab === 'units' && (
+        <div className="space-y-6 animate-fadeIn" id="unit-master-view">
+          {unitError && (
+            <div className="flex items-center justify-between bg-rose-950/40 border border-rose-800/60 text-rose-200 text-xs rounded-xl px-4 py-3 shadow-md">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{unitError}</span>
+              </div>
+              <button onClick={() => setUnitError(null)} className="text-rose-400 hover:text-white cursor-pointer">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Unit Master Summary Header */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-[#141418] border border-slate-800/80 p-4 rounded-2xl flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Total Units</span>
+                <h4 className="text-2xl font-black text-white mt-1 font-mono">{units.length}</h4>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-indigo-950/60 border border-indigo-800/40 flex items-center justify-center text-indigo-400">
+                <Grid className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-[#141418] border border-slate-800/80 p-4 rounded-2xl flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Unique UQCs</span>
+                <h4 className="text-2xl font-black text-emerald-400 mt-1 font-mono">{new Set(units.map(u => u.uqc.toUpperCase())).size}</h4>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-950/60 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
+                <Check className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-[#141418] border border-slate-800/80 p-4 rounded-2xl flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Validation Rules</span>
+                <p className="text-xs font-semibold text-slate-300 mt-1">Desc & UQC Mandatory | UQC Unique</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-sky-950/60 border border-sky-800/40 flex items-center justify-center text-sky-400">
+                <Tag className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="bg-[#141418] border border-slate-800/80 rounded-2xl overflow-hidden shadow-xl">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Grid className="w-4 h-4 text-indigo-400" />
+                  Unit Master Table
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Manage unit descriptions and official Unique Quantity Codes (UQC)</p>
+              </div>
+              {hasAccess('Products & Clients', 'create') && (
+                <button
+                  onClick={() => {
+                    setNewUnitDesc('');
+                    setNewUnitUqc('');
+                    setUnitError(null);
+                    setShowAddMasterModal('unit');
+                  }}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Unit Master
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-[#0d0d10] text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">
+                    <th className="py-3.5 px-4 w-12 text-center">#</th>
+                    <th className="py-3.5 px-4 font-extrabold text-slate-300">Desc (Description) <span className="text-rose-400">*</span></th>
+                    <th className="py-3.5 px-4 font-extrabold text-slate-300">UQC (Unique Quantity Code) <span className="text-rose-400">* Unique</span></th>
+                    <th className="py-3.5 px-4">Created Date</th>
+                    <th className="py-3.5 px-4 text-right pr-6">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-xs">
+                  {units
+                    .filter(u => 
+                      u.desc.toLowerCase().includes(masterSearchQuery.toLowerCase()) || 
+                      u.uqc.toLowerCase().includes(masterSearchQuery.toLowerCase())
+                    )
+                    .map((u, idx) => {
+                      const isEditing = editingUnitId === u.id;
+                      return (
+                        <tr key={u.id} className="hover:bg-slate-900/40 transition-colors">
+                          <td className="py-3.5 px-4 text-center font-mono text-slate-500 text-[11px] font-bold">
+                            {idx + 1}
+                          </td>
+                          <td className="py-3.5 px-4 font-semibold text-slate-200">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={editUnitDescVal}
+                                onChange={e => setEditUnitDescVal(e.target.value)}
+                                className="w-full p-2 bg-[#0d0d10] border border-indigo-500/80 text-xs text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                placeholder="Desc (Mandatory)"
+                                required
+                              />
+                            ) : (
+                              <span>{u.desc}</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 font-mono font-bold">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={editUnitUqcVal}
+                                onChange={e => setEditUnitUqcVal(e.target.value.toUpperCase())}
+                                className="w-36 p-2 bg-[#0d0d10] border border-indigo-500/80 text-xs font-mono font-bold text-indigo-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 uppercase"
+                                placeholder="UQC (Mandatory & Unique)"
+                                required
+                              />
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-1 bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-xs font-bold rounded-lg tracking-wider">
+                                {u.uqc}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-400 text-[11px] font-mono">
+                            {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'System Default'}
+                          </td>
+                          <td className="py-3.5 px-4 text-right pr-6">
+                            {isEditing ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={async () => {
+                                    setUnitError(null);
+                                    try {
+                                      await updateUnit(u.id, editUnitDescVal, editUnitUqcVal);
+                                      setEditingUnitId(null);
+                                    } catch (err: any) {
+                                      setUnitError(err?.message || 'Failed to update unit');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
+                                >
+                                  <Check className="w-3.5 h-3.5" /> Save
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingUnitId(null);
+                                    setUnitError(null);
+                                  }}
+                                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-end gap-2">
+                                {hasAccess('Products & Clients', 'edit') && (
+                                  <button
+                                    onClick={() => {
+                                      setEditingUnitId(u.id);
+                                      setEditUnitDescVal(u.desc);
+                                      setEditUnitUqcVal(u.uqc);
+                                      setUnitError(null);
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                                    title="Edit Unit"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {hasAccess('Products & Clients', 'delete') && (
+                                  <button
+                                    onClick={() => setDeletingUnitId(u.id)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                                    title="Delete Unit"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  {units.filter(u => u.desc.toLowerCase().includes(masterSearchQuery.toLowerCase()) || u.uqc.toLowerCase().includes(masterSearchQuery.toLowerCase())).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="py-12 text-center text-slate-500 text-xs">
+                        No unit records found matching "{masterSearchQuery}".
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Unit Confirmation Modal */}
+      {deletingUnitId && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#141418] border border-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-scaleIn">
+            <div className="flex items-center gap-3 text-rose-400 mb-3">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
+              <h4 className="text-sm font-bold text-white uppercase tracking-wider">Confirm Delete Unit</h4>
+            </div>
+            <p className="text-xs text-slate-300 mb-5">
+              Are you sure you want to delete this unit master record? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setDeletingUnitId(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await deleteUnit(deletingUnitId);
+                    setDeletingUnitId(null);
+                  } catch (err: any) {
+                    setUnitError(err?.message || 'Failed to delete unit');
+                  }
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Delete Unit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <input
         type="file"
         ref={brandImageInputRef}
@@ -4731,10 +5058,10 @@ export default function PerformanceTrackingView() {
             <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
               <h3 className="text-xs font-extrabold text-white flex items-center gap-1.5 uppercase tracking-wider">
                 <Plus className="w-4 h-4 text-indigo-400 animate-pulse" />
-                Add New {showAddMasterModal === 'category' ? 'Category' : showAddMasterModal === 'brand' ? 'Brand' : 'Brand Owner'}
+                Add New {showAddMasterModal === 'category' ? 'Category' : showAddMasterModal === 'brand' ? 'Brand' : showAddMasterModal === 'owner' ? 'Brand Owner' : 'Unit Master'}
               </h3>
               <button 
-                onClick={() => setShowAddMasterModal(null)} 
+                onClick={() => { setShowAddMasterModal(null); setUnitError(null); }} 
                 className="text-slate-404 hover:text-white text-xs cursor-pointer bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg"
               >
                 ✕
@@ -4742,20 +5069,22 @@ export default function PerformanceTrackingView() {
             </div>
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-404 mb-1.5 uppercase tracking-wider">
-                  {showAddMasterModal === 'category' ? 'Category Name' : showAddMasterModal === 'brand' ? 'Brand Name' : 'Brand Owner Name'}
-                </label>
-                <input
-                  type="text"
-                  placeholder={`e.g. ${showAddMasterModal === 'category' ? 'Homecare Pro' : showAddMasterModal === 'brand' ? 'CleanFlow' : 'CleanseCorp Ltd'}`}
-                  value={newMasterName}
-                  onChange={e => setNewMasterName(e.target.value)}
-                  className="w-full text-xs p-2.5 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  required
-                  autoFocus
-                />
-              </div>
+              {showAddMasterModal !== 'unit' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-404 mb-1.5 uppercase tracking-wider">
+                    {showAddMasterModal === 'category' ? 'Category Name' : showAddMasterModal === 'brand' ? 'Brand Name' : 'Brand Owner Name'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={`e.g. ${showAddMasterModal === 'category' ? 'Homecare Pro' : showAddMasterModal === 'brand' ? 'CleanFlow' : 'CleanseCorp Ltd'}`}
+                    value={newMasterName}
+                    onChange={e => setNewMasterName(e.target.value)}
+                    className="w-full text-xs p-2.5 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    required
+                    autoFocus
+                  />
+                </div>
+              )}
 
               {showAddMasterModal === 'category' && (
                 <div className="space-y-3 border-t border-slate-800/60 pt-3">
@@ -4901,9 +5230,50 @@ export default function PerformanceTrackingView() {
                 </div>
               )}
 
+              {showAddMasterModal === 'unit' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+                      Desc (Description) <span className="text-rose-400">* Mandatory</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. BAG, Bundles, Box, Cartons"
+                      value={newUnitDesc}
+                      onChange={e => setNewUnitDesc(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      required
+                      autoFocus
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+                      UQC (Unique Quantity Code) <span className="text-rose-400">* Mandatory & Unique</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. BAG, BDL, BOX, CTN"
+                      value={newUnitUqc}
+                      onChange={e => setNewUnitUqc(e.target.value.toUpperCase())}
+                      className="w-full text-xs p-2.5 bg-[#0d0d10] border border-slate-800 text-indigo-300 font-mono font-bold uppercase rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      required
+                    />
+                    <span className="text-[9px] text-slate-500 block mt-1">UQC must be unique across all unit master records.</span>
+                  </div>
+
+                  {unitError && (
+                    <div className="p-2.5 bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs rounded-lg flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                      <span>{unitError}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800/40">
                 <button
-                  onClick={() => setShowAddMasterModal(null)}
+                  onClick={() => { setShowAddMasterModal(null); setUnitError(null); }}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
                 >
                   Cancel
@@ -4915,18 +5285,30 @@ export default function PerformanceTrackingView() {
                       setNewMasterCategoryFile(null);
                       setNewMasterCategoryPreview('');
                       setNewMasterCategoryDescription('');
+                      setShowAddMasterModal(null);
                     } else if (showAddMasterModal === 'brand') {
                       await handleAddBrand(newMasterName, newMasterOwner || 'Generic Owner', newMasterBrandDescription, newMasterBrandFile);
                       setNewMasterBrandFile(null);
                       setNewMasterBrandPreview('');
                       setNewMasterBrandDescription('');
+                      setShowAddMasterModal(null);
                     } else if (showAddMasterModal === 'owner') {
                       await handleAddBrandOwner(newMasterName, newMasterOwnerDescription, newMasterOwnerFile);
                       setNewMasterOwnerFile(null);
                       setNewMasterOwnerPreview('');
                       setNewMasterOwnerDescription('');
+                      setShowAddMasterModal(null);
+                    } else if (showAddMasterModal === 'unit') {
+                      setUnitError(null);
+                      try {
+                        await createUnit(newUnitDesc, newUnitUqc);
+                        setNewUnitDesc('');
+                        setNewUnitUqc('');
+                        setShowAddMasterModal(null);
+                      } catch (err: any) {
+                        setUnitError(err?.message || 'Failed to create unit master');
+                      }
                     }
-                    setShowAddMasterModal(null);
                   }}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl text-xs font-bold transition cursor-pointer"
                 >

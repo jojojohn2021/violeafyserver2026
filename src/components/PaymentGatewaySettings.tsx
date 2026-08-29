@@ -24,7 +24,7 @@ export default function PaymentGatewaySettings() {
       success_url: window.location.origin + '/api/payment/callback/success',
       failure_url: window.location.origin + '/api/payment/callback/failure',
       webhook_url: window.location.origin + '/api/payment/webhook',
-      payment_description: 'VioneX Organic Groceries Secure Payment Checkout',
+      payment_description: 'Leafy Server Organic Groceries Secure Payment Checkout',
       currency: 'INR',
       status: 'Enabled',
       created_at: new Date().toISOString(),
@@ -639,7 +639,7 @@ export default function PaymentGatewaySettings() {
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300">PCI-DSS Cryptographic Security</span>
             </div>
             <p className="text-[10px] text-slate-500 leading-relaxed">
-              VioneX employs industry-leading SHA-512 backend key/salt signature verification. 
+              Leafy Server employs industry-leading SHA-512 backend key/salt signature verification. 
               The merchant credentials are never sent to the browser or stored as plain text, 
               protecting against unauthorized API modifications.
             </p>

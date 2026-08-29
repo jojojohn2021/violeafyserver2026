@@ -50,9 +50,9 @@ export default function SettingsView() {
   const getPayUPayloads = (tx: PaymentTransaction) => {
     const key = 'gtKFFx';
     const salt = 'eCwWELSp';
-    const productInfo = "VioneX Organic Grocery Checkout Bundle";
-    const firstname = "VioneX Shopper";
-    const email = "shopper@vionex.com";
+    const productInfo = "Leafy Server Organic Grocery Checkout Bundle";
+    const firstname = "Leafy Server Shopper";
+    const email = "shopper@Leafy Server.com";
     
     const requestPayload = {
       key: key,

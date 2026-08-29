@@ -61,7 +61,7 @@ export default function DashboardView() {
       let doc = '';
       const date = new Date().toLocaleString();
       
-      doc += `# VioneX AUTOMATED BUSINESS REPORT\n`;
+      doc += `# Leafy Server AUTOMATED BUSINESS REPORT\n`;
       doc += `Generated: ${date}\n`;
       doc += `Security Classification: CONFIDENTIAL (Role Restrictions applied)\n`;
       doc += `------------------------------------------------------------\n\n`;
@@ -101,7 +101,7 @@ export default function DashboardView() {
       }
 
       doc += `\n------------------------------------------------------------\n`;
-      doc += `End of report. (VioneX Trusted Integration Protocol)`;
+      doc += `End of report. (Leafy Server Trusted Integration Protocol)`;
       
       setGeneratedReport(doc);
       setIsLoadingReport(false);

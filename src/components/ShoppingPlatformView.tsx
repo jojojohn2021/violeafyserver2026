@@ -202,7 +202,7 @@ export default function ShoppingPlatformView() {
     // PayU
     list.push({
       id: 'payu',
-      name: 'PayU Secure Gateway (payu_biz_node_vionex)',
+      name: 'PayU Secure Gateway (payu_biz_node_Leafy Server)',
       icon: CreditCard,
       subtitle: 'Secure merchant checkout powered by PayU'
     });
@@ -244,7 +244,7 @@ export default function ShoppingPlatformView() {
   // Support Chat simulation
   const [showHelpChat, setShowHelpChat] = useState<boolean>(false);
   const [helpMessages, setHelpMessages] = useState<Array<{sender: 'user' | 'agent', text: string}>>([
-    { sender: 'agent', text: 'Hello! I am VioneX Support Agent. How can I help you today with your delivery?' }
+    { sender: 'agent', text: 'Hello! I am Leafy Server Support Agent. How can I help you today with your delivery?' }
   ]);
   const [helpInput, setHelpInput] = useState<string>('');
   const handleSendHelpMessage = (e: React.FormEvent) => {
@@ -264,7 +264,7 @@ export default function ShoppingPlatformView() {
     { title: "Today's Special Offers", subtitle: "Flat 25% Off On Organic Veggies", tag: "FESTIVAL25", bg: "from-emerald-500 to-teal-600" },
     { title: "Free Instant Delivery", subtitle: "Delivering happiness within 15 minutes", tag: "FREEDEL", bg: "from-lime-500 to-emerald-600" },
     { title: "Combo Smart Packs", subtitle: "Save up to ₹150 on kitchen essentials", tag: "COMBOSAVE", bg: "from-orange-500 to-red-600" },
-    { title: "Sponsor Incentives", subtitle: "Earn Level commissions on every order placed!", tag: "VIONEX5", bg: "from-blue-500 to-indigo-600" }
+    { title: "Sponsor Incentives", subtitle: "Earn Level commissions on every order placed!", tag: "Leafy Server5", bg: "from-blue-500 to-indigo-600" }
   ], []);
 
   useEffect(() => {
@@ -666,7 +666,7 @@ export default function ShoppingPlatformView() {
             id: tempOrderId,
             customerId: uId,
             customerName: currentUser?.name || 'Online Customer',
-            customerCompany: 'VioneX Shopper Client',
+            customerCompany: 'Leafy Server Shopper Client',
             products: orderedGoods,
             totalValue: financials.total,
             paymentStatus: 'Pending' as const, // Pending COD collection
@@ -683,7 +683,7 @@ export default function ShoppingPlatformView() {
           clearCart();
           setActiveCoupon(null);
           setCheckoutStep('confirmed');
-          addCustomAuditLog('ECOM_ORDER_PLACED', `VioneX order placed successfully. Cash on Delivery ₹${financials.total} registered.`);
+          addCustomAuditLog('ECOM_ORDER_PLACED', `Leafy Server order placed successfully. Cash on Delivery ₹${financials.total} registered.`);
         } else {
           // Open the payment simulator panel in the same screen
           setShowPaymentGatewaySimulator(true);
@@ -727,7 +727,7 @@ export default function ShoppingPlatformView() {
           id: activePaymentTx.orderId,
           customerId: uId,
           customerName: currentUser?.name || 'Online Customer',
-          customerCompany: 'VioneX Shopper Client',
+          customerCompany: 'Leafy Server Shopper Client',
           products: orderedGoods,
           totalValue: financials.total,
           paymentStatus: 'Paid' as const,
@@ -1464,10 +1464,10 @@ export default function ShoppingPlatformView() {
                     <img src={currentUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop&q=80'} alt="User Profile avatar" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm">{currentUser?.name || 'VioneX Shopper Partner'}</h3>
+                    <h3 className="font-bold text-sm">{currentUser?.name || 'Leafy Server Shopper Partner'}</h3>
                     <span className="text-[10px] bg-[#22C55E]/10 text-[#22C55E] py-0.5 px-2 rounded-full font-bold uppercase">{currentUser?.role || 'Referral Partner'}</span>
                   </div>
-                  <p className="text-xs text-slate-400 truncate">{currentUser?.email || 'shopper@vionex.co.in'}</p>
+                  <p className="text-xs text-slate-400 truncate">{currentUser?.email || 'shopper@Leafy Server.co.in'}</p>
                 </div>
 
                 {/* Vertical Account Sub-Navigation Menu */}
@@ -1585,7 +1585,7 @@ export default function ShoppingPlatformView() {
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border dark:border-slate-750">
                         <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Your Sponsor Code</span>
                         <div className="flex items-center justify-between">
-                          <strong className="text-lg font-mono text-[#22C55E]">VIONEXPARTNER9</strong>
+                          <strong className="text-lg font-mono text-[#22C55E]">Leafy ServerPARTNER9</strong>
                           <button onClick={() => alert('Referral link copied to clipboard!')} className="p-1 hover:bg-slate-100 rounded">
                             <Share2 className="w-4 h-4 text-slate-500" />
                           </button>
@@ -1610,7 +1610,7 @@ export default function ShoppingPlatformView() {
                       </div>
                       <div className="space-y-1.5 text-xs">
                         <h4 className="font-bold text-slate-800 dark:text-slate-100">Invite Friends & Earn Override Commission</h4>
-                        <p className="text-slate-450 leading-relaxed">Let sponsors register under your active level chain. Earn overrides instantly for every grocery checkout they finish inside the VioneX storefront.</p>
+                        <p className="text-slate-450 leading-relaxed">Let sponsors register under your active level chain. Earn overrides instantly for every grocery checkout they finish inside the Leafy Server storefront.</p>
                         <button 
                           onClick={() => alert('Sponsor invitation links dispatched to WhatsApp nodes.')}
                           className="px-4 py-1.5 bg-[#22C55E] hover:bg-[#22C55E]/90 text-white rounded-lg text-[10px] font-bold uppercase transition"
@@ -2178,7 +2178,7 @@ export default function ShoppingPlatformView() {
 
             <div className="space-y-2">
               <h3 className="text-lg font-bold">Instant Order Confirmed!</h3>
-              <p className="text-xs text-slate-400">Your VioneX storefront order was dispatched to nearby fulfillment nodes. Delivery partner will arrive shortly!</p>
+              <p className="text-xs text-slate-400">Your Leafy Server storefront order was dispatched to nearby fulfillment nodes. Delivery partner will arrive shortly!</p>
             </div>
 
             {/* Coupon reward reveal */}
@@ -2220,7 +2220,7 @@ export default function ShoppingPlatformView() {
             <div>
               <span className="text-[9px] font-mono text-slate-400 uppercase">LIVE DISPATCH TRACKING</span>
               <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mt-1">{trackingOrder.orderNumber}</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">Logistics: VioneX instant delivery partner • Estimated arrival: <strong>12-14 mins</strong></p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Logistics: Leafy Server instant delivery partner • Estimated arrival: <strong>12-14 mins</strong></p>
             </div>
 
             {/* VERTICAL TIMELINE */}
@@ -2292,7 +2292,7 @@ export default function ShoppingPlatformView() {
       {/* ================================== */}
       {showPaymentGatewaySimulator && activePaymentTx && (() => {
         const activePayuConfig = paymentGatewaySettings.find(c => c.gateway_name === 'PayU' && c.status === 'Enabled');
-        const paymentLink = activePayuConfig?.merchant_key || 'payu_biz_node_vionex';
+        const paymentLink = activePayuConfig?.merchant_key || 'payu_biz_node_Leafy Server';
         const isExternalUrl = paymentLink.startsWith('http://') || paymentLink.startsWith('https://');
 
         // Dynamic local mock document if not a full external link
@@ -2319,7 +2319,7 @@ export default function ShoppingPlatformView() {
               <div class="bg-[#f0fdf4] border border-[#bbf7d0] p-4 rounded-xl space-y-2.5">
                 <div class="flex justify-between items-center text-[11px]">
                   <span class="text-slate-500">Recipient Store</span>
-                  <strong class="text-slate-800">VioneX Shopper Commerce</strong>
+                  <strong class="text-slate-800">Leafy Server Shopper Commerce</strong>
                 </div>
                 <div class="flex justify-between items-center text-[11px]">
                   <span class="text-slate-500">Order Ref ID</span>
@@ -2385,7 +2385,7 @@ export default function ShoppingPlatformView() {
                   <ShieldCheck className="w-3.5 h-3.5 text-[#16a34a] shrink-0" />
                   <span className="text-[#16a34a] font-bold">https://</span>
                   <span className="truncate flex-1 text-slate-700">
-                    {isExternalUrl ? paymentLink : `secure.payu.in/sandbox/checkout?handle=${paymentLink || 'default_vionex_merchant'}`}
+                    {isExternalUrl ? paymentLink : `secure.payu.in/sandbox/checkout?handle=${paymentLink || 'default_Leafy Server_merchant'}`}
                   </span>
                   <span className="text-[8px] bg-green-100 text-[#16a34a] px-1.5 py-0.5 rounded font-sans uppercase font-extrabold tracking-wider shrink-0">
                     SSL Encrypted

@@ -1998,7 +1998,7 @@ export default function SalesOrdersView() {
               {/* Document Header */}
               <div className="flex justify-between items-start border-b border-slate-200 pb-5">
                 <div>
-                  <h4 className="text-xl font-black tracking-tight text-violet-700">VioneX Enterprise</h4>
+                  <h4 className="text-xl font-black tracking-tight text-violet-700">Leafy Server Enterprise</h4>
                   <p className="text-[10px] text-slate-500 uppercase tracking-widest font-mono font-bold mt-1">Order Fulfillment Invoice</p>
                   <p className="text-[11px] text-slate-605 leading-relaxed mt-2 max-w-xs">
                     Naturescience Custom Formulators Headquarters,<br />
@@ -2157,7 +2157,7 @@ export default function SalesOrdersView() {
               {/* Printable terms and footer */}
               <div className="pt-6 border-t border-slate-200 text-center space-y-1 select-none">
                 <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest leading-relaxed">Thank you for your valuable business partnership!</p>
-                <p className="text-[9px] text-slate-450 leading-relaxed max-w-md mx-auto">This commercial invoice document was electronically compiled and authorized via VioneX Enterprise. If you have any inquiries regarding active outstanding balances, please contact accounts@vionex.io.</p>
+                <p className="text-[9px] text-slate-450 leading-relaxed max-w-md mx-auto">This commercial invoice document was electronically compiled and authorized via Leafy Server Enterprise. If you have any inquiries regarding active outstanding balances, please contact accounts@Leafy Server.io.</p>
               </div>
 
             </div>

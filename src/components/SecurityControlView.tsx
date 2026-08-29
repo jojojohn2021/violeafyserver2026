@@ -207,7 +207,7 @@ export default function SecurityControlView() {
         <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
           {auditLogs.length === 0 ? (
             <p className="text-[11px] text-slate-500 font-mono italic text-center py-10">
-              No audit logs captured. Everything clean inside VioneX databases.
+              No audit logs captured. Everything clean inside Leafy Server databases.
             </p>
           ) : (
             auditLogs.map((log) => {

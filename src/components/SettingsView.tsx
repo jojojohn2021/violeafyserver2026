@@ -130,7 +130,7 @@ export default function SettingsView() {
   const [editingPincode, setEditingPincode] = useState('');
   const [editingAmount, setEditingAmount] = useState('');
 
-  const handleCreateDeliveryCharge = (e: React.FormEvent) => {
+  const handleCreateDeliveryCharge = async (e: React.FormEvent) => {
     e.preventDefault();
     setChargeError(null);
     setChargeSuccess(null);
@@ -154,18 +154,21 @@ export default function SettingsView() {
       return;
     }
 
-    addDeliveryCharge({
-      id: 'del_' + Math.random().toString(36).substr(2, 9),
-      pincode: pin,
-      charge: amt
-    });
-
-    setChargeSuccess(`Successfully set delivery charge of ₹${amt.toFixed(2)} for pincode ${pin}`);
-    setChargePincode('');
-    setChargeAmount('');
+    try {
+      await addDeliveryCharge({
+        id: 'del_' + Math.random().toString(36).substr(2, 9),
+        pincode: pin,
+        charge: amt
+      });
+      setChargeSuccess(`Successfully set delivery charge of ₹${amt.toFixed(2)} for pincode ${pin}`);
+      setChargePincode('');
+      setChargeAmount('');
+    } catch (err: any) {
+      setChargeError(err.message || 'Unable to save the delivery charge rule.');
+    }
   };
 
-  const handleSaveEditDeliveryCharge = (id: string) => {
+  const handleSaveEditDeliveryCharge = async (id: string) => {
     const amt = parseFloat(editingAmount);
     const pin = editingPincode.trim();
 
@@ -185,12 +188,15 @@ export default function SettingsView() {
       return;
     }
 
-    updateDeliveryCharge(id, {
-      pincode: pin,
-      charge: amt
-    });
-
-    setEditingChargeId(null);
+    try {
+      await updateDeliveryCharge(id, {
+        pincode: pin,
+        charge: amt
+      });
+      setEditingChargeId(null);
+    } catch (err: any) {
+      alert(err.message || 'Unable to update the delivery charge rule.');
+    }
   };
 
   // Coupon create and registration
@@ -1016,7 +1022,9 @@ export default function SettingsView() {
                                     <button
                                       onClick={() => {
                                         if (confirm(`Are you sure you want to delete delivery charge for pincode ${c.pincode}?`)) {
-                                          deleteDeliveryCharge(c.id);
+                                          deleteDeliveryCharge(c.id).catch((err: any) => {
+                                            alert(err.message || 'Unable to delete the delivery charge rule.');
+                                          });
                                         }
                                       }}
                                       className="p-1.5 bg-slate-900 hover:bg-red-950/40 border border-slate-800 hover:border-red-900/30 rounded text-slate-400 hover:text-red-400 transition"

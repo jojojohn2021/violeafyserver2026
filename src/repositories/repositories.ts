@@ -22,6 +22,7 @@ import {
   RolePermissions,
   SystemAuditLog,
   PaymentGatewaySetting,
+  DeliveryCharge,
   CustomerDeliveryAddress,
   PartnerLevel,
   CommissionRule,
@@ -180,6 +181,12 @@ export class PaymentGatewaySettingRepository extends BaseRepository<PaymentGatew
   }
 }
 
+export class DeliveryChargeRepository extends BaseRepository<DeliveryCharge> {
+  constructor() {
+    super('delivery_charges');
+  }
+}
+
 export class PartnerLevelRepository extends BaseRepository<PartnerLevel> {
   constructor() {
     super('performance_levels');
@@ -332,6 +339,7 @@ export const influencerContentRepository = new InfluencerContentRepository();
 export const brandConfigRepository = new BrandConfigRepository();
 export const rolePermissionsRepository = new RolePermissionsRepository();
 export const paymentGatewaySettingRepository = new PaymentGatewaySettingRepository();
+export const deliveryChargeRepository = new DeliveryChargeRepository();
 export const partnerLevelRepository = new PartnerLevelRepository();
 export const commissionRuleRepository = new CommissionRuleRepository();
 export const commissionTransactionRepository = new CommissionTransactionRepository();

@@ -43,6 +43,7 @@ import {
   brandConfigRepository,
   rolePermissionsRepository,
   paymentGatewaySettingRepository,
+  deliveryChargeRepository,
   customerDeliveryAddressRepository,
   partnerLevelRepository,
   commissionRuleRepository,
@@ -269,9 +270,9 @@ export interface CRMContextType {
   updatePaymentGatewaySetting: (id: string, updates: Partial<PaymentGatewaySetting>) => void;
 
   deliveryCharges: DeliveryCharge[];
-  addDeliveryCharge: (charge: DeliveryCharge) => void;
-  updateDeliveryCharge: (id: string, updates: Partial<DeliveryCharge>) => void;
-  deleteDeliveryCharge: (id: string) => void;
+  addDeliveryCharge: (charge: DeliveryCharge) => Promise<void>;
+  updateDeliveryCharge: (id: string, updates: Partial<DeliveryCharge>) => Promise<void>;
+  deleteDeliveryCharge: (id: string) => Promise<void>;
 
   formatInvoices: FormatInvoice[];
   addFormatInvoice: (invoice: Omit<FormatInvoice, 'id'>) => Promise<void>;
@@ -495,7 +496,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetchedPartnerLevels,
         fetchedCommissionRules,
         fetchedCommissionTransactions,
-        fetchedFormatInvoices
+        fetchedFormatInvoices,
+        fetchedDeliveryCharges
       ] = await Promise.all([
         userRepository.getAll(),
         productRepository.getAll(),
@@ -513,7 +515,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         partnerLevelRepository.getAll(),
         commissionRuleRepository.getAll(),
         commissionTransactionRepository.getAll(),
-        formatInvoiceRepository.getAll()
+        formatInvoiceRepository.getAll(),
+        deliveryChargeRepository.getAll()
       ]);
 
       setRegisteredUsers(fetchedUsers);
@@ -524,6 +527,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCalendarEvents(fetchedEvents);
       setCampaigns(fetchedCampaigns);
       setFormatInvoices(fetchedFormatInvoices);
+      setDeliveryCharges(fetchedDeliveryCharges);
 
       // Derive referral partners strictly from CUSTOMERS table, excluding administrative users
       const adminUserIds = new Set(fetchedUsers.map(u => String(u.id)));
@@ -2366,11 +2370,35 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [paymentGatewaySettings]);
 
-  const addDeliveryCharge = useCallback((charge: DeliveryCharge) => setDeliveryCharges(prev => [...prev, charge]), []);
-  const updateDeliveryCharge = useCallback((id: string, updates: Partial<DeliveryCharge>) => {
-    setDeliveryCharges(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
+  const addDeliveryCharge = useCallback(async (charge: DeliveryCharge) => {
+    try {
+      const created = await deliveryChargeRepository.create(charge);
+      setDeliveryCharges(prev => [...prev, created]);
+    } catch (err: any) {
+      setFirestoreError({ hasError: true, message: err.message, collectionName: 'delivery_charges', operationType: 'create', timestamp: new Date().toISOString() });
+      throw err;
+    }
   }, []);
-  const deleteDeliveryCharge = useCallback((id: string) => setDeliveryCharges(prev => prev.filter(d => d.id !== id)), []);
+
+  const updateDeliveryCharge = useCallback(async (id: string, updates: Partial<DeliveryCharge>) => {
+    try {
+      await deliveryChargeRepository.update(id, updates);
+      setDeliveryCharges(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
+    } catch (err: any) {
+      setFirestoreError({ hasError: true, message: err.message, collectionName: 'delivery_charges', operationType: 'update', timestamp: new Date().toISOString() });
+      throw err;
+    }
+  }, []);
+
+  const deleteDeliveryCharge = useCallback(async (id: string) => {
+    try {
+      await deliveryChargeRepository.delete(id);
+      setDeliveryCharges(prev => prev.filter(d => d.id !== id));
+    } catch (err: any) {
+      setFirestoreError({ hasError: true, message: err.message, collectionName: 'delivery_charges', operationType: 'delete', timestamp: new Date().toISOString() });
+      throw err;
+    }
+  }, []);
 
   const addFormatInvoice = useCallback(async (invoice: Omit<FormatInvoice, 'id'>) => {
     try {

@@ -14,6 +14,7 @@ import {
   OperationalTimelineEvent,
   PaymentReminderRecord,
   OperationsOrderDetailsResponse,
+  PaymentRecord,
 } from '../types/operations';
 
 export interface DataAccessor {
@@ -143,6 +144,7 @@ export class OperationsService {
       updatedBy || 'Operations Staff',
       notes ? { notes, newStatus } : { newStatus }
     );
+    await this.syncPaymentRecord(orderId);
 
     this.setIdempotency(idempotencyKey, ful);
     return ful;
@@ -249,6 +251,92 @@ export class OperationsService {
     };
   }
 
+  // Map the loosely-typed sales_orders.paymentStatus field onto the authoritative payments.paymentStatus enum
+  private mapPaymentStatus(raw?: string): PaymentRecord['paymentStatus'] {
+    const normalized = String(raw || '').toUpperCase();
+    if (normalized === 'PAID') return 'COMPLETED';
+    if (normalized === 'OVERDUE') return 'OVERDUE';
+    if (normalized === 'REFUNDED') return 'REFUNDED';
+    return 'PENDING';
+  }
+
+  /**
+   * Recompute and persist the authoritative `payments` record for an order.
+   * `payments.orderId` (doc id == orderId) is the single relationship key that every
+   * operational table (fulfilment, packing, shipments, delivery, returns, history) links to.
+   * This must be called after every operation that changes operational or payment state.
+   */
+  private async syncPaymentRecord(orderId: string): Promise<PaymentRecord> {
+    const [orders, fulfilments, packings, shipments, deliveries, returns, existingPayments] = await Promise.all([
+      this.db.getCollectionDocs('sales_orders'),
+      this.db.getCollectionDocs('order_fulfilment'),
+      this.db.getCollectionDocs('order_packing'),
+      this.db.getCollectionDocs('order_shipments'),
+      this.db.getCollectionDocs('order_delivery'),
+      this.db.getCollectionDocs('order_returns'),
+      this.db.getCollectionDocs('payments'),
+    ]);
+
+    const order = orders.find((o) => String(o.id) === String(orderId));
+    if (!order) {
+      throw new Error(`Sales Order '${orderId}' not found.`);
+    }
+
+    const fulfilment = fulfilments.find((f) => String(f.orderId) === String(orderId));
+    const packing = packings.find((p) => String(p.orderId) === String(orderId));
+    const orderShipments = shipments
+      .filter((s) => String(s.orderId) === String(orderId))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+    const latestShipment = orderShipments[0];
+    const delivery = deliveries.find((d) => String(d.orderId) === String(orderId));
+    const orderReturns = returns
+      .filter((r) => String(r.orderId) === String(orderId))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+    const latestReturn = orderReturns[0];
+
+    const now = new Date().toISOString();
+    const existing = existingPayments.find((p) => String(p.orderId) === String(orderId));
+
+    const record: PaymentRecord = {
+      id: String(orderId), // guarantees payments.orderId uniqueness (one doc per orderId)
+      orderId: String(orderId),
+      orderNumber: order.orderNumber,
+      customerId: order.customerId,
+      customerName: order.customerName,
+      totalAmount: Number(order.totalValue || 0),
+      paymentStatus: this.mapPaymentStatus(order.paymentStatus),
+      orderStatus: fulfilment?.status || 'NOT_STARTED',
+      fulfilmentStatus: fulfilment?.status || 'NOT_STARTED',
+      packingStatus: packing?.status || 'NOT_STARTED',
+      shipmentStatus: (latestShipment?.status as PaymentRecord['shipmentStatus']) || 'NONE',
+      deliveryStatus: delivery ? 'DELIVERED' : 'PENDING',
+      returnStatus: latestReturn?.status || 'NONE',
+      courierName: latestShipment?.courierAgency,
+      trackingNumber: latestShipment?.trackingNumber,
+      latestOperationAt: now,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+
+    await this.db.saveCollectionDoc('payments', sanitizeFirestorePayload(record));
+    return record;
+  }
+
+  // GET AUTHORITATIVE ORDER VIEW - single source of truth for customer/operations facing order status
+  async getAuthoritativeOrderView(orderId: string): Promise<PaymentRecord> {
+    const payments = await this.db.getCollectionDocs('payments');
+    const existing = payments.find((p) => String(p.orderId) === String(orderId));
+    if (existing) return existing as PaymentRecord;
+    // Lazily backfill payments record for orders created before this sync existed
+    return this.syncPaymentRecord(orderId);
+  }
+
+  // Public entry point for external callers (e.g. sales_orders create/update routes) to
+  // refresh the authoritative payments.orderId record after payment status changes.
+  async syncPaymentRecordForOrder(orderId: string): Promise<PaymentRecord> {
+    return this.syncPaymentRecord(orderId);
+  }
+
   // 3. GET TIMELINE
   async getOrderTimeline(orderId: string): Promise<OperationalTimelineEvent[]> {
     const allTimeline = await this.db.getCollectionDocs('order_operation_history');
@@ -300,6 +388,7 @@ export class OperationsService {
     await this.db.saveCollectionDoc('order_packing', packing);
     await this.updateFulfilmentStatus(orderId, 'PACKING', { packingId: packing.id });
     await this.recordTimelineEvent(orderId, 'PACKING_STARTED', `Packing started by ${packerId || 'Warehouse Staff'}`, packerId);
+    await this.syncPaymentRecord(orderId);
 
     this.setIdempotency(idempotencyKey, packing);
     return packing;
@@ -355,6 +444,7 @@ export class OperationsService {
     await this.db.saveCollectionDoc('order_packing', packing);
     await this.updateFulfilmentStatus(orderId, 'PACKED', { packingId: packing.id });
     await this.recordTimelineEvent(orderId, 'PACKING_COMPLETED', `Packing completed by ${packerId || 'Warehouse Staff'}`, packerId, { notes });
+    await this.syncPaymentRecord(orderId);
 
     this.setIdempotency(idempotencyKey, packing);
     return packing;
@@ -401,6 +491,7 @@ export class OperationsService {
       assignedBy,
       { assignments: formattedAssignments }
     );
+    await this.syncPaymentRecord(orderId);
 
     this.setIdempotency(idempotencyKey, record);
     return record;
@@ -478,6 +569,7 @@ export class OperationsService {
       createdBy,
       { shipmentId: shipment.id, trackingNumber: shipment.trackingNumber, totalCharge }
     );
+    await this.syncPaymentRecord(orderId);
 
     this.setIdempotency(idempotencyKey, shipment);
     return shipment;
@@ -513,6 +605,7 @@ export class OperationsService {
       dispatchedBy,
       { shipmentId: shipment.id, trackingNumber: shipment.trackingNumber }
     );
+    await this.syncPaymentRecord(shipment.orderId);
 
     this.setIdempotency(idempotencyKey, shipment);
     return shipment;
@@ -573,6 +666,7 @@ export class OperationsService {
       recordedBy,
       { deliveryId: delivery.id, recipientName: delivery.recipientName }
     );
+    await this.syncPaymentRecord(shipment.orderId);
 
     this.setIdempotency(idempotencyKey, delivery);
     return delivery;
@@ -631,6 +725,7 @@ export class OperationsService {
       requestedBy,
       { returnId: returnRecord.id, reason: returnRecord.reason }
     );
+    await this.syncPaymentRecord(orderId);
 
     this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;
@@ -665,6 +760,7 @@ export class OperationsService {
       createdBy,
       { returnId: returnRecord.id, reverseTracking: reverseData.trackingNumber }
     );
+    await this.syncPaymentRecord(returnRecord.orderId);
 
     this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;
@@ -695,6 +791,7 @@ export class OperationsService {
       receivedBy,
       { returnId: returnRecord.id }
     );
+    await this.syncPaymentRecord(returnRecord.orderId);
 
     this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;
@@ -732,6 +829,7 @@ export class OperationsService {
       resolvedBy,
       { returnId: returnRecord.id, resolution, notes }
     );
+    await this.syncPaymentRecord(returnRecord.orderId);
 
     this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;

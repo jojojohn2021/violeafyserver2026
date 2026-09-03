@@ -176,3 +176,31 @@ export interface OperationsOrderDetailsResponse {
   returns: ReturnRecord[];
   timeline: OperationalTimelineEvent[];
 }
+
+/**
+ * Authoritative order/payment record. `orderId` (== sales_orders.id) is the unique,
+ * primary relationship key linking payments to every operational table
+ * (order_fulfilment, order_packing, order_shipments, order_delivery, order_returns,
+ * order_operation_history). This record is server-maintained and reflects the
+ * current operational summary for an order; it is never written to directly by the frontend.
+ */
+export interface PaymentRecord {
+  id: string; // equals orderId - enforces uniqueness of payments.orderId
+  orderId: string;
+  orderNumber?: string;
+  customerId?: string;
+  customerName?: string;
+  totalAmount: number;
+  paymentStatus: 'PENDING' | 'COMPLETED' | 'OVERDUE' | 'REFUNDED';
+  orderStatus: FulfilmentStatus;
+  fulfilmentStatus: FulfilmentStatus;
+  packingStatus: 'NOT_STARTED' | 'PACKING' | 'PACKED';
+  shipmentStatus: 'NONE' | 'CREATED' | 'DISPATCHED' | 'IN_TRANSIT' | 'DELIVERED' | 'FAILED';
+  deliveryStatus: 'PENDING' | 'DELIVERED';
+  returnStatus: 'NONE' | ReturnStatus;
+  courierName?: string;
+  trackingNumber?: string;
+  latestOperationAt: string;
+  createdAt: string;
+  updatedAt: string;
+}

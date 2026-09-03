@@ -451,6 +451,15 @@ app.get("/api/db/:col/:id", async (req, res) => {
 app.post("/api/db/:col", async (req, res) => {
   try {
     await saveCollectionDoc(req.params.col, req.body);
+    // Keep the authoritative payments.orderId record in sync whenever a sales order
+    // is created/updated directly (e.g. manual paymentStatus edits from Sales Orders view).
+    if (req.params.col === "sales_orders" && req.body?.id) {
+      try {
+        await operationsService.syncPaymentRecordForOrder(String(req.body.id));
+      } catch (syncError: any) {
+        console.error("[VIO-PAYMENTS] Failed to sync payments record:", syncError?.message || syncError);
+      }
+    }
     return res.json({ success: true, item: req.body });
   } catch (error: any) {
     return res.status(500).json({ error: error?.message || "Failed to save document" });
@@ -1350,6 +1359,36 @@ const handleGetOrderDetails = async (req: express.Request, res: express.Response
 };
 app.get("/api/operations/orders/:orderId", handleGetOrderDetails);
 app.get("/api/v1/operations/orders/:orderId", handleGetOrderDetails);
+
+// Authoritative single source of truth for order/payment status, keyed by payments.orderId.
+// The client must use this instead of independently combining unrelated records.
+const handleGetAuthoritativeOrder = async (req: express.Request, res: express.Response) => {
+  try {
+    const payment = await operationsService.getAuthoritativeOrderView(req.params.orderId);
+    return res.json({
+      success: true,
+      data: {
+        orderId: payment.orderId,
+        paymentStatus: payment.paymentStatus,
+        orderStatus: payment.orderStatus,
+        fulfilmentStatus: payment.fulfilmentStatus,
+        packingStatus: payment.packingStatus,
+        shipmentStatus: payment.shipmentStatus,
+        deliveryStatus: payment.deliveryStatus,
+        returnStatus: payment.returnStatus,
+        courierName: payment.courierName,
+        trackingNumber: payment.trackingNumber,
+        totalAmount: payment.totalAmount,
+        latestOperationAt: payment.latestOperationAt,
+      },
+    });
+  } catch (error: any) {
+    const statusCode = error?.message?.includes("not found") ? 404 : 500;
+    return res.status(statusCode).json({ error: error?.message || "Failed to retrieve order" });
+  }
+};
+app.get("/api/orders/:orderId", handleGetAuthoritativeOrder);
+app.get("/api/v1/orders/:orderId", handleGetAuthoritativeOrder);
 
 // 7. GET /api/operations/orders/:orderId/timeline & /api/v1/operations/orders/:orderId/timeline
 const handleGetOrderTimeline = async (req: express.Request, res: express.Response) => {

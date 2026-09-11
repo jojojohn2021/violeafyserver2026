@@ -210,7 +210,27 @@ export default function ReferralPartnerHubView() {
     e.preventDefault();
     if (!targetPartnerToLink) return;
     const finalSponsor = selectedSponsorId || customSponsorInput.trim();
+
+    // Self-referral validation
+    if (targetPartnerToLink.id === finalSponsor || targetPartnerToLink.referralId === finalSponsor) {
+      showFeedback('error', 'A customer cannot refer themselves.');
+      return;
+    }
+
     try {
+      // Call authoritative backend endpoint for editing existing sponsor relationship
+      const res = await fetch(`/api/admin/referral-partners/${targetPartnerToLink.id}/sponsor`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proposedSponsorId: finalSponsor })
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        showFeedback('error', data.message || data.error || 'Failed to update sponsor link.');
+        return;
+      }
+
       if (updateReferral) {
         await updateReferral(targetPartnerToLink.id, { referredById: finalSponsor, parentId: finalSponsor });
       }
@@ -227,6 +247,69 @@ export default function ReferralPartnerHubView() {
   // Helper to normalize strings for comparison
   const norm = (str?: string) => (str || '').trim().toLowerCase();
   const cleanDigits = (str?: string) => (str || '').replace(/\D/g, '');
+
+  // Helper to dynamically resolve sales metrics and commission details for a partner
+  const getPartnerMetrics = (p: Referral | any) => {
+    if (!p) return { totalSales: 0, commissionEarned: 0, commissionPayable: 0, commissionPaid: 0 };
+
+    const pId = norm(p.id);
+    const pRefId = norm(p.referralId || p.referralCode);
+    const pCustId = norm(p.customerId);
+    const pMobileDigits = cleanDigits(p.mobileNumber);
+
+    // Calculate sales directly from salesOrders
+    const partnerOrders = (salesOrders || []).filter((o: any) => {
+      const oCustId = norm(o.customerId);
+      const oRefCode = norm(o.referralCode);
+      const oContactDigits = cleanDigits(o.contactNo);
+
+      if (pId && oCustId === pId) return true;
+      if (pCustId && oCustId === pCustId) return true;
+      if (pRefId && oRefCode === pRefId) return true;
+      if (pMobileDigits && pMobileDigits.length >= 7 && oContactDigits === pMobileDigits) return true;
+      return false;
+    });
+
+    const calculatedSales = partnerOrders.reduce((sum, o) => sum + Number(o.totalValue || 0), 0);
+    const totalSales = Math.max(calculatedSales, Number(p.totalSales || 0), Number(p.totalSpent || 0));
+
+    // Calculate commissions directly from commissionTransactions
+    const partnerTxs = (commissionTransactions || []).filter((tx: any) => {
+      const benId = norm(tx.beneficiary_partner_id || tx.beneficiary_customer_id);
+      return benId === pId || (pRefId && benId === pRefId) || (pCustId && benId === pCustId);
+    });
+
+    const earnedFromTxs = partnerTxs
+      .filter((tx: any) => tx.status !== 'REVERSED')
+      .reduce((sum, tx) => sum + Number(tx.commission_amount || 0), 0);
+
+    const payableFromTxs = partnerTxs
+      .filter((tx: any) => tx.status === 'CONFIRMED' || tx.status === 'PAYABLE' || tx.status === 'PENDING')
+      .reduce((sum, tx) => sum + Number(tx.commission_amount || 0), 0);
+
+    const paidFromTxs = partnerTxs
+      .filter((tx: any) => tx.status === 'PAID')
+      .reduce((sum, tx) => sum + Number(tx.commission_amount || 0), 0);
+
+    const commissionEarned = Math.max(earnedFromTxs, Number(p.commissionEarned || 0));
+    const commissionPayable = Math.max(payableFromTxs, Number(p.commissionPayable || 0));
+    const commissionPaid = Math.max(paidFromTxs, Number(p.commissionPaid || 0));
+
+    return { totalSales, commissionEarned, commissionPayable, commissionPaid };
+  };
+
+  // Helper to dynamically look up active default rate for a level from commissionRules table
+  const getLevelDefaultRate = (lvl: number) => {
+    const rule = (commissionRules || []).find(
+      (r) =>
+        (!r.product_id || r.product_id === null) &&
+        (!r.partner_id || r.partner_id === null) &&
+        Number(r.level) === lvl &&
+        r.source === 'Default' &&
+        r.status === 'Active'
+    );
+    return rule ? Number(rule.commission_value) : 0;
+  };
 
   // Helper to find a matching partner/customer record by any identifier
   const findPartnerMatch = (identifier: string, pool: any[]) => {
@@ -249,39 +332,130 @@ export default function ReferralPartnerHubView() {
       if (itemCustId === target && itemCustId !== '') return true;
       if (itemUserId === target && itemUserId !== '') return true;
       if (itemEmail === target && itemEmail !== '') return true;
-      if (targetDigits.length >= 7 && itemMobileDigits === targetDigits) return true;
+      if (
+        targetDigits.length >= 7 &&
+        itemMobileDigits.length >= 7 &&
+        (itemMobileDigits === targetDigits ||
+          itemMobileDigits.endsWith(targetDigits) ||
+          targetDigits.endsWith(itemMobileDigits))
+      ) {
+        return true;
+      }
       if (itemName === target && itemName !== '') return true;
 
       return false;
     });
   };
 
-  // Build Upline Chain for active partner (Up to 5 Levels) vs Permanent Upline History
+  const resolveSponsorIdFromCustomer = (cust: any) => {
+    if (!cust) return null;
+    const ownKeys = new Set<string>();
+    if (cust.id) ownKeys.add(norm(cust.id));
+    if (cust.customerId) ownKeys.add(norm(cust.customerId));
+    if (cust.referralCode) ownKeys.add(norm(cust.referralCode));
+    if (cust.referralId) ownKeys.add(norm(cust.referralId));
+
+    const ownMobileDigits = cleanDigits(cust.mobileNumber);
+
+    const candidates = [
+      cust.referredById,
+      cust.parentId,
+      cust.sponsorPartnerId,
+      cust.sponsorId,
+      cust.sponsorCode,
+      cust.referredByCode,
+      cust.referredBy,
+      cust.referralmobileno,
+    ];
+
+    for (const rawCandidate of candidates) {
+      if (!rawCandidate) continue;
+      const candStr = String(rawCandidate).trim();
+      if (!candStr) continue;
+
+      const candLower = norm(candStr);
+      const candDigits = cleanDigits(candStr);
+
+      if (ownKeys.has(candLower)) continue;
+      if (
+        candDigits &&
+        ownMobileDigits &&
+        candDigits.length >= 7 &&
+        ownMobileDigits.length >= 7 &&
+        (candDigits === ownMobileDigits ||
+          candDigits.endsWith(ownMobileDigits) ||
+          ownMobileDigits.endsWith(candDigits))
+      ) {
+        continue;
+      }
+
+      return candStr;
+    }
+
+    return null;
+  };
+
+  // Build Upline Chain for active partner (L1 Primary Customer, L2-L5 Active Commission Window, L6 Termination Boundary)
   const getUplineChain = (targetPartnerId: string) => {
     const combinedPool = [...referrals, ...(customers || [])];
-    const chain: { level: number; partner: Referral; isActiveWindow: boolean }[] = [];
+    const chain: { level: number; partner: Referral; isActiveWindow: boolean; isPrimary: boolean }[] = [];
     
     let current: any = findPartnerMatch(targetPartnerId, combinedPool) || referrals.find(r => r.id === targetPartnerId || r.referralId === targetPartnerId);
     if (!current) return chain;
 
     const visited = new Set<string>();
-    const currentKey = norm(current.id || current.referralId || current.customerId);
-    if (currentKey) visited.add(currentKey);
+    if (current.id) visited.add(norm(current.id));
+    if (current.referralId) visited.add(norm(current.referralId));
+    if (current.referralCode) visited.add(norm(current.referralCode));
+    if (current.customerId) visited.add(norm(current.customerId));
+    if (current.mobileNumber) visited.add(cleanDigits(current.mobileNumber));
 
-    let depth = 1;
-    while (current && depth <= 10) {
-      const sponsorId = current.referredById || current.parentId || current.sponsorPartnerId || current.sponsorId || current.sponsorCode || current.referredByCode || current.referredBy;
+    // L1 = Transaction Customer / Primary Partner
+    const primaryPartner: Referral = {
+      id: current.id,
+      referralId: current.referralId || current.referralCode || current.customerId || `REF-${current.id}`,
+      name: current.name || 'Unnamed Customer',
+      mobileNumber: current.mobileNumber || '',
+      email: current.email || '',
+      address: current.address || '',
+      status: current.status || 'Active',
+      referredById: resolveSponsorIdFromCustomer(current) || '',
+      partnerLevelName: current.partnerLevelName || 'Bronze',
+      totalSales: current.totalSales || 0,
+      createdAt: current.createdAt || new Date().toISOString()
+    };
+
+    chain.push({
+      level: 1,
+      partner: primaryPartner,
+      isActiveWindow: true,
+      isPrimary: true
+    });
+
+    let depth = 2; // Immediate upline is L2
+    while (current && depth <= 6) {
+      const sponsorId = resolveSponsorIdFromCustomer(current);
       if (!sponsorId) break;
 
       const sponsor = findPartnerMatch(sponsorId, combinedPool);
       if (!sponsor) break;
 
-      const sponsorKey = norm(sponsor.id || sponsor.referralId || sponsor.customerId || sponsor.mobileNumber);
-      if (visited.has(sponsorKey)) {
-        console.warn(`[REFERRAL HUB] Circular referral detected for sponsor ${sponsorKey}. Terminating chain.`);
+      const sponsorIdKey = norm(sponsor.id || sponsor.referralId || sponsor.customerId);
+      const sponsorMobileKey = cleanDigits(sponsor.mobileNumber);
+
+      if (
+        (sponsorIdKey && visited.has(sponsorIdKey)) ||
+        (sponsorMobileKey && visited.has(sponsorMobileKey))
+      ) {
+        console.warn(`[REFERRAL HUB] Circular referral detected for sponsor ${sponsorIdKey || sponsorMobileKey}. Terminating chain.`);
         break;
       }
-      visited.add(sponsorKey);
+
+      if (sponsor.id) visited.add(norm(sponsor.id));
+      if (sponsor.referralId) visited.add(norm(sponsor.referralId));
+      if (sponsor.referralCode) visited.add(norm(sponsor.referralCode));
+      if (sponsor.customerId) visited.add(norm(sponsor.customerId));
+      if (sponsor.mobileNumber) visited.add(cleanDigits(sponsor.mobileNumber));
 
       const formattedSponsor: Referral = {
         id: sponsor.id,
@@ -291,7 +465,7 @@ export default function ReferralPartnerHubView() {
         email: sponsor.email || '',
         address: sponsor.address || '',
         status: sponsor.status || 'Active',
-        referredById: sponsor.referredById || sponsor.parentId,
+        referredById: resolveSponsorIdFromCustomer(sponsor) || '',
         partnerLevelName: sponsor.partnerLevelName || 'Bronze',
         totalSales: sponsor.totalSales || 0,
         createdAt: sponsor.createdAt || new Date().toISOString()
@@ -300,7 +474,8 @@ export default function ReferralPartnerHubView() {
       chain.push({
         level: depth,
         partner: formattedSponsor,
-        isActiveWindow: depth <= 5
+        isActiveWindow: depth <= 5,
+        isPrimary: false
       });
 
       current = sponsor;
@@ -435,19 +610,19 @@ export default function ReferralPartnerHubView() {
             <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-1 shadow-2xs">
               <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">Total Sales Generated</span>
               <p className="text-xl font-extrabold text-emerald-700">
-                ₹{referrals.reduce((sum, r) => sum + (r.totalSales || 0), 0).toLocaleString('en-IN')}
+                ₹{referrals.reduce((sum, r) => sum + getPartnerMetrics(r).totalSales, 0).toLocaleString('en-IN')}
               </p>
             </div>
             <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-1 shadow-2xs">
               <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">Commissions Payable</span>
               <p className="text-xl font-extrabold text-amber-600">
-                ₹{referrals.reduce((sum, r) => sum + (r.commissionPayable || 0), 0).toLocaleString('en-IN')}
+                ₹{referrals.reduce((sum, r) => sum + getPartnerMetrics(r).commissionPayable, 0).toLocaleString('en-IN')}
               </p>
             </div>
             <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-1 shadow-2xs">
               <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">Commissions Paid</span>
               <p className="text-xl font-extrabold text-blue-600">
-                ₹{referrals.reduce((sum, r) => sum + (r.commissionPaid || 0), 0).toLocaleString('en-IN')}
+                ₹{referrals.reduce((sum, r) => sum + getPartnerMetrics(r).commissionPaid, 0).toLocaleString('en-IN')}
               </p>
             </div>
           </div>
@@ -484,43 +659,46 @@ export default function ReferralPartnerHubView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredPartners.map(p => (
-                    <tr key={p.id} className={`hover:bg-emerald-50/30 transition ${selectedPartnerId === p.id ? 'bg-emerald-50/60 font-medium' : ''}`}>
-                      <td className="p-3">
-                        <div className="font-bold text-slate-900">{p.name}</div>
-                        <div className="text-[10px] text-slate-400 font-mono">ID: {p.id} | {p.mobileNumber}</div>
-                      </td>
-                      <td className="p-3 font-mono font-bold text-emerald-700">{p.referralId}</td>
-                      <td className="p-3 font-mono text-slate-600">{p.referredById || p.parentId || '—'}</td>
-                      <td className="p-3">
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
-                          {p.partnerLevelName || 'Bronze'}
-                        </span>
-                      </td>
-                      <td className="p-3 font-semibold">₹{(p.totalSales || 0).toLocaleString('en-IN')}</td>
-                      <td className="p-3 text-emerald-700 font-bold">₹{(p.commissionEarned || 0).toLocaleString('en-IN')}</td>
-                      <td className="p-3 text-amber-700 font-bold">₹{(p.commissionPayable || 0).toLocaleString('en-IN')}</td>
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          p.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                        }`}>
-                          {p.status}
-                        </span>
-                      </td>
-                      <td className="p-3 text-right">
-                        <button
-                          onClick={() => {
-                            setSelectedPartnerId(p.id);
-                            setActiveTab('referral_tree');
-                          }}
-                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition flex items-center gap-1 ml-auto cursor-pointer"
-                        >
-                          <Eye className="w-3 h-3" />
-                          <span>View Tree</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredPartners.map(p => {
+                    const pm = getPartnerMetrics(p);
+                    return (
+                      <tr key={p.id} className={`hover:bg-emerald-50/30 transition ${selectedPartnerId === p.id ? 'bg-emerald-50/60 font-medium' : ''}`}>
+                        <td className="p-3">
+                          <div className="font-bold text-slate-900">{p.name}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">ID: {p.id} | {p.mobileNumber}</div>
+                        </td>
+                        <td className="p-3 font-mono font-bold text-emerald-700">{p.referralId}</td>
+                        <td className="p-3 font-mono text-slate-600">{p.referredById || p.parentId || '—'}</td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
+                            {p.partnerLevelName || 'Bronze'}
+                          </span>
+                        </td>
+                        <td className="p-3 font-semibold">₹{pm.totalSales.toLocaleString('en-IN')}</td>
+                        <td className="p-3 text-emerald-700 font-bold">₹{pm.commissionEarned.toLocaleString('en-IN')}</td>
+                        <td className="p-3 text-amber-700 font-bold">₹{pm.commissionPayable.toLocaleString('en-IN')}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                            p.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {p.status}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => {
+                              setSelectedPartnerId(p.id);
+                              setActiveTab('referral_tree');
+                            }}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition flex items-center gap-1 ml-auto cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View Tree</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -543,46 +721,57 @@ export default function ReferralPartnerHubView() {
             >
               {referrals.map(r => (
                 <option key={r.id} value={r.id}>
-                  {r.name} (#{r.referralId})
+                  {r.name} (#{r.referralId} | {r.mobileNumber})
                 </option>
               ))}
             </select>
           </div>
 
           {/* Active Partner Focus Card */}
-          {partner && (
-            <div className="p-5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-lg shadow-xs">
-                  {partner.name[0]}
+          {partner && (() => {
+            const focusMetrics = getPartnerMetrics(partner);
+            return (
+              <div className="p-5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-lg shadow-xs">
+                    {partner.name[0]}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-base">{partner.name}</h4>
+                    <p className="text-xs text-slate-600 font-mono">Code: #{partner.referralId} | Mobile: {partner.mobileNumber}</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 text-base">{partner.name}</h4>
-                  <p className="text-xs text-slate-600 font-mono">Code: #{partner.referralId} | Mobile: {partner.mobileNumber}</p>
-                </div>
-              </div>
 
-              <div className="flex items-center gap-4 text-right">
-                <div>
-                  <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Current Level</span>
-                  <span className="px-2.5 py-0.5 bg-emerald-600 text-white text-xs font-bold rounded-full">{partner.partnerLevelName || 'Bronze'}</span>
-                </div>
-                <div>
-                  <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Total Sales</span>
-                  <span className="text-xs font-extrabold text-slate-900">₹{(partner.totalSales || 0).toLocaleString('en-IN')}</span>
-                </div>
-                <div>
-                  <button
-                    onClick={() => openLinkSponsorModal(partner)}
-                    className="px-3 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>Link / Edit Sponsor</span>
-                  </button>
+                <div className="flex flex-wrap items-center gap-4 text-right">
+                  <div>
+                    <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Current Level</span>
+                    <span className="px-2.5 py-0.5 bg-emerald-600 text-white text-xs font-bold rounded-full">{partner.partnerLevelName || 'Bronze'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Total Sales</span>
+                    <span className="text-xs font-extrabold text-slate-900">₹{focusMetrics.totalSales.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Earned Comm.</span>
+                    <span className="text-xs font-extrabold text-emerald-700">₹{focusMetrics.commissionEarned.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Payable Comm.</span>
+                    <span className="text-xs font-extrabold text-amber-600">₹{focusMetrics.commissionPayable.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div>
+                    <button
+                      onClick={() => openLinkSponsorModal(partner)}
+                      className="px-3 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Link / Edit Sponsor</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Upline Chain Visualizer */}
           <div className="bg-white border border-slate-200 p-6 rounded-2xl space-y-4">
@@ -624,40 +813,72 @@ export default function ReferralPartnerHubView() {
               </div>
             ) : (
               <div className="space-y-3">
-                {getUplineChain(partner?.id || '').map((node) => (
-                  <div 
-                    key={node.level}
-                    className={`p-4 rounded-xl border flex items-center justify-between transition ${
-                      node.isActiveWindow 
-                        ? 'bg-emerald-50/50 border-emerald-200' 
-                        : 'bg-slate-50 border-slate-200 opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className={`w-7 h-7 rounded-full text-xs font-mono font-bold flex items-center justify-center ${
-                        node.isActiveWindow ? 'bg-emerald-600 text-white' : 'bg-slate-400 text-white'
-                      }`}>
-                        L{node.level}
-                      </span>
-                      <div>
-                        <span className="font-bold text-slate-900 text-xs">{node.partner.name}</span>
-                        <p className="text-[10px] text-slate-500 font-mono">
-                          Referral Code: #{node.partner.referralId} | Mobile: {node.partner.mobileNumber}
-                        </p>
+                {getUplineChain(partner?.id || '').map((node) => {
+                  const nodeMetrics = getPartnerMetrics(node.partner);
+                  return (
+                    <div 
+                      key={node.level}
+                      className={`p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-3 transition ${
+                        node.isActiveWindow 
+                          ? 'bg-emerald-50/50 border-emerald-200' 
+                          : 'bg-slate-50 border-slate-200 opacity-60'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`w-8 h-8 rounded-full text-xs font-mono font-bold flex items-center justify-center shrink-0 ${
+                          node.isActiveWindow ? 'bg-emerald-600 text-white' : 'bg-slate-400 text-white'
+                        }`}>
+                          L{node.level}
+                        </span>
+                        <div>
+                          <span className="font-bold text-slate-900 text-sm">{node.partner.name}</span>
+                          <p className="text-[10px] text-slate-500 font-mono">
+                            Referral Code: #{node.partner.referralId} | Mobile: {node.partner.mobileNumber}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4 text-xs">
+                        <div className="text-right">
+                          <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Node Sales</span>
+                          <span className="font-extrabold text-slate-900">₹{nodeMetrics.totalSales.toLocaleString('en-IN')}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Earned</span>
+                          <span className="font-bold text-emerald-700">₹{nodeMetrics.commissionEarned.toLocaleString('en-IN')}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[9px] font-mono uppercase text-slate-400 font-bold block">Payable</span>
+                          <span className="font-bold text-amber-700">₹{nodeMetrics.commissionPayable.toLocaleString('en-IN')}</span>
+                        </div>
+
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase ${
+                          node.isPrimary
+                            ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                            : node.level === 6
+                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                            : node.isActiveWindow 
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                            : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {node.isPrimary
+                            ? `L1 Primary Customer (${getLevelDefaultRate(1)}% Default)`
+                            : node.level === 2
+                            ? `L2 Active Commission (${getLevelDefaultRate(2)}% Default)`
+                            : node.level === 3
+                            ? `L3 Active Commission (${getLevelDefaultRate(3)}% Default)`
+                            : node.level === 4
+                            ? `L4 Active Commission (${getLevelDefaultRate(4)}% Default)`
+                            : node.level === 5
+                            ? `L5 Active Commission (${getLevelDefaultRate(5)}% Default)`
+                            : node.level === 6
+                            ? 'L6 Termination Boundary (No Commission)'
+                            : 'Historical Upline (Outside L5)'}
+                        </span>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
-                        node.isActiveWindow 
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
-                          : 'bg-slate-200 text-slate-700'
-                      }`}>
-                        {node.isActiveWindow ? `Level ${node.level} Active Commission` : 'Historical Upline (Outside L5)'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -754,9 +975,8 @@ export default function ReferralPartnerHubView() {
             <h4 className="font-bold text-sm text-emerald-400">System Default 5-Level Commission Rates</h4>
             <div className="grid grid-cols-5 gap-2 text-center font-mono">
               {[1, 2, 3, 4, 5].map(lvl => {
-                const rule = commissionRules.find(r => (!r.product_id || r.product_id === null) && (!r.partner_id || r.partner_id === null) && Number(r.level) === lvl && r.source === 'Default');
-                const defaultFallback: Record<number, number> = { 1: 10, 2: 8, 3: 6, 4: 4, 5: 2 };
-                const rate = rule ? rule.commission_value : defaultFallback[lvl];
+                const rule = commissionRules.find(r => (!r.product_id || r.product_id === null) && (!r.partner_id || r.partner_id === null) && Number(r.level) === lvl && r.source === 'Default' && r.status === 'Active');
+                const rate = rule ? rule.commission_value : 0;
                 return (
                   <div key={lvl} className="p-2.5 bg-white/10 rounded-xl border border-white/10">
                     <span className="text-[10px] text-slate-400 uppercase font-bold block">Level {lvl}</span>

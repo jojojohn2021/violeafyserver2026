@@ -27,6 +27,7 @@ import {
   Check,
   Eye,
 } from 'lucide-react';
+import { useCRM } from '../store';
 
 interface OperationsOrder {
   id: string;
@@ -46,6 +47,7 @@ interface OperationsOrder {
 }
 
 export const OrderOperationsView: React.FC = () => {
+  const { salesOrders } = useCRM();
   const [activeSubTab, setActiveSubTab] = useState<'all' | 'packing' | 'dispatch' | 'delivery' | 'returns' | 'unpaid'>('all');
   const [orders, setOrders] = useState<OperationsOrder[]>([]);
   const [returnsList, setReturnsList] = useState<any[]>([]);
@@ -114,12 +116,22 @@ export const OrderOperationsView: React.FC = () => {
       if (activeSubTab === 'delivery') endpoint = '/api/operations/delivery/orders';
 
       const res = await fetch(endpoint);
-      const data = await res.json();
-      if (data.success) {
+      const contentType = res.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await res.json() : null;
+      if (data?.success) {
         setOrders(data.orders || []);
+      } else {
+        setOrders(salesOrders.map((order) => ({
+          ...order,
+          fulfilmentStatus: order.deliveryStatus === 'Delivered'
+            ? 'DELIVERED'
+            : order.deliveryStatus === 'Shipped'
+            ? 'DISPATCHED'
+            : 'NOT_STARTED',
+        })));
       }
 
-      if (activeSubTab === 'returns') {
+      if (activeSubTab === 'returns' && data?.success) {
         const retRes = await fetch('/api/operations/returns');
         const retData = await retRes.json();
         if (retData.success) {
@@ -135,7 +147,7 @@ export const OrderOperationsView: React.FC = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [activeSubTab]);
+  }, [activeSubTab, salesOrders]);
 
   const fetchOrderDetails = async (orderId: string) => {
     setDetailsLoading(true);

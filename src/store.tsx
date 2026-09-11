@@ -536,6 +536,23 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const customerPartners: Referral[] = fetchedCustomers.map(c => {
         const legacy = fetchedReferrals.find(r => r.id === c.id || r.referralId === c.referralCode || r.referralId === c.customerId || (r.mobileNumber && c.mobileNumber && r.mobileNumber.replace(/\D/g, '') === c.mobileNumber.replace(/\D/g, '')));
+        const uplineSponsorId =
+          c.referredById ||
+          c.parentId ||
+          (c as any).sponsorPartnerId ||
+          (c as any).sponsorId ||
+          (c as any).sponsorCode ||
+          (c as any).referredByCode ||
+          (c as any).referredBy ||
+          (c as any).referralmobileno ||
+          c.partnerName ||
+          legacy?.referredById ||
+          legacy?.parentId ||
+          (legacy as any)?.sponsorId ||
+          (legacy as any)?.partnerName ||
+          (legacy as any)?.referralmobileno ||
+          '';
+
         return {
           id: c.id,
           referralId: c.referralCode || c.customerId || `REF-${c.id}`,
@@ -551,8 +568,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           upiId: legacy?.upiId || '',
           createdAt: c.lastOrderDate || legacy?.createdAt || new Date().toISOString(),
           status: (c.status as any) || legacy?.status || 'Active',
-          referredById: c.referredById || legacy?.referredById || legacy?.parentId,
-          parentId: c.referredById || legacy?.parentId,
+          referredById: uplineSponsorId,
+          parentId: uplineSponsorId,
           partnerLevelId: c.partnerLevelId || legacy?.partnerLevelId,
           partnerLevelName: c.partnerLevelName || legacy?.partnerLevelName,
           totalSales: c.totalSales || legacy?.totalSales || c.totalSpent || 0,

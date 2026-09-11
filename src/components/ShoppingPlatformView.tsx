@@ -54,8 +54,22 @@ export default function ShoppingPlatformView() {
     updateProduct,
     initiatePaymentFlow,
     verifyPaymentFlow,
-    paymentGatewaySettings
+    paymentGatewaySettings,
+    commissionRules
   } = useCRM();
+
+  // Dynamic lookup for default commission rate per level
+  const getDefaultRate = (lvl: number) => {
+    const rule = (commissionRules || []).find(
+      (r: any) =>
+        (!r.product_id || r.product_id === null) &&
+        (!r.partner_id || r.partner_id === null) &&
+        Number(r.level) === lvl &&
+        r.source === 'Default' &&
+        r.status === 'Active'
+    );
+    return rule ? Number(rule.commission_value) : 0;
+  };
 
   // Pricing helper utilities
   const getProductPrice = (p: any) => {
@@ -1594,12 +1608,14 @@ export default function ShoppingPlatformView() {
 
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border dark:border-slate-750">
                         <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Direct Commission L1</span>
-                        <strong className="text-lg text-lime-500">10.0%</strong>
+                        <strong className="text-lg text-lime-500">{getDefaultRate(1)}%</strong>
                       </div>
 
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border dark:border-slate-750">
                         <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Level commissions</span>
-                        <strong className="text-xs text-orange-500 block mt-1">L2 (5.0%) | L3 (2.0%) | L4 (1.0%) | L5 (0.5%)</strong>
+                        <strong className="text-xs text-orange-500 block mt-1">
+                          L2 ({getDefaultRate(2)}%) | L3 ({getDefaultRate(3)}%) | L4 ({getDefaultRate(4)}%) | L5 ({getDefaultRate(5)}%)
+                        </strong>
                       </div>
                     </div>
 
@@ -1639,7 +1655,7 @@ export default function ShoppingPlatformView() {
                             <div className="w-7 h-7 rounded-full bg-lime-500/10 flex items-center justify-center text-lime-500 font-bold">L1</div>
                             <div>
                               <strong className="block text-slate-700 dark:text-slate-200">Sponsor Node: Arjun K.</strong>
-                              <span className="text-[10px] text-slate-400">10% commission on orders</span>
+                              <span className="text-[10px] text-slate-400">{getDefaultRate(1)}% commission on orders</span>
                             </div>
                           </div>
 
@@ -1648,7 +1664,7 @@ export default function ShoppingPlatformView() {
                               <div className="w-6 h-6 rounded-full bg-orange-500/10 flex items-center justify-center text-orange-500 font-bold">L2</div>
                               <div>
                                 <strong className="block text-slate-700 dark:text-slate-200">Indirect Sponsor: Preeti S.</strong>
-                                <span className="text-[10px] text-slate-400">5% override commission</span>
+                                <span className="text-[10px] text-slate-400">{getDefaultRate(2)}% override commission</span>
                               </div>
                             </div>
                           </div>

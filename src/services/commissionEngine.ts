@@ -1,4 +1,10 @@
 import { adminDb } from "../../firebase-admin";
+import {
+  resolveReferralChainAuthoritative,
+  findCustomerInCollections,
+  ResolvedChainResult,
+  ChainMember,
+} from "./referralChainService";
 
 export interface CommissionItemCalculation {
   productId: string;
@@ -17,6 +23,7 @@ export interface CommissionPreviewResult {
   success: boolean;
   orderId?: string;
   customerId?: string;
+  customerType?: 'ORGANIC' | 'REFERRED';
   commissions: CommissionItemCalculation[];
   totalCommission: number;
   error?: string;
@@ -34,76 +41,33 @@ export interface CommissionProcessResult {
 export const MAX_REFERRAL_LEVEL = 5;
 
 /**
- * Resolves referral chain up to MAX_REFERRAL_LEVEL (5) starting from a buyer customer.
- * CUSTOMERS database collection is the single source of truth for identity & hierarchy.
+ * Resolves transaction-relative referral chain starting from buyer customer up to L6.
+ * L1 = Transaction Customer (Primary)
+ * L2 = Immediate Upline
+ * L3 = Second Upline
+ * L4 = Third Upline
+ * L5 = Fourth Upline
+ * L6 = Fifth Upline (Termination Boundary - 0 Commission)
+ * L7 = NEVER generated!
  */
 export async function resolveReferralChain(
   buyerCustomerId: string,
   getDocsFn: (collection: string) => Promise<any[]>
 ): Promise<Array<{ level: number; customer: any }>> {
-  const customers = await getDocsFn("customers");
-  const referrals = await getDocsFn("referrals");
-
-  // Lookup buyer in customers first, fallback to referrals
-  let current = customers.find(
-    (c: any) =>
-      c.id === buyerCustomerId ||
-      c.customerId === buyerCustomerId ||
-      c.referralCode === buyerCustomerId ||
-      c.mobileNumber === buyerCustomerId
+  const result: ResolvedChainResult = await resolveReferralChainAuthoritative(
+    buyerCustomerId,
+    getDocsFn
   );
 
-  if (!current) {
-    current = referrals.find(
-      (r: any) => r.id === buyerCustomerId || r.referralId === buyerCustomerId || r.mobileNumber === buyerCustomerId
-    );
-  }
-
-  if (!current) return [];
-
-  const chain: Array<{ level: number; customer: any }> = [];
-  const visited = new Set<string>();
-  visited.add(String(current.id || current.customerId || current.referralId));
-
-  let level = 1;
-  while (level <= MAX_REFERRAL_LEVEL) {
-    const sponsorId = current.referredById || current.parentId || current.sponsorPartnerId || current.sponsorId;
-    if (!sponsorId) break;
-
-    // Lookup sponsor in customers first, fallback to referrals
-    let sponsor = customers.find(
-      (c: any) =>
-        c.id === sponsorId ||
-        c.customerId === sponsorId ||
-        c.referralCode === sponsorId ||
-        c.mobileNumber === sponsorId
-    );
-
-    if (!sponsor) {
-      sponsor = referrals.find(
-        (r: any) => r.id === sponsorId || r.referralId === sponsorId || r.mobileNumber === sponsorId
-      );
-    }
-
-    if (!sponsor) break;
-
-    const sponsorKey = String(sponsor.id || sponsor.customerId || sponsor.referralId);
-    if (visited.has(sponsorKey)) {
-      console.warn(`[COMMISSION ENGINE] Circular referral detected for sponsor ID ${sponsorKey}. Terminating chain.`);
-      break;
-    }
-
-    visited.add(sponsorKey);
-    chain.push({ level, customer: sponsor });
-    current = sponsor;
-    level++;
-  }
-
-  return chain;
+  return result.chain.map((member: ChainMember) => ({
+    level: member.level,
+    customer: member.customer,
+  }));
 }
 
 /**
  * Resolves effective commission rate for a product, beneficiary, and level.
+ * Level 6 is the termination boundary and receives NO commission (0%).
  */
 export async function resolveEffectiveCommissionRate(
   productId: string,
@@ -111,8 +75,19 @@ export async function resolveEffectiveCommissionRate(
   level: number,
   getDocsFn: (collection: string) => Promise<any[]>
 ): Promise<{ rate: number; ruleId: string; source: string }> {
+  // L6 is termination boundary - no commission
+  if (level >= 6) {
+    return {
+      rate: 0,
+      ruleId: `termination_boundary_l${level}`,
+      source: "Termination Boundary (No Commission)",
+    };
+  }
+
   const rules = await getDocsFn("commission_rules");
-  const activeRules = rules.filter((r: any) => r.status === "Active" && Number(r.level) === level);
+  const activeRules = rules.filter(
+    (r: any) => r.status === "Active" && Number(r.level) === level
+  );
 
   // 1. Partner + Product Specific Override
   const partnerProductOverride = activeRules.find(
@@ -153,13 +128,32 @@ export async function resolveEffectiveCommissionRate(
     };
   }
 
-  // 4. Hardcoded Fallback Rates (Level 1: 10%, 2: 8%, 3: 6%, 4: 4%, 5: 2%)
-  const fallbackRates: Record<number, number> = { 1: 10, 2: 8, 3: 6, 4: 4, 5: 2 };
+  // 4. Dynamic Fallback: if no default rule exists in commission_rules collection
   return {
-    rate: fallbackRates[level] || 0,
+    rate: 0,
     ruleId: `system_fallback_l${level}`,
-    source: "System Default Fallback",
+    source: "System Default (No Active Rule)",
   };
+}
+
+/**
+ * Calculates pre-GST product base amount per item, excluding GST, delivery charges, shipping, and taxes.
+ */
+export function calculatePreGstBaseAmount(item: any): number {
+  let unitPricePreGst = Number(item.priceBeforeGst || item.basePrice || 0);
+
+  if (!unitPricePreGst) {
+    const fullPrice = Number(item.price || item.unitPrice || item.totalValue || 0);
+    const gstRate = Number(item.gstRate || item.taxRate || 0);
+    if (gstRate > 0) {
+      unitPricePreGst = fullPrice / (1 + gstRate / 100);
+    } else {
+      unitPricePreGst = fullPrice;
+    }
+  }
+
+  const qty = Number(item.quantity || 1);
+  return Math.round(unitPricePreGst * qty * 100) / 100;
 }
 
 /**
@@ -205,12 +199,13 @@ export async function calculateCommissionPreviewInternal(
       };
     }
 
-    const chain = await resolveReferralChain(customerId, getDocsFn);
-    if (chain.length === 0) {
+    const resolved = await resolveReferralChainAuthoritative(customerId, getDocsFn);
+    if (resolved.chain.length === 0) {
       return {
         success: true,
         orderId: order?.id || orderIdOrDetails.orderId,
         customerId,
+        customerType: resolved.customerType,
         commissions: [],
         totalCommission: 0,
       };
@@ -219,28 +214,36 @@ export async function calculateCommissionPreviewInternal(
     const calculations: CommissionItemCalculation[] = [];
     let totalCommission = 0;
 
-    for (const { level, customer: beneficiary } of chain) {
+    for (const member of resolved.chain) {
+      // L6 is termination boundary - no commission
+      if (member.level >= 6) continue;
+
+      const beneficiary = member.customer;
+      const beneficiaryId = member.customerId;
+
       for (let idx = 0; idx < products.length; idx++) {
         const item = products[idx];
         const productId = item.productId || item.id || `item_${idx}`;
         const orderItemId = `${order?.id || "preview"}_${productId}`;
-        const baseAmount = Number(item.price || item.totalValue || 0) * Number(item.quantity || 1);
+        const baseAmount = calculatePreGstBaseAmount(item);
 
         const { rate, ruleId, source } = await resolveEffectiveCommissionRate(
           productId,
-          beneficiary.id,
-          level,
+          beneficiaryId,
+          member.level,
           getDocsFn
         );
+
+        if (rate <= 0) continue;
 
         const commAmount = Math.round(((baseAmount * rate) / 100) * 100) / 100;
 
         calculations.push({
           productId,
           orderItemId,
-          beneficiaryCustomerId: beneficiary.id || beneficiary.customerId,
-          beneficiaryCustomerName: beneficiary.name || beneficiary.customerName,
-          level,
+          beneficiaryCustomerId: beneficiaryId,
+          beneficiaryCustomerName: member.customerName,
+          level: member.level,
           commissionRate: rate,
           commissionBaseAmount: baseAmount,
           commissionAmount: commAmount,
@@ -256,6 +259,7 @@ export async function calculateCommissionPreviewInternal(
       success: true,
       orderId: order?.id || orderIdOrDetails.orderId,
       customerId,
+      customerType: resolved.customerType,
       commissions: calculations,
       totalCommission: Math.round(totalCommission * 100) / 100,
     };
@@ -279,17 +283,7 @@ export async function evaluatePartnerLevelInternal(
   saveDocFn: (collection: string, doc: any) => Promise<void>
 ) {
   try {
-    const customers = await getDocsFn("customers");
-    const referrals = await getDocsFn("referrals");
-
-    let partner = customers.find((c: any) => c.id === partnerId || c.customerId === partnerId);
-    let col = "customers";
-
-    if (!partner) {
-      partner = referrals.find((r: any) => r.id === partnerId || r.referralId === partnerId);
-      col = "referrals";
-    }
-
+    const partner = await findCustomerInCollections(partnerId, getDocsFn);
     if (!partner) return;
 
     const orders = await getDocsFn("sales_orders");
@@ -301,7 +295,10 @@ export async function evaluatePartnerLevelInternal(
         o.customerId === partner.customerId
     );
 
-    const totalSales = partnerOrders.reduce((sum: number, o: any) => sum + Number(o.totalValue || 0), 0);
+    const totalSales = partnerOrders.reduce(
+      (sum: number, o: any) => sum + Number(o.totalValue || 0),
+      0
+    );
     const levels = await getDocsFn("performance_levels");
 
     const activeLevels = levels
@@ -311,7 +308,12 @@ export async function evaluatePartnerLevelInternal(
     const qualifiedLevel = activeLevels.find((l: any) => totalSales >= Number(l.sales_amount));
 
     if (qualifiedLevel && partner.partnerLevelId !== qualifiedLevel.id) {
-      await saveDocFn(col, {
+      const customers = await getDocsFn("customers");
+      const targetCol = customers.some((c: any) => c.id === partner.id)
+        ? "customers"
+        : "referrals";
+
+      await saveDocFn(targetCol, {
         ...partner,
         totalSales,
         partnerLevelId: qualifiedLevel.id,
@@ -326,7 +328,7 @@ export async function evaluatePartnerLevelInternal(
 
 /**
  * Server-authoritative commission processing & posting.
- * Enforces transaction existence, payment eligibility, 5-level hierarchy, idempotency, atomic persistence, and audit.
+ * Enforces transaction existence, pre-GST base, L1-L5 commission eligibility, L6 boundary, idempotency, atomic persistence.
  */
 export async function processOrderCommissionsAuthoritative(
   orderId: string,
@@ -341,45 +343,48 @@ export async function processOrderCommissionsAuthoritative(
     );
 
     if (!order) {
-      return { success: false, count: 0, transactions: [], totalCommissionPosted: 0, error: `Order ${orderId} not found` };
+      return {
+        success: false,
+        count: 0,
+        transactions: [],
+        totalCommissionPosted: 0,
+        error: `Order ${orderId} not found`,
+      };
     }
 
     if (order.deliveryStatus === "Cancelled" || order.paymentStatus === "Refunded") {
-      return { success: false, count: 0, transactions: [], totalCommissionPosted: 0, error: `Order ${orderId} is cancelled or refunded` };
+      return {
+        success: false,
+        count: 0,
+        transactions: [],
+        totalCommissionPosted: 0,
+        error: `Order ${orderId} is cancelled or refunded`,
+      };
     }
 
-    const customers = await getDocsFn("customers");
-    const referrals = await getDocsFn("referrals");
-
-    // Resolve purchasing customer from CUSTOMERS first
-    let buyerCustomer = customers.find(
-      (c: any) =>
-        (order.customerId && (c.id === order.customerId || c.customerId === order.customerId)) ||
-        (order.referralCode && (c.referralCode === order.referralCode || c.id === order.referralCode))
+    // Resolve purchasing customer
+    const buyerCustomer = await findCustomerInCollections(
+      order.customerId || order.referralCode || order.contactNo,
+      getDocsFn
     );
 
-    if (!buyerCustomer && order.contactNo) {
-      buyerCustomer = customers.find((c: any) => c.mobileNumber === order.contactNo);
-    }
-
-    // Fallback to legacy referrals collection if customer not in customers table
     if (!buyerCustomer) {
-      buyerCustomer = referrals.find(
-        (r: any) =>
-          (order.referralCode && (r.referralId === order.referralCode || r.id === order.referralCode)) ||
-          (order.customerId && r.id === order.customerId) ||
-          (order.contactNo && r.mobileNumber === order.contactNo)
-      );
+      return {
+        success: true,
+        count: 0,
+        transactions: [],
+        totalCommissionPosted: 0,
+        error: "No purchasing customer found for order",
+      };
     }
 
-    if (!buyerCustomer) {
-      return { success: true, count: 0, transactions: [], totalCommissionPosted: 0, error: "No purchasing customer found for order" };
-    }
+    const buyerId = String(
+      buyerCustomer.id || buyerCustomer.customerId || buyerCustomer.referralCode
+    );
 
-    const buyerId = String(buyerCustomer.id || buyerCustomer.customerId || buyerCustomer.referralId);
-    const chain = await resolveReferralChain(buyerId, getDocsFn);
+    const resolved = await resolveReferralChainAuthoritative(buyerId, getDocsFn);
 
-    if (chain.length === 0) {
+    if (resolved.chain.length === 0) {
       return { success: true, count: 0, transactions: [], totalCommissionPosted: 0 };
     }
 
@@ -389,8 +394,12 @@ export async function processOrderCommissionsAuthoritative(
 
     const products = Array.isArray(order.products) ? order.products : [];
 
-    for (const { level, customer: beneficiary } of chain) {
-      const beneficiaryId = String(beneficiary.id || beneficiary.customerId || beneficiary.referralId);
+    for (const member of resolved.chain) {
+      // L6 is termination boundary - no commission
+      if (member.level >= 6) continue;
+
+      const beneficiary = member.customer;
+      const beneficiaryId = member.customerId;
 
       for (let idx = 0; idx < products.length; idx++) {
         const item = products[idx];
@@ -403,20 +412,30 @@ export async function processOrderCommissionsAuthoritative(
             String(tx.order_id) === String(order.id) &&
             String(tx.order_item_id) === String(orderItemId) &&
             String(tx.beneficiary_partner_id || tx.beneficiary_customer_id) === beneficiaryId &&
-            Number(tx.level) === level &&
+            Number(tx.level) === member.level &&
             tx.status !== "REVERSED"
         );
 
         if (isDuplicate) {
-          console.info(`[COMMISSION ENGINE] Idempotency guard: skipping existing commission for Order ${order.id}, Item ${productId}, Beneficiary ${beneficiaryId}, Level ${level}`);
+          console.info(
+            `[COMMISSION ENGINE] Idempotency guard: skipping existing commission for Order ${order.id}, Item ${productId}, Beneficiary ${beneficiaryId}, Level ${member.level}`
+          );
           continue;
         }
 
-        const { rate, ruleId } = await resolveEffectiveCommissionRate(productId, beneficiaryId, level, getDocsFn);
-        const baseAmount = Number(item.price || item.totalValue || 0) * Number(item.quantity || 1);
+        const { rate, ruleId } = await resolveEffectiveCommissionRate(
+          productId,
+          beneficiaryId,
+          member.level,
+          getDocsFn
+        );
+
+        if (rate <= 0) continue;
+
+        const baseAmount = calculatePreGstBaseAmount(item);
         const commissionAmount = Math.round(((baseAmount * rate) / 100) * 100) / 100;
 
-        const txnId = `comm_${order.id}_${productId}_${beneficiaryId}_L${level}`;
+        const txnId = `comm_${order.id}_${productId}_${beneficiaryId}_L${member.level}`;
         const txn = {
           id: txnId,
           order_id: order.id,
@@ -425,7 +444,7 @@ export async function processOrderCommissionsAuthoritative(
           buyer_customer_id: buyerId,
           beneficiary_partner_id: beneficiaryId,
           beneficiary_customer_id: beneficiaryId,
-          level,
+          level: member.level,
           commission_rate: rate,
           commission_base_amount: baseAmount,
           commission_amount: commissionAmount,
@@ -441,11 +460,15 @@ export async function processOrderCommissionsAuthoritative(
         newTransactions.push(txn);
         totalPosted += commissionAmount;
 
-        // ATOMIC WALLET / EARNINGS UPDATE: Update customer earnings record
+        // ATOMIC WALLET / EARNINGS UPDATE
         const currentEarned = Number(beneficiary.commissionEarned || 0) + commissionAmount;
         const currentPayable = Number(beneficiary.commissionPayable || 0) + commissionAmount;
 
-        const targetCollection = customers.some((c: any) => c.id === beneficiary.id) ? "customers" : "referrals";
+        const customers = await getDocsFn("customers");
+        const targetCollection = customers.some((c: any) => c.id === beneficiary.id)
+          ? "customers"
+          : "referrals";
+
         await saveDocFn(targetCollection, {
           ...beneficiary,
           commissionEarned: Math.round(currentEarned * 100) / 100,

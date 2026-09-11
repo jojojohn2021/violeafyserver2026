@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useCRM } from '../store';
 import { PaymentTransaction, Coupon, DeliveryCharge } from '../types';
 import BrandCustomizer from './BrandCustomizer';
-import PaymentGatewaySettings from './PaymentGatewaySettings';
 import FormatInvoiceSettings from './FormatInvoiceSettings';
 import { 
   Settings, Shield, RefreshCw, Search, Info, 
@@ -32,7 +31,7 @@ export default function SettingsView() {
     deleteDeliveryCharge
   } = useCRM();
 
-  const [activeTab, setActiveTab] = useState<'gateways' | 'brand' | 'transactions' | 'refunds' | 'coupons' | 'returns' | 'delivery_charges' | 'format_invoice'>('gateways');
+  const [activeTab, setActiveTab] = useState<'brand' | 'transactions' | 'refunds' | 'coupons' | 'returns' | 'delivery_charges' | 'format_invoice'>('brand');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTx, setSelectedTx] = useState<PaymentTransaction | null>(null);
   const [selectedTxTab, setSelectedTxTab] = useState<'info' | 'timeline' | 'audit'>('info');
@@ -45,68 +44,6 @@ export default function SettingsView() {
   const [modalRefunding, setModalRefunding] = useState(false);
   const [modalRefundError, setModalRefundError] = useState<string | null>(null);
   const [modalRefundSuccess, setModalRefundSuccess] = useState<string | null>(null);
-
-  // Helper to generate simulated PayU payloads based on transaction details
-  const getPayUPayloads = (tx: PaymentTransaction) => {
-    const key = 'gtKFFx';
-    const salt = 'eCwWELSp';
-    const productInfo = "Leafy Server Organic Grocery Checkout Bundle";
-    const firstname = "Leafy Server Shopper";
-    const email = "shopper@Leafy Server.com";
-    
-    const requestPayload = {
-      key: key,
-      txnid: tx.id,
-      amount: tx.amount.toFixed(2),
-      productinfo: productInfo,
-      firstname: firstname,
-      email: email,
-      phone: "9876543210",
-      surl: `${window.location.origin}/api/payment/verify`,
-      furl: `${window.location.origin}/api/payment/verify`,
-      hash: "6b360b9794e776e625a25752c0068a0... (SHA-512 Secure Hash)"
-    };
-
-    const responsePayload = tx.status === 'Success' ? {
-      mihpayid: "403998711" + tx.id.slice(-6),
-      mode: tx.paymentMethod === 'Credit Card' ? 'CC' : tx.paymentMethod === 'Debit Card' ? 'DC' : tx.paymentMethod === 'UPI' ? 'UPI' : 'NB',
-      status: "success",
-      unmappedstatus: "captured",
-      key: key,
-      txnid: tx.id,
-      amount: tx.amount.toFixed(2),
-      cardCategory: "domestic",
-      discount: "0.00",
-      additional_charges: "0.00",
-      productinfo: productInfo,
-      firstname: firstname,
-      email: email,
-      hash: "3775f0f08cb388a18357a702b85e05c... (SHA-512 Reverse Hash)",
-      bank_ref_num: "BANKREF" + tx.id.slice(-8),
-      bankcode: tx.paymentMethod === 'UPI' ? 'UPI' : 'VISA',
-      error: "SUCCESS",
-      error_Message: "No Error"
-    } : tx.status === 'Failed' ? {
-      mihpayid: "403998711" + tx.id.slice(-6),
-      mode: "CC",
-      status: "failure",
-      unmappedstatus: "failed",
-      key: key,
-      txnid: tx.id,
-      amount: tx.amount.toFixed(2),
-      additional_charges: "0.00",
-      productinfo: productInfo,
-      firstname: firstname,
-      email: email,
-      hash: "8cb388a18357a702b85e05c...",
-      error: "E103",
-      error_Message: tx.errorMessage || "Card declined or insufficient funds (Simulated Gateway Error)"
-    } : {
-      info: "Payment transaction is in 'Initiated' state. Response payload will be populated once transaction completes."
-    };
-
-    return { requestPayload, responsePayload };
-  };
 
   // Refund local states
   const [refundPaymentId, setRefundPaymentId] = useState('');
@@ -370,19 +307,6 @@ export default function SettingsView() {
       {/* Navigation Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3">
         <button
-          onClick={() => setActiveTab('gateways')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 ${
-            activeTab === 'gateways' 
-              ? 'bg-indigo-600 text-white shadow-lg' 
-              : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
-          }`}
-          id="tab-settings-gateways"
-        >
-          <CreditCard className="w-3.5 h-3.5" />
-          PayU Configuration
-        </button>
-
-        <button
           onClick={() => setActiveTab('brand')}
           className={`px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 ${
             activeTab === 'brand' 
@@ -475,15 +399,10 @@ export default function SettingsView() {
       </div>
 
       {/* Main Content Grid */}
-      <div className={(activeTab === 'brand' || activeTab === 'gateways' || activeTab === 'delivery_charges' || activeTab === 'format_invoice') ? "w-full" : "grid grid-cols-1 lg:grid-cols-3 gap-6"}>
+      <div className={(activeTab === 'brand' || activeTab === 'delivery_charges' || activeTab === 'format_invoice') ? "w-full" : "grid grid-cols-1 lg:grid-cols-3 gap-6"}>
         
         {/* LEFT/MAIN COLUMN */}
-        <div className={(activeTab === 'brand' || activeTab === 'gateways' || activeTab === 'delivery_charges' || activeTab === 'format_invoice') ? "w-full" : "lg:col-span-2 space-y-6"}>
-
-          {/* TAB: PAYU GATEWAY CONFIGURATION */}
-          {activeTab === 'gateways' && (
-            <PaymentGatewaySettings />
-          )}
+        <div className={(activeTab === 'brand' || activeTab === 'delivery_charges' || activeTab === 'format_invoice') ? "w-full" : "lg:col-span-2 space-y-6"}>
 
           {/* TAB: BRAND STYLE CUSTOMIZER */}
           {activeTab === 'brand' && (
@@ -1200,69 +1119,30 @@ export default function SettingsView() {
                         </h4>
                         
                         <div className="space-y-5 pl-2.5 border-l border-slate-800 mt-2">
-                          {/* Chronological events merge with payloads */}
-                          {(selectedTx.logs || []).map((log, idx) => {
-                            const showReqPayload = log.action === 'INITIATED';
-                            const showResPayload = (log.action === 'VERIFIED' || log.action === 'FAILED');
-                            const payloads = getPayUPayloads(selectedTx);
-                            
-                            return (
-                              <div key={idx} className="relative pl-4 text-[10.5px] space-y-2">
-                                <span className={`absolute -left-[14.5px] top-1.5 w-2 h-2 rounded-full ${
-                                  log.action === 'VERIFIED' ? 'bg-emerald-500' : log.action === 'FAILED' ? 'bg-red-500' : 'bg-indigo-400'
-                                } border-2 border-[#0d0d10]`} />
-                                
-                                <div className="flex items-center justify-between">
-                                  <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase font-mono tracking-wider ${
-                                    log.action === 'VERIFIED' 
-                                      ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/40'
-                                      : log.action === 'FAILED'
-                                        ? 'bg-red-950/40 text-red-400 border border-red-900/40'
-                                        : 'bg-slate-900 text-slate-400 border border-slate-800'
-                                  }`}>
-                                    {log.action}
-                                  </span>
-                                  <span className="text-[8px] text-slate-500 font-mono">
-                                    {new Date(log.timestamp).toLocaleTimeString()}
-                                  </span>
-                                </div>
-                                
-                                <p className="text-slate-300 font-medium leading-relaxed">{log.details}</p>
-                                
-                                {/* If INITIATED, display outbound request payload */}
-                                {showReqPayload && (
-                                  <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-xl mt-2.5 space-y-1.5">
-                                    <div className="flex items-center justify-between border-b border-slate-900 pb-1.5">
-                                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans">
-                                        <ArrowUpRight className="w-3 h-3 text-indigo-400" />
-                                        PayU Request Payload
-                                      </span>
-                                      <span className="text-[8px] font-mono text-slate-600 uppercase">Outbound HTTPS POST</span>
-                                    </div>
-                                    <pre className="text-[9px] font-mono text-indigo-300 bg-slate-950/50 p-2 rounded-lg overflow-x-auto max-h-[140px] leading-relaxed">
-                                      {JSON.stringify(payloads.requestPayload, null, 2)}
-                                    </pre>
-                                  </div>
-                                )}
-
-                                {/* If VERIFIED / FAILED, display callback / API response payload */}
-                                {showResPayload && (
-                                  <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-xl mt-2.5 space-y-1.5">
-                                    <div className="flex items-center justify-between border-b border-slate-900 pb-1.5">
-                                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1 font-sans">
-                                        <ArrowDownLeft className="w-3 h-3 text-emerald-400" />
-                                        PayU Callback Response
-                                      </span>
-                                      <span className="text-[8px] font-mono text-slate-600 uppercase">Inbound HTTPS POST</span>
-                                    </div>
-                                    <pre className="text-[9px] font-mono text-emerald-300 bg-slate-950/50 p-2 rounded-lg overflow-x-auto max-h-[160px] leading-relaxed">
-                                      {JSON.stringify(payloads.responsePayload, null, 2)}
-                                    </pre>
-                                  </div>
-                                )}
+                          {(selectedTx.logs || []).map((log, idx) => (
+                            <div key={idx} className="relative pl-4 text-[10.5px] space-y-2">
+                              <span className={`absolute -left-[14.5px] top-1.5 w-2 h-2 rounded-full ${
+                                log.action === 'VERIFIED' ? 'bg-emerald-500' : log.action === 'FAILED' ? 'bg-red-500' : 'bg-indigo-400'
+                              } border-2 border-[#0d0d10]`} />
+                              
+                              <div className="flex items-center justify-between">
+                                <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase font-mono tracking-wider ${
+                                  log.action === 'VERIFIED' 
+                                    ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/40'
+                                    : log.action === 'FAILED'
+                                      ? 'bg-red-950/40 text-red-400 border border-red-900/40'
+                                      : 'bg-slate-900 text-slate-400 border border-slate-800'
+                                }`}>
+                                  {log.action}
+                                </span>
+                                <span className="text-[8px] text-slate-500 font-mono">
+                                  {new Date(log.timestamp).toLocaleTimeString()}
+                                </span>
                               </div>
-                            );
-                          })}
+                              
+                              <p className="text-slate-300 font-medium leading-relaxed">{log.details}</p>
+                            </div>
+                          ))}
                         </div>
                       </div>
 

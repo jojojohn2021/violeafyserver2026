@@ -12,6 +12,11 @@ import {
   processOrderCommissionsAuthoritative,
   refundOrderCommissionsAuthoritative,
 } from "./src/services/commissionEngine";
+import {
+  ReferralChainService,
+  resolveReferralChainAuthoritative,
+  findCustomerInCollections,
+} from "./src/services/referralChainService";
 import { OperationsService } from "./src/services/operationsService";
 
 dotenv.config();
@@ -450,6 +455,35 @@ app.get("/api/db/:col/:id", async (req, res) => {
 
 app.post("/api/db/:col", async (req, res) => {
   try {
+    const col = req.params.col;
+
+    // Enforce referral restrictions: NO new referral creation / loop creation via generic DB proxy
+    if (col === "referrals" || col === "referral_chains") {
+      const docId = req.body?.id;
+      const existingDocs = await getCollectionDocs(col);
+      const existing = docId ? existingDocs.find((d: any) => String(d.id) === String(docId)) : null;
+
+      if (!existing) {
+        return res.status(400).json({
+          success: false,
+          error: "REFERRAL_RELATIONSHIP_NOT_ALLOWED",
+          message: "Creating a new referral relationship is not permitted."
+        });
+      }
+
+      const proposedSponsor = req.body?.referredById || req.body?.parentId;
+      if (proposedSponsor) {
+        const validation = await ReferralChainService.validateEdit(docId, proposedSponsor, getCollectionDocs);
+        if (!validation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: validation.error || "REFERRAL_EDIT_REJECTED",
+            message: validation.message || "Referral relationship edit is not permitted."
+          });
+        }
+      }
+    }
+
     await saveCollectionDoc(req.params.col, req.body);
     // Keep the authoritative payments.orderId record in sync whenever a sales order
     // is created/updated directly (e.g. manual paymentStatus edits from Sales Orders view).
@@ -650,17 +684,28 @@ app.post("/api/payment/test-connection", async (req, res) => {
 async function ensureDefaultCommissionRules() {
   try {
     const rules = await getCollectionDocs("commission_rules");
-    const defaultRules = rules.filter((r: any) => !r.product_id && !r.partner_id && r.source === "Default");
-    if (defaultRules.length === 0) {
-      const initialDefaults = [
-        { id: "rule_default_l1", level: 1, commission_type: "Percentage", commission_value: 10, source: "Default", status: "Active", created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-        { id: "rule_default_l2", level: 2, commission_type: "Percentage", commission_value: 8, source: "Default", status: "Active", created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-        { id: "rule_default_l3", level: 3, commission_type: "Percentage", commission_value: 6, source: "Default", status: "Active", created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-        { id: "rule_default_l4", level: 4, commission_type: "Percentage", commission_value: 4, source: "Default", status: "Active", created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-        { id: "rule_default_l5", level: 5, commission_type: "Percentage", commission_value: 2, source: "Default", status: "Active", created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      ];
-      for (const rule of initialDefaults) {
-        await saveCollectionDoc("commission_rules", rule);
+    const targetDefaults = [
+      { id: "rule_default_l1", level: 1, commission_type: "Percentage", commission_value: 5, source: "Default", status: "Active" },
+      { id: "rule_default_l2", level: 2, commission_type: "Percentage", commission_value: 6, source: "Default", status: "Active" },
+      { id: "rule_default_l3", level: 3, commission_type: "Percentage", commission_value: 5, source: "Default", status: "Active" },
+      { id: "rule_default_l4", level: 4, commission_type: "Percentage", commission_value: 4, source: "Default", status: "Active" },
+      { id: "rule_default_l5", level: 5, commission_type: "Percentage", commission_value: 3, source: "Default", status: "Active" },
+    ];
+
+    for (const def of targetDefaults) {
+      const existing = rules.find((r: any) => (!r.product_id || r.product_id === null) && (!r.partner_id || r.partner_id === null) && Number(r.level) === def.level && r.source === "Default");
+      if (!existing) {
+        await saveCollectionDoc("commission_rules", {
+          ...def,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      } else if (Number(existing.commission_value) !== def.commission_value) {
+        await saveCollectionDoc("commission_rules", {
+          ...existing,
+          commission_value: def.commission_value,
+          updated_at: new Date().toISOString()
+        });
       }
     }
   } catch (err) {
@@ -712,8 +757,7 @@ async function resolveEffectiveCommissionRate(productId: string, beneficiaryPart
     return { rate: Number(defaultRule.commission_value), ruleId: defaultRule.id, source: "System Default" };
   }
 
-  const fallbackRates: Record<number, number> = { 1: 10, 2: 8, 3: 6, 4: 4, 5: 2 };
-  return { rate: fallbackRates[level] || 0, ruleId: "system_fallback", source: "System Default Fallback" };
+  return { rate: 0, ruleId: "system_fallback", source: "System Default (No Active Rule)" };
 }
 
 async function evaluatePartnerLevel(partnerId: string) {
@@ -771,6 +815,53 @@ app.get("/api/admin/referral-partners", async (req, res) => {
     // CUSTOMERS table is single source of truth for referral identity
     const customerPartners = customers.map((c: any) => {
       const legacy = referrals.find((r: any) => r.id === c.id || r.referralId === c.referralCode || (r.mobileNumber && c.mobileNumber && r.mobileNumber.replace(/\D/g, "") === c.mobileNumber.replace(/\D/g, "")));
+      const ownKeys = new Set<string>();
+      if (c.id) ownKeys.add(String(c.id).trim().toLowerCase());
+      if (c.customerId) ownKeys.add(String(c.customerId).trim().toLowerCase());
+      if (c.referralCode) ownKeys.add(String(c.referralCode).trim().toLowerCase());
+      const ownMobileDigits = (c.mobileNumber || "").replace(/\D/g, "");
+
+      const candidates = [
+        c.referredById,
+        c.parentId,
+        c.sponsorPartnerId,
+        c.sponsorId,
+        c.sponsorCode,
+        c.referredByCode,
+        c.referredBy,
+        c.referralmobileno,
+        legacy?.referredById,
+        legacy?.parentId,
+        legacy?.sponsorId,
+        legacy?.referralmobileno,
+      ];
+
+      let uplineSponsorId = "";
+      for (const rawCandidate of candidates) {
+        if (!rawCandidate) continue;
+        const candStr = String(rawCandidate).trim();
+        if (!candStr) continue;
+
+        const candLower = candStr.toLowerCase();
+        const candDigits = candStr.replace(/\D/g, "");
+
+        if (ownKeys.has(candLower)) continue;
+        if (
+          candDigits &&
+          ownMobileDigits &&
+          candDigits.length >= 7 &&
+          ownMobileDigits.length >= 7 &&
+          (candDigits === ownMobileDigits ||
+            candDigits.endsWith(ownMobileDigits) ||
+            ownMobileDigits.endsWith(candDigits))
+        ) {
+          continue;
+        }
+
+        uplineSponsorId = candStr;
+        break;
+      }
+
       return {
         id: c.id,
         referralId: c.referralCode || c.customerId || `REF-${c.id}`,
@@ -779,7 +870,8 @@ app.get("/api/admin/referral-partners", async (req, res) => {
         email: c.email || "",
         address: c.address || "",
         status: c.status || legacy?.status || "Active",
-        referredById: c.referredById || legacy?.referredById || legacy?.parentId,
+        referredById: uplineSponsorId,
+        parentId: uplineSponsorId,
         partnerLevelId: c.partnerLevelId || legacy?.partnerLevelId,
         partnerLevelName: c.partnerLevelName || legacy?.partnerLevelName,
         totalSales: c.totalSales || legacy?.totalSales || c.totalSpent || 0,
@@ -812,6 +904,53 @@ app.get("/api/admin/referral-partners/:id", async (req, res) => {
     const customer = customers.find((c: any) => c.id === req.params.id || c.customerId === req.params.id || c.referralCode === req.params.id);
     if (customer) {
       const legacy = referrals.find((r: any) => r.id === customer.id);
+      const ownKeys = new Set<string>();
+      if (customer.id) ownKeys.add(String(customer.id).trim().toLowerCase());
+      if (customer.customerId) ownKeys.add(String(customer.customerId).trim().toLowerCase());
+      if (customer.referralCode) ownKeys.add(String(customer.referralCode).trim().toLowerCase());
+      const ownMobileDigits = (customer.mobileNumber || "").replace(/\D/g, "");
+
+      const candidates = [
+        customer.referredById,
+        customer.parentId,
+        customer.sponsorPartnerId,
+        customer.sponsorId,
+        customer.sponsorCode,
+        customer.referredByCode,
+        customer.referredBy,
+        customer.referralmobileno,
+        legacy?.referredById,
+        legacy?.parentId,
+        legacy?.sponsorId,
+        legacy?.referralmobileno,
+      ];
+
+      let uplineSponsorId = "";
+      for (const rawCandidate of candidates) {
+        if (!rawCandidate) continue;
+        const candStr = String(rawCandidate).trim();
+        if (!candStr) continue;
+
+        const candLower = candStr.toLowerCase();
+        const candDigits = candStr.replace(/\D/g, "");
+
+        if (ownKeys.has(candLower)) continue;
+        if (
+          candDigits &&
+          ownMobileDigits &&
+          candDigits.length >= 7 &&
+          ownMobileDigits.length >= 7 &&
+          (candDigits === ownMobileDigits ||
+            candDigits.endsWith(ownMobileDigits) ||
+            ownMobileDigits.endsWith(candDigits))
+        ) {
+          continue;
+        }
+
+        uplineSponsorId = candStr;
+        break;
+      }
+
       const partner = {
         id: customer.id,
         referralId: customer.referralCode || customer.customerId || `REF-${customer.id}`,
@@ -820,7 +959,8 @@ app.get("/api/admin/referral-partners/:id", async (req, res) => {
         email: customer.email || "",
         address: customer.address || "",
         status: customer.status || legacy?.status || "Active",
-        referredById: customer.referredById || legacy?.referredById || legacy?.parentId,
+        referredById: uplineSponsorId,
+        parentId: uplineSponsorId,
         partnerLevelId: customer.partnerLevelId || legacy?.partnerLevelId,
         partnerLevelName: customer.partnerLevelName || legacy?.partnerLevelName,
         totalSales: customer.totalSales || legacy?.totalSales || customer.totalSpent || 0,
@@ -1136,6 +1276,113 @@ app.patch("/api/admin/commission-transactions/:id/status", async (req, res) => {
     return res.json({ success: true, transaction: updated });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || "Failed to update transaction status" });
+  }
+});
+
+// ==========================================
+// RESTRICTED REFERRAL CHAIN API ENDPOINTS
+// ==========================================
+
+// Prohibited Referral Creation
+app.post("/api/partners/apply-referral", async (req, res) => {
+  return res.status(400).json({
+    success: false,
+    error: "REFERRAL_RELATIONSHIP_NOT_ALLOWED",
+    message: "Creating a new referral relationship is not permitted."
+  });
+});
+
+app.post("/api/referrals/create", async (req, res) => {
+  return res.status(400).json({
+    success: false,
+    error: "REFERRAL_RELATIONSHIP_NOT_ALLOWED",
+    message: "Creating a new referral relationship is not permitted."
+  });
+});
+
+// View Referral Info & Resolved Chain
+app.get("/api/partners/referral-info", async (req, res) => {
+  try {
+    const customerId = String(req.query.customerId || req.query.partnerId || "");
+    if (!customerId) return res.status(400).json({ error: "customerId query parameter is required" });
+
+    const resolved = await resolveReferralChainAuthoritative(customerId, getCollectionDocs);
+    return res.json({ success: true, customerId, referralChain: resolved });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || "Failed to fetch referral info" });
+  }
+});
+
+// View Commission History
+app.get("/api/partners/commission-history", async (req, res) => {
+  try {
+    const customerId = String(req.query.customerId || req.query.partnerId || "");
+    if (!customerId) return res.status(400).json({ error: "customerId query parameter is required" });
+
+    const txs = await getCollectionDocs("commission_transactions");
+    const history = txs.filter(
+      (t: any) =>
+        String(t.beneficiary_partner_id) === String(customerId) ||
+        String(t.beneficiary_customer_id) === String(customerId)
+    );
+    return res.json({ success: true, customerId, history });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || "Failed to fetch commission history" });
+  }
+});
+
+// Validate Referral Chain
+app.post("/api/referrals/validate-chain", async (req, res) => {
+  try {
+    const { customerId } = req.body;
+    if (!customerId) return res.status(400).json({ error: "customerId is required" });
+
+    const resolved = await resolveReferralChainAuthoritative(customerId, getCollectionDocs);
+    return res.json({ success: true, customerId, ...resolved });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || "Chain validation failed" });
+  }
+});
+
+// Validate Referral Edit
+app.post("/api/referrals/validate-edit", async (req, res) => {
+  try {
+    const { customerId, proposedSponsorId } = req.body;
+    const validation = await ReferralChainService.validateEdit(customerId, proposedSponsorId, getCollectionDocs);
+    return res.json(validation);
+  } catch (err: any) {
+    return res.status(500).json({ valid: false, error: "VALIDATION_FAILED", message: err?.message || "Validation failed" });
+  }
+});
+
+// Edit Existing Relationship (Authorized Admin)
+app.put("/api/admin/referral-partners/:id/sponsor", async (req, res) => {
+  try {
+    const customerId = req.params.id;
+    const { proposedSponsorId } = req.body;
+
+    const validation = await ReferralChainService.validateEdit(customerId, proposedSponsorId, getCollectionDocs);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, ...validation });
+    }
+
+    const customer = await findCustomerInCollections(customerId, getCollectionDocs);
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const updated = {
+      ...customer,
+      referredById: proposedSponsorId,
+      parentId: proposedSponsorId,
+      updated_at: new Date().toISOString()
+    };
+
+    const customersDocs = await getCollectionDocs("customers");
+    const targetCol = customersDocs.some((c: any) => c.id === customer.id) ? "customers" : "referrals";
+
+    await saveCollectionDoc(targetCol, updated);
+    return res.json({ success: true, message: "Referral relationship updated successfully", partner: updated });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || "Failed to update sponsor relationship" });
   }
 });
 

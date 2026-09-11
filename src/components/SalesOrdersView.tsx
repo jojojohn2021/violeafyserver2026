@@ -14,7 +14,7 @@ export default function SalesOrdersView() {
   const { 
     hasAccess, salesOrders, addSalesOrder, updateSalesOrder, deleteSalesOrder, deleteAllSalesOrders,
     customers, products, updateProduct, referrals, addCustomer, currentUser,
-    updateCustomer, referralChains
+    updateCustomer, referralChains, reloadFirestoreData
   } = useCRM();
 
   // New Order Form state
@@ -24,11 +24,11 @@ export default function SalesOrdersView() {
   const [updatePayload, setUpdatePayload] = useState<any>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [selectedMethod, setSelectedMethod] = useState<'Cash' | 'Bank Transfer' | 'Stripe' | 'UPI' | 'Credit Card'>('Bank Transfer');
-  const [paymentStatus, setPaymentStatus] = useState<'Paid' | 'Pending' | 'Overdue'>('Paid');
-  const [deliveryStatus, setDeliveryStatus] = useState<'Pending' | 'Shipped' | 'Delivered'>('Pending');
+  const [paymentStatus, setPaymentStatus] = useState<'Paid' | 'Pending' | 'Overdue' | 'Refunded'>('Paid');
+  const [deliveryStatus, setDeliveryStatus] = useState<'Pending' | 'Shipped' | 'Delivered' | 'Cancelled'>('Pending');
   const [assignedAgent, setAssignedAgent] = useState('Tony Stark');
   const [orderType, setOrderType] = useState<'Online' | 'Shop'>('Online');
-  const [salesChannel, setSalesChannel] = useState<'Amazon' | 'Flipkart' | 'Vamjo' | 'Meesho' | 'Shop'>('Shop');
+  const [salesChannel, setSalesChannel] = useState<'Amazon' | 'Flipkart' | 'Vamjo' | 'Meesho' | 'Shop' | 'Website' | 'Distributor' | 'Other Marketplace' | string>('Shop');
 
   // Unified Invoice Headers State
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -445,6 +445,8 @@ export default function SalesOrdersView() {
   };
 
   const handleEditInvoice = (order: SalesOrder) => {
+    // Refresh directory before editing so the customer combobox reflects the latest saved data
+    reloadFirestoreData();
     setIsAdding(true);
     setEditingOrderId(order.id);
     setSelectedCustomerId(order.customerId || '');
@@ -1042,7 +1044,7 @@ export default function SalesOrdersView() {
                 </button>
                 <button
                   type="button"
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     if (!newCustName.trim() || !newCustMobile.trim()) {
                       setErrorMessage('Loyalty client name and mobile contact no are strictly mandatory.');
                       return;
@@ -1052,7 +1054,12 @@ export default function SalesOrdersView() {
                       setErrorMessage('Mobile / Contact No must be exactly 10 digits.');
                       return;
                     }
-                    const newC = addCustomer({
+                    let generatedCustomerId = '';
+                    do {
+                      generatedCustomerId = `CUS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+                    } while (customers.some(c => c.customerId === generatedCustomerId));
+                    const newC = await addCustomer({
+                      customerId: generatedCustomerId,
                       name: newCustName,
                       company: newCustCompany || 'Individual',
                       email: newCustEmail || `${newCustName.toLowerCase().replace(/\s+/g, '')}@noemail.com`,
@@ -1131,6 +1138,8 @@ export default function SalesOrdersView() {
                       }}
                       onFocus={() => {
                         setIsCustomerDropdownOpen(true);
+                        // Refetch latest customers/referrals so the directory never shows stale data
+                        reloadFirestoreData();
                       }}
                       className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 pl-3 pr-10 text-slate-200 transition"
                     />
@@ -1151,7 +1160,11 @@ export default function SalesOrdersView() {
                       )}
                       <button
                         type="button"
-                        onClick={() => setIsCustomerDropdownOpen(!isCustomerDropdownOpen)}
+                        onClick={() => {
+                          const next = !isCustomerDropdownOpen;
+                          setIsCustomerDropdownOpen(next);
+                          if (next) reloadFirestoreData();
+                        }}
                         className="hover:text-violet-400 text-slate-500 transition cursor-pointer p-0.5"
                       >
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isCustomerDropdownOpen ? 'rotate-180' : ''}`} />
@@ -1211,7 +1224,7 @@ export default function SalesOrdersView() {
                               <button
                                 type="button"
                                 key={r.id}
-                                onClick={() => {
+                                onClick={async () => {
                                   // Check if a customer record already exists for this referral partner
                                   let existingC = customers.find(c => 
                                     (c.referralCode === r.referralId) ||
@@ -1220,8 +1233,13 @@ export default function SalesOrdersView() {
                                   );
                                   
                                   if (!existingC) {
+                                    let generatedCustomerId = '';
+                                    do {
+                                      generatedCustomerId = `CUS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+                                    } while (customers.some(c => c.customerId === generatedCustomerId));
                                     // Dynamically register the referral partner as a customer in the directory
-                                    existingC = addCustomer({
+                                    existingC = await addCustomer({
+                                      customerId: generatedCustomerId,
                                       name: r.name,
                                       company: "Referral Partner",
                                       email: r.email || `${r.referralId.toLowerCase()}@partner.com`,

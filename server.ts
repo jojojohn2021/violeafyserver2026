@@ -138,6 +138,7 @@ const memoryCollections = [
   "order_operation_history",
   "order_brand_assignments",
   "payment_reminders",
+  "invoices",
 ];
 
 const inMemoryDb: Record<string, any[]> = {};

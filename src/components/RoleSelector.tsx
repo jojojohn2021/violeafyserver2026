@@ -71,7 +71,7 @@ export default function RoleSelector({ onAvatarDoubleClick }: { onAvatarDoubleCl
                 currentUser.role === 'Referral Team' ? 'bg-teal-100 text-teal-800 border-teal-200' :
                 'bg-rose-100 text-rose-800 border-rose-200'
               }`}>
-                {currentUser.role === 'Referral Team' ? 'Referral Team' : `${currentUser.role} Team`}
+                {(currentUser.role as string) === 'Referral Team' ? 'Referral Team' : `${currentUser.role} Team`}
               </span>
             </div>
             <p className="text-xs text-slate-600 mt-1 flex items-center gap-1 font-medium">

@@ -968,7 +968,7 @@ export default function SettingsView() {
         </div>
 
         {/* RIGHT AUDIT SIDEBAR PANEL (Only shown when not displaying Brand Customizer or full-width tabs) */}
-        {activeTab !== 'brand' && activeTab !== 'gateways' && activeTab !== 'delivery_charges' && (
+        {activeTab !== 'brand' && (activeTab as string) !== 'gateways' && activeTab !== 'delivery_charges' && (
           <div className="space-y-6">
             
             {/* Selected Transaction Audit Details panel */}

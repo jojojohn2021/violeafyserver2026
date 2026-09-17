@@ -1,24 +1,107 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useCRM } from '../store';
 import { SalesOrder, SalesProduct, CustomerPerformance, ProductPerformance } from '../types';
-import { 
-  Receipt, Plus, DollarSign, Calendar, TrendingUp, Search, 
+import {
+  Receipt, Plus, DollarSign, Calendar, TrendingUp, Search,
   Trash2, Eye, ShoppingBag, CreditCard, ChevronDown, Check, X,
   FileSpreadsheet, FileText, CheckCircle2, Clock, AlertTriangle, AlertCircle,
-  UserPlus, UserCheck, Link, Edit
+  UserPlus, UserCheck, Link, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 
 import { INDIAN_STATES_AND_DISTRICTS, INDIAN_STATES_LIST } from '../data/indianStatesAndDistricts';
+import { invoiceRepository } from '../repositories/repositories';
+
+const formatDateToInputString = (dateVal?: any): string => {
+  if (!dateVal) return new Date().toISOString().split('T')[0];
+
+  // Handle Firestore Timestamp object
+  if (typeof dateVal === 'object') {
+    if (typeof dateVal.toDate === 'function') {
+      try {
+        dateVal = dateVal.toDate();
+      } catch (e) {
+        // ignore
+      }
+    } else if (typeof dateVal.seconds === 'number') {
+      dateVal = new Date(dateVal.seconds * 1000);
+    } else if (typeof dateVal._seconds === 'number') {
+      dateVal = new Date(dateVal._seconds * 1000);
+    }
+  }
+
+  if (dateVal instanceof Date && !isNaN(dateVal.getTime())) {
+    const y = dateVal.getFullYear();
+    const m = String(dateVal.getMonth() + 1).padStart(2, '0');
+    const d = String(dateVal.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  if (typeof dateVal === 'number') {
+    const parsed = new Date(dateVal);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+
+  if (typeof dateVal === 'string') {
+    const trimmed = dateVal.trim();
+    if (!trimmed) return new Date().toISOString().split('T')[0];
+
+    // Check if ISO format with T
+    if (trimmed.includes('T')) {
+      const parts = trimmed.split('T');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(parts[0])) {
+        return parts[0];
+      }
+    }
+
+    // Check if already YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+
+    // Check if DD-MM-YYYY or DD/MM/YYYY (with or without time)
+    const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (dmyMatch) {
+      const day = dmyMatch[1].padStart(2, '0');
+      const month = dmyMatch[2].padStart(2, '0');
+      const year = dmyMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+
+    // Check if YYYY/MM/DD
+    const ymdMatch = trimmed.match(/^(\d{4})[/](\d{1,2})[/](\d{1,2})/);
+    if (ymdMatch) {
+      const year = ymdMatch[1];
+      const month = ymdMatch[2].padStart(2, '0');
+      const day = ymdMatch[3].padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    // Try parsing with Date constructor
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+
+  return new Date().toISOString().split('T')[0];
+};
 
 export default function SalesOrdersView() {
-  const { 
-    hasAccess, salesOrders, addSalesOrder, updateSalesOrder, deleteSalesOrder, deleteAllSalesOrders,
+  const {
+    hasAccess, salesOrders, updateSalesOrder, deleteSalesOrder, deleteAllSalesOrders,
     customers, products, updateProduct, referrals, addCustomer, currentUser,
     updateCustomer, referralChains, reloadFirestoreData
   } = useCRM();
 
-  // New Order Form state
-  const [isAdding, setIsAdding] = useState(false);
+  // Invoice Editor Form state
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
   const [updatePayload, setUpdatePayload] = useState<any>(null);
@@ -29,6 +112,8 @@ export default function SalesOrdersView() {
   const [assignedAgent, setAssignedAgent] = useState('Tony Stark');
   const [orderType, setOrderType] = useState<'Online' | 'Shop'>('Online');
   const [salesChannel, setSalesChannel] = useState<'Amazon' | 'Flipkart' | 'Vamjo' | 'Meesho' | 'Shop' | 'Website' | 'Distributor' | 'Other Marketplace' | string>('Shop');
+  const [salesPlatformState, setSalesPlatformState] = useState('webleafyearth');
+  const [invoiceIdState, setInvoiceIdState] = useState('');
 
   // Unified Invoice Headers State
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -76,7 +161,7 @@ export default function SalesOrdersView() {
               const apiState = postOffice.State || '';
               const apiDistrict = postOffice.District || '';
 
-              const matchedState = INDIAN_STATES_LIST.find(st => 
+              const matchedState = INDIAN_STATES_LIST.find(st =>
                 st.toLowerCase().replace(/[^a-z]/g, '') === apiState.toLowerCase().replace(/[^a-z]/g, '') ||
                 st.toLowerCase() === apiState.toLowerCase()
               );
@@ -86,7 +171,7 @@ export default function SalesOrdersView() {
                 setNewCustStateSearch(matchedState);
 
                 const districtsList = INDIAN_STATES_AND_DISTRICTS[matchedState] || [];
-                const matchedDistrict = districtsList.find(dst => 
+                const matchedDistrict = districtsList.find(dst =>
                   dst.toLowerCase().replace(/[^a-z]/g, '') === apiDistrict.toLowerCase().replace(/[^a-z]/g, '') ||
                   dst.toLowerCase() === apiDistrict.toLowerCase()
                 ) || districtsList[0];
@@ -214,6 +299,15 @@ export default function SalesOrdersView() {
   const [paymentFilter, setPaymentFilter] = useState<string>('All');
   const [deliveryFilter, setDeliveryFilter] = useState<string>('All');
 
+  // Pagination State (20 records per page)
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 20;
+
+  // Reset page to 1 when filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, paymentFilter, deliveryFilter]);
+
   // Active dropdown status editor state
   const [activeDropId, setActiveDropId] = useState<string | null>(null);
   const [dropType, setDropType] = useState<'payment' | 'delivery' | null>(null);
@@ -230,15 +324,21 @@ export default function SalesOrdersView() {
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const customerDropdownRef = useRef<HTMLDivElement>(null);
 
-  const selectedCustomerObj = customers.find(c => c.id === selectedCustomerId);
+  const selectedCustomerObj = customers.find(c => c.id === selectedCustomerId || (c.customerId && c.customerId === selectedCustomerId));
 
-  // Helper to resolve referral code for customer from master customer directory
+  // Helper to resolve referral code for customer from master customer directory (Firestore customers table)
   const getCustomerReferralCode = (cust?: CustomerPerformance) => {
     if (!cust) return '';
     if (cust.referralCode) return cust.referralCode;
     if (cust.partnerName) {
       const found = referrals.find(r => (r.name || '').toLowerCase() === cust.partnerName?.toLowerCase());
       if (found) return found.referralId;
+    }
+    const refKey = cust.referredById || cust.parentId || (cust as any).sponsorId || (cust as any).sponsorCode || (cust as any).referredByCode;
+    if (refKey) {
+      const found = referrals.find(r => r.id === refKey || r.referralId === refKey || (r.name || '').toLowerCase() === String(refKey).toLowerCase());
+      if (found) return found.referralId;
+      return refKey;
     }
     return '';
   };
@@ -254,12 +354,15 @@ export default function SalesOrdersView() {
         setReferralCode(code);
         setReferralValid(true);
         setReferralError('');
+        const partner = referrals.find(r => r.referralId === code);
+        setReferralSearchQuery(partner ? partner.name : code);
       } else {
         // If there is no customer master referral code, don't wipe out any manually selected or invoice-loaded referral code
         if (!referralCode && !referralValid) {
           setReferralCode('');
           setReferralValid(false);
           setReferralError('');
+          setReferralSearchQuery('');
         }
       }
     } else {
@@ -267,6 +370,7 @@ export default function SalesOrdersView() {
         setReferralCode('');
         setReferralValid(false);
         setReferralError('');
+        setReferralSearchQuery('');
       }
     }
   }, [selectedCustomerId, customers, referrals, editingOrderId]);
@@ -397,7 +501,7 @@ export default function SalesOrdersView() {
   // Handle adding product line item to draft order
   const handleAddLineItem = () => {
     if (!currentItemId) return;
-    
+
     const prod = products.find(p => p.id === currentItemId);
     if (!prod) return;
 
@@ -447,27 +551,36 @@ export default function SalesOrdersView() {
   const handleEditInvoice = (order: SalesOrder) => {
     // Refresh directory before editing so the customer combobox reflects the latest saved data
     reloadFirestoreData();
-    setIsAdding(true);
     setEditingOrderId(order.id);
     setSelectedCustomerId(order.customerId || '');
+    const custObj = customers.find(c => c.id === order.customerId || (c.customerId && c.customerId === order.customerId));
     setSelectedMethod((order.paymentMethod as any) || 'Bank Transfer');
     setPaymentStatus(order.paymentStatus || 'Paid');
     setDeliveryStatus(order.deliveryStatus || 'Pending');
+    setSalesPlatformState(order.salesPlatform || 'webleafyearth');
     setAssignedAgent(order.assignedTo || 'Tony Stark');
     setOrderType(order.orderType || 'Online');
     setSalesChannel(order.salesChannel || 'Shop');
-    setInvoiceDate(order.invoiceDate || (order.createdAt ? new Date(order.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]));
-    setPickupDate(order.pickupDate || new Date(Date.now() + 86400000).toISOString().split('T')[0]);
+    setInvoiceIdState(order.invoiceId || order.id || `INV-${order.orderNumber}`);
+    const rawInvoiceDate = order.invoiceDate || (order as any).invoice_date || (order as any).date || (order as any).orderDate || order.createdAt;
+    setInvoiceDate(formatDateToInputString(rawInvoiceDate));
+    const rawPickupDate = order.pickupDate || (order as any).pickup_date;
+    setPickupDate(formatDateToInputString(rawPickupDate || new Date(Date.now() + 86400000)));
     setCourierAgency(order.courierAgency || 'Amazon');
-    setCourierCharges(order.courierCharges || 0);
-    setContactNo(order.contactNo || '');
-    setReferralCode(order.referralCode || '');
-    
-    if (order.referralCode) {
+    setCourierCharges(order.deliveryFee ?? order.courierCharges ?? 0);
+    setContactNo(order.customerMobile || order.contactNo || custObj?.mobileNumber || '');
+
+    // Search and pick referral code from firestore database -> customers tables by using customerId
+    const customerMasterRefCode = custObj ? getCustomerReferralCode(custObj) : '';
+    const effectiveReferralCode = customerMasterRefCode || order.referralCode || '';
+
+    setReferralCode(effectiveReferralCode);
+
+    if (effectiveReferralCode) {
       setReferralValid(true);
       setReferralError('');
-      const partner = referrals.find(r => r.referralId === order.referralCode);
-      setReferralSearchQuery(partner ? partner.name : order.referralCode);
+      const partner = referrals.find(r => r.referralId === effectiveReferralCode || (r.name || '').toLowerCase() === effectiveReferralCode.toLowerCase());
+      setReferralSearchQuery(partner ? partner.name : effectiveReferralCode);
     } else {
       setReferralValid(false);
       setReferralError('');
@@ -482,123 +595,79 @@ export default function SalesOrdersView() {
     setLineItems(items);
   };
 
-  const handleCreateOrder = (e: React.FormEvent) => {
+  const handleSaveInvoiceUpdate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingOrderId) {
-      if (!hasAccess('Sales Orders', 'edit')) return;
-    } else {
-      if (!hasAccess('Sales Orders', 'create')) return;
-    }
-
-    if (!selectedCustomerId) {
-      setErrorMessage('Please select a customer or define a new one first.');
-      return;
-    }
-
-    if (lineItems.length === 0) {
-      setErrorMessage('Please add at least one product to the sales order.');
-      return;
-    }
-
-    const customer = customers.find(c => c.id === selectedCustomerId);
-    if (!customer) {
-      setErrorMessage('Invalid customer chosen.');
-      return;
-    }
-
-    const compiledProducts: SalesProduct[] = lineItems.map(item => {
-      const prod = products.find(p => p.id === item.productId)!;
-      return {
-        productId: item.productId,
-        productName: prod?.name || 'Unknown Item',
-        quantity: item.quantity,
-        price: item.price,
-        gstPercentage: prod?.gstPercentage ?? 18
-      };
-    });
-
-    const totalValue = calculateTotal();
-
-    // If the customer does NOT already have a referral code in the customer directory master table, update it
-    if (selectedCustomerObj && !selectedCustomerObj.referralCode && referralCode) {
-      const matchPartner = referrals.find(r => r.referralId === referralCode || (r.name || '').toLowerCase() === referralCode.toLowerCase());
-      updateCustomer(selectedCustomerId, {
-        referralCode: referralCode,
-        partnerName: matchPartner ? matchPartner.name : undefined
-      });
-    }
-
-    if (editingOrderId) {
-      setUpdatePayload({
-        id: editingOrderId,
-        data: {
-          customerId: selectedCustomerId,
-          customerName: customer.name,
-          customerCompany: customer.company || "Individual",
-          products: compiledProducts,
-          totalValue,
-          paymentStatus: paymentStatus as any,
-          deliveryStatus: deliveryStatus as any,
-          assignedTo: assignedAgent,
-          paymentMethod: selectedMethod,
-          orderType: orderType,
-          salesChannel: salesChannel,
-          invoiceDate,
-          pickupDate,
-          courierAgency,
-          courierCharges: Math.round(Number(courierCharges || 0) * 100) / 100,
-          contactNo,
-          referralCode
-        }
-      });
-      setShowUpdateConfirm(true);
-      return;
-    } else {
-      // Trigger store integration adding order
-      addSalesOrder({
-        customerId: selectedCustomerId,
-        customerName: customer.name,
-        customerCompany: customer.company || "Individual",
-        products: compiledProducts,
-        totalValue,
-        paymentStatus: paymentStatus as any,
-        deliveryStatus: deliveryStatus as any,
-        assignedTo: assignedAgent,
-        paymentMethod: selectedMethod,
-        orderType: orderType,
-        salesChannel: salesChannel,
-        invoiceDate,
-        pickupDate,
-        courierAgency,
-        courierCharges: Math.round(Number(courierCharges || 0) * 100) / 100,
-        contactNo,
-        referralCode
-      });
-
-      // Reset Form on fresh creation
-      setIsAdding(false);
-      setEditingOrderId(null);
-      setSelectedCustomerId('');
-      setLineItems([]);
-      setErrorMessage('');
-      setCourierAgency('Amazon');
-      setCourierCharges(0);
-      setContactNo('');
-      setReferralCode('');
-      setReferralError('');
-      setReferralValid(false);
-      setSalesChannel('Shop');
-    }
+    if (!editingOrderId) return;
+    if (!hasAccess('Sales Orders', 'edit')) return;
+    setShowUpdateConfirm(true);
   };
 
-  const handleConfirmUpdate = () => {
-    if (!updatePayload) return;
-    updateSalesOrder(updatePayload.id, updatePayload.data);
+  const handleConfirmSaveInvoiceUpdate = async () => {
+    if (!editingOrderId) return;
 
-    // Reset Form on confirmation
+    const currentOrder = salesOrders.find(o => o.id === editingOrderId);
+    const targetInvoiceId = currentOrder?.invoiceId || invoiceIdState || editingOrderId;
+    const chargesVal = Math.round(Number(courierCharges || 0) * 100) / 100;
+
+    // 1. Search and update sales_orders table by id (unique key)
+    const salesOrderUpdates: Partial<SalesOrder> = {
+      invoiceDate: invoiceDate,
+      pickupDate: pickupDate,
+      courierAgency: courierAgency,
+      deliveryFee: chargesVal,
+      courierCharges: chargesVal,
+      paymentStatus: paymentStatus as any,
+      deliveryStatus: deliveryStatus as any,
+    };
+
+    try {
+      await updateSalesOrder(editingOrderId, salesOrderUpdates);
+    } catch (err) {
+      console.error('Failed to update sales_orders table:', err);
+    }
+
+    // 2. Search and update invoices table by selected transaction invoiceId
+    if (targetInvoiceId) {
+      try {
+        const existingInvoices = await invoiceRepository.getAll();
+        const matches = (existingInvoices || []).filter(
+          (inv: any) => String(inv.invoiceId) === String(targetInvoiceId) || String(inv.id) === String(targetInvoiceId)
+        );
+
+        if (matches.length > 0) {
+          for (const match of matches) {
+            await invoiceRepository.update(match.id, {
+              invoiceId: targetInvoiceId,
+              invoiceDate: invoiceDate,
+            });
+          }
+        } else {
+          await invoiceRepository.create({
+            id: targetInvoiceId,
+            invoiceId: targetInvoiceId,
+            invoiceDate: invoiceDate,
+          });
+        }
+      } catch (invErr) {
+        console.error('Failed to update invoices table via repository:', invErr);
+        try {
+          await fetch('/api/db/invoices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: targetInvoiceId,
+              invoiceId: targetInvoiceId,
+              invoiceDate: invoiceDate,
+            }),
+          });
+        } catch (apiErr) {
+          console.error('API update to /api/db/invoices failed:', apiErr);
+        }
+      }
+    }
+
+    // Reset Form
     setShowUpdateConfirm(false);
-    setUpdatePayload(null);
-    setIsAdding(false);
     setEditingOrderId(null);
     setSelectedCustomerId('');
     setLineItems([]);
@@ -613,45 +682,85 @@ export default function SalesOrdersView() {
   };
 
   // Performance calculations
-  const partnerOfUser = referrals.find(r => 
-    (r.email && currentUser?.email && r.email.toLowerCase() === currentUser.email.toLowerCase()) || 
+  const partnerOfUser = referrals.find(r =>
+    (r.email && currentUser?.email && r.email.toLowerCase() === currentUser.email.toLowerCase()) ||
     (r.mobileNumber && currentUser?.mobileNumber && r.mobileNumber === currentUser.mobileNumber) ||
     (r.name && currentUser?.name && r.name.toLowerCase() === currentUser.name.toLowerCase())
   );
-  
-  const userSalesOrders = currentUser?.role === 'Referral Team' 
+
+  const userSalesOrders = currentUser?.role === 'Referral Team'
     ? salesOrders.filter(order => {
-        const myCode = partnerOfUser?.referralId || '';
-        const myName = currentUser?.name || '';
-        return order.referralCode && (
-          (myCode && order.referralCode === myCode) ||
-          (myName && order.referralCode.toLowerCase() === myName.toLowerCase())
-        );
-      })
+      const myCode = partnerOfUser?.referralId || '';
+      const myName = currentUser?.name || '';
+      return order.referralCode && (
+        (myCode && order.referralCode === myCode) ||
+        (myName && order.referralCode.toLowerCase() === myName.toLowerCase())
+      );
+    })
     : salesOrders;
 
-  const activeOrders = userSalesOrders.filter(o => o.deliveryStatus !== 'Cancelled' && o.paymentStatus !== 'Refunded');
+  const isPaid = (status?: string) => {
+    if (!status) return false;
+    const s = String(status).trim().toLowerCase();
+    return s === 'paid' || s === 'completed';
+  };
 
-  const totalRevenue = activeOrders.reduce((sum, o) => sum + o.totalValue, 0);
-  const paidRevenue = activeOrders.filter(o => o.paymentStatus === 'Paid').reduce((sum, o) => sum + o.totalValue, 0);
-  const outstandingRevenue = activeOrders.filter(o => o.paymentStatus === 'Pending' || o.paymentStatus === 'Overdue').reduce((sum, o) => sum + o.totalValue, 0);
+  const isOutstanding = (status?: string) => {
+    if (!status) return false;
+    const s = String(status).trim().toLowerCase();
+    return s === 'pending' || s === 'overdue' || s === 'unpaid';
+  };
+
+  const activeOrders = userSalesOrders.filter(o => {
+    const d = (o.deliveryStatus || '').toLowerCase();
+    const p = (o.paymentStatus || '').toLowerCase();
+    return d !== 'cancelled' && d !== 'canceled' && p !== 'refunded';
+  });
+
+  const totalRevenue = activeOrders.reduce((sum, o) => sum + (o.totalValue || 0), 0);
+  const paidRevenue = activeOrders.filter(o => isPaid(o.paymentStatus)).reduce((sum, o) => sum + (o.totalValue || 0), 0);
+  const outstandingRevenue = activeOrders.filter(o => isOutstanding(o.paymentStatus)).reduce((sum, o) => sum + (o.totalValue || 0), 0);
   const averageValue = activeOrders.length > 0 ? (totalRevenue / activeOrders.length) : 0;
 
-  // Search filter implementation
-  const filteredOrders = userSalesOrders.filter(o => {
-    const matchesSearch = o.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          o.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          o.customerCompany.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesPayment = paymentFilter === 'All' || o.paymentStatus === paymentFilter;
+  // Helper to parse invoice date (falling back to createdAt) into epoch ms for sorting
+  const getInvoiceDateTime = (o: SalesOrder) => {
+    const rawDate = o.invoiceDate || o.createdAt;
+    if (!rawDate) return 0;
+    const parsed = new Date(rawDate).getTime();
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  // Sort descending by Invoice Date
+  const sortedSalesOrders = [...userSalesOrders].sort((a, b) => getInvoiceDateTime(b) - getInvoiceDateTime(a));
+
+  const filteredOrders = sortedSalesOrders.filter(o => {
+    const q = searchTerm.toLowerCase();
+    const matchesSearch =
+      (o.orderId && o.orderId.toLowerCase().includes(q)) ||
+      (o.orderNumber && o.orderNumber.toLowerCase().includes(q)) ||
+      (o.invoiceId && o.invoiceId.toLowerCase().includes(q)) ||
+      (o.id && o.id.toLowerCase().includes(q)) ||
+      (o.customerName && o.customerName.toLowerCase().includes(q)) ||
+      (o.customerCompany && o.customerCompany.toLowerCase().includes(q));
+
+    const matchesPayment = paymentFilter === 'All' ||
+      (o.paymentStatus || '').toLowerCase() === paymentFilter.toLowerCase() ||
+      (paymentFilter === 'Paid' && isPaid(o.paymentStatus));
     const matchesDelivery = deliveryFilter === 'All' || o.deliveryStatus === deliveryFilter;
 
     return matchesSearch && matchesPayment && matchesDelivery;
   });
 
+  // Pagination Calculations
+  const totalPages = Math.ceil(filteredOrders.length / pageSize) || 1;
+  const safeCurrentPage = Math.min(Math.max(currentPage, 1), totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, filteredOrders.length);
+  const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
+
   return (
     <div className="space-y-6" id="sales-orders-view">
-      
+
       {/* 1. Module Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0d0d10] p-6 rounded-2xl border border-slate-800 shadow shadow-black/40">
         <div className="flex items-center gap-3">
@@ -660,7 +769,7 @@ export default function SalesOrdersView() {
           </div>
           <div>
             <h1 className="text-xl font-extrabold text-white tracking-tight flex items-center gap-2">
-              Sales Orders & Invoiced Accounts
+              Invoice Details
             </h1>
             <p className="text-xs text-slate-400">Generate commercial invoices, manage order fulfillment, and reconcile loyalty accounts.</p>
           </div>
@@ -681,33 +790,6 @@ export default function SalesOrdersView() {
           )}
           */}
 
-          {hasAccess('Sales Orders', 'create') && currentUser?.role !== 'Referral Team' && (
-            <button
-              onClick={() => {
-                if (isAdding) {
-                  setIsAdding(false);
-                  setEditingOrderId(null);
-                  setSelectedCustomerId('');
-                  setLineItems([]);
-                  setErrorMessage('');
-                  setCourierAgency('Amazon');
-                  setContactNo('');
-                  setReferralCode('');
-                  setReferralError('');
-                  setReferralValid(false);
-                  setReferralSearchQuery('');
-                } else {
-                  setIsAdding(true);
-                  setEditingOrderId(null);
-                }
-              }}
-              className="py-2.5 px-4 bg-green-600 hover:bg-green-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer active:scale-95 shadow-lg shadow-green-600/15 border border-green-500/20"
-              id="add-order-toggler"
-            >
-              {isAdding ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isAdding ? (editingOrderId ? 'Close Editor' : 'Close Builder') : 'New Invoice Order'}
-            </button>
-          )}
         </div>
       </div>
 
@@ -758,16 +840,16 @@ export default function SalesOrdersView() {
         </div>
       </div>
 
-      {/* 3. New Order builder card */}
-      {isAdding && (
-        <form onSubmit={handleCreateOrder} className="bg-[#0d0d10] border-2 border-violet-900/35 p-6 rounded-2xl shadow-xl animate-scaleIn space-y-6" id="add-order-form">
+      {/* 3. Order Editor Card */}
+      {editingOrderId && (
+        <form onSubmit={handleSaveInvoiceUpdate} className="bg-[#0d0d10] border-2 border-violet-900/35 p-6 rounded-2xl shadow-xl animate-scaleIn space-y-6" id="edit-order-form">
           <div className="border-b border-slate-800 pb-4">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <ShoppingBag className="w-5 h-5 text-violet-400" />
-              {editingOrderId ? 'Edit Invoice & Order Details' : 'Dynamic Invoice & Order Configurator'}
+              Edit Invoice & Order Details
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              {editingOrderId ? 'Refine metallurgical, partner, and distribution parameters for this invoice live.' : 'Specify logistical parameters and compile loyal partner billing records securely.'}
+              Refine metallurgical, partner, and distribution parameters for this invoice live.
             </p>
           </div>
 
@@ -783,25 +865,21 @@ export default function SalesOrdersView() {
             <button
               type="button"
               onClick={() => setActiveConfigTab('order')}
-              className={`py-2.5 px-5 text-xs font-bold border-b-2 transition ${
-                activeConfigTab === 'order' 
-                  ? 'border-violet-500 text-white bg-violet-950/20' 
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
+              className={`py-2.5 px-5 text-xs font-bold border-b-2 transition ${activeConfigTab === 'order'
+                ? 'border-violet-500 text-white bg-violet-950/20'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
             >
               Configure Order Document
             </button>
             <button
               type="button"
-              onClick={() => setActiveConfigTab('new_customer')}
-              className={`py-2.5 px-5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
-                activeConfigTab === 'new_customer' 
-                  ? 'border-violet-500 text-white bg-violet-950/20' 
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
+              disabled
+              className="py-2.5 px-5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 opacity-40 cursor-not-allowed border-transparent text-slate-500"
+              title="New Customer Creation Disabled"
             >
-              <UserPlus className="w-4 h-4 text-violet-400" />
-              New Customer Creation Tab
+              <UserPlus className="w-4 h-4 text-slate-500" />
+              New Customer Creation Tab (Disabled)
             </button>
           </div>
 
@@ -814,7 +892,7 @@ export default function SalesOrdersView() {
               <p className="text-xs text-slate-400 leading-relaxed font-sans">
                 Create a permanent folder entry for this partner. On registration completion, they will be saved to the database directory and pre-selected in your open invoice configuration tab automatically.
               </p>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-1 block">Full Name *</label>
@@ -870,13 +948,12 @@ export default function SalesOrdersView() {
                   <div className="flex justify-between items-center mb-1">
                     <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block">PIN Code</label>
                     {newCustPincodeLookupMessage && (
-                      <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded transition-all duration-200 ${
-                        newCustPincodeLookupMessage.includes('matches') || newCustPincodeLookupMessage.includes('locally')
-                          ? 'text-emerald-400 bg-emerald-950/30'
-                          : newCustPincodeLookupMessage.includes('Fetching')
+                      <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded transition-all duration-200 ${newCustPincodeLookupMessage.includes('matches') || newCustPincodeLookupMessage.includes('locally')
+                        ? 'text-emerald-400 bg-emerald-950/30'
+                        : newCustPincodeLookupMessage.includes('Fetching')
                           ? 'text-amber-400 bg-amber-955/20 animate-pulse'
                           : 'text-slate-400 bg-slate-900/50'
-                      }`}>
+                        }`}>
                         {newCustPincodeLookupMessage}
                       </span>
                     )}
@@ -895,9 +972,9 @@ export default function SalesOrdersView() {
                 <div className="relative" ref={newCustStateRef}>
                   <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-1 block">State</label>
                   <div className="relative">
-                    <input 
-                      type="text" 
-                      placeholder="-- Search State --" 
+                    <input
+                      type="text"
+                      placeholder="-- Search State --"
                       value={isNewCustStateOpen ? newCustStateSearch : newCustState}
                       onChange={e => {
                         setNewCustStateSearch(e.target.value);
@@ -935,9 +1012,8 @@ export default function SalesOrdersView() {
                               setNewCustDistrict('');
                               setNewCustDistrictSearch('');
                             }}
-                            className={`w-full text-left px-3 py-2 text-xs hover:bg-violet-950/40 text-slate-300 transition ${
-                              newCustState === st ? 'bg-violet-950/20 text-white font-bold' : ''
-                            }`}
+                            className={`w-full text-left px-3 py-2 text-xs hover:bg-violet-950/40 text-slate-300 transition ${newCustState === st ? 'bg-violet-950/20 text-white font-bold' : ''
+                              }`}
                           >
                             {st}
                           </button>
@@ -951,9 +1027,9 @@ export default function SalesOrdersView() {
                 <div className="relative" ref={newCustDistrictRef}>
                   <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-1 block">District</label>
                   <div className="relative">
-                    <input 
-                      type="text" 
-                      placeholder={newCustState ? "-- Search District --" : "Select State First"} 
+                    <input
+                      type="text"
+                      placeholder={newCustState ? "-- Search District --" : "Select State First"}
                       disabled={!newCustState}
                       value={newCustState ? (isNewCustDistrictOpen ? newCustDistrictSearch : newCustDistrict) : ''}
                       onChange={e => {
@@ -990,9 +1066,8 @@ export default function SalesOrdersView() {
                               setNewCustDistrictSearch(dst);
                               setIsNewCustDistrictOpen(false);
                             }}
-                            className={`w-full text-left px-3 py-2 text-xs hover:bg-violet-950/40 text-slate-300 transition ${
-                              newCustDistrict === dst ? 'bg-violet-900/20 text-white font-bold' : ''
-                            }`}
+                            className={`w-full text-left px-3 py-2 text-xs hover:bg-violet-950/40 text-slate-300 transition ${newCustDistrict === dst ? 'bg-violet-900/20 text-white font-bold' : ''
+                              }`}
                           >
                             {dst}
                           </button>
@@ -1101,269 +1176,102 @@ export default function SalesOrdersView() {
             <div className="space-y-6 animate-fadeIn">
               {/* Elegant Header Fields Grid */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-5 bg-[#141418] rounded-2xl border border-slate-800" id="invoice-header-fields">
-                
-                {/* Field 1: Customer Link Selection */}
-                <div className="md:col-span-2 relative" ref={customerDropdownRef}>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-[10px] uppercase font-bold tracking-widest text-slate-455 block">Customer Selection (Directory) *</label>
-                    <button
-                      type="button"
-                      onClick={() => setActiveConfigTab('new_customer')}
-                      className="text-[10px] font-extrabold text-violet-400 hover:text-violet-300 flex items-center gap-1 cursor-pointer hover:underline animate-pulse"
-                    >
-                      <Plus className="w-2.5 h-2.5" /> Register New Customer
-                    </button>
-                  </div>
 
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder={
-                        selectedCustomerObj 
-                          ? `${selectedCustomerObj.name} - ${selectedCustomerObj.mobileNumber || 'No Mobile'}`
-                          : "-- Choose Customer: Search by Name or Mobile --"
-                      }
-                      value={
-                        isCustomerDropdownOpen 
-                          ? customerSearchQuery 
-                          : selectedCustomerObj 
-                            ? `${selectedCustomerObj.name} - ${selectedCustomerObj.mobileNumber || 'No Mobile'}` 
-                            : ''
-                      }
-                      onChange={(e) => {
-                        setCustomerSearchQuery(e.target.value);
-                        if (!isCustomerDropdownOpen) {
-                          setIsCustomerDropdownOpen(true);
-                        }
-                      }}
-                      onFocus={() => {
-                        setIsCustomerDropdownOpen(true);
-                        // Refetch latest customers/referrals so the directory never shows stale data
-                        reloadFirestoreData();
-                      }}
-                      className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 pl-3 pr-10 text-slate-200 transition"
-                    />
-
-                    <div className="absolute right-3.5 top-2.5 flex items-center gap-1.5 text-slate-400">
-                      {selectedCustomerId && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleCustomerSelect('');
-                            setCustomerSearchQuery('');
-                          }}
-                          className="hover:text-rose-455 text-slate-500 transition cursor-pointer p-0.5"
-                          title="Clear customer selection"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = !isCustomerDropdownOpen;
-                          setIsCustomerDropdownOpen(next);
-                          if (next) reloadFirestoreData();
-                        }}
-                        className="hover:text-violet-400 text-slate-500 transition cursor-pointer p-0.5"
-                      >
-                        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isCustomerDropdownOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {isCustomerDropdownOpen && (
-                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-[#0d0d10] border border-slate-850 rounded-xl max-h-60 overflow-y-auto shadow-2xl divide-y divide-slate-850 animate-fadeIn">
-                      {filteredCustomers.length === 0 && filteredReferralAsCustomers.length === 0 ? (
-                        <div className="px-4 py-3 text-xs text-slate-500 italic">
-                          No matching customers or referral partners found.
-                        </div>
-                      ) : (
-                        <>
-                          {/* Standard Customers Header */}
-                          {filteredCustomers.length > 0 && (
-                            <div className="bg-[#141418] px-3 py-1.5 text-[9px] uppercase tracking-wider font-extrabold text-slate-500 border-b border-slate-850 font-mono">
-                              Master Customer Directory
-                            </div>
-                          )}
-                          {filteredCustomers.map(c => (
-                            <button
-                              type="button"
-                              key={c.id}
-                              onClick={() => {
-                                handleCustomerSelect(c.id);
-                                setIsCustomerDropdownOpen(false);
-                                setCustomerSearchQuery('');
-                              }}
-                              className={`w-full text-left px-4 py-2.5 text-xs hover:bg-violet-950/30 transition flex flex-col gap-0.5 ${
-                                selectedCustomerId === c.id ? 'bg-violet-950/20 text-white font-bold' : 'text-slate-300'
-                              }`}
-                            >
-                              <div className="flex justify-between items-center w-full">
-                                <span className="font-semibold text-slate-100">{c.name}</span>
-                                <span className="text-[10px] font-mono text-violet-400 bg-violet-950/45 px-1.5 py-0.5 rounded font-bold">{c.tier}</span>
-                              </div>
-                              <div className="flex justify-between items-center text-[10px] text-slate-400 w-full font-sans mt-0.5">
-                                <span className="truncate">{c.company || 'Individual'}</span>
-                                <span className="font-mono text-slate-400">{c.mobileNumber || 'No Mobile'}</span>
-                              </div>
-                            </button>
-                          ))}
-
-                          {/* Referral Partners Section */}
-                          {filteredReferralAsCustomers.length > 0 && (
-                            <div className="bg-lime-950/40 px-3 py-1.5 text-[9px] uppercase tracking-wider font-extrabold text-lime-400 border-t border-b border-slate-850 font-mono flex items-center justify-between">
-                              <span>Referral Partners (Convert on Selection)</span>
-                              <span className="text-[8px] bg-lime-900/50 text-lime-300 px-1 py-0.2 rounded font-bold uppercase">Partner Hub</span>
-                            </div>
-                          )}
-                          {filteredReferralAsCustomers.map(r => {
-                            // Find if this referral is currently active or selected as customer
-                            const isSelected = selectedCustomerObj?.referralCode === r.referralId;
-                            return (
-                              <button
-                                type="button"
-                                key={r.id}
-                                onClick={async () => {
-                                  // Check if a customer record already exists for this referral partner
-                                  let existingC = customers.find(c => 
-                                    (c.referralCode === r.referralId) ||
-                                    (c.mobileNumber === r.mobileNumber && r.mobileNumber) ||
-                                    (c.name.toLowerCase() === r.name.toLowerCase())
-                                  );
-                                  
-                                  if (!existingC) {
-                                    let generatedCustomerId = '';
-                                    do {
-                                      generatedCustomerId = `CUS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
-                                    } while (customers.some(c => c.customerId === generatedCustomerId));
-                                    // Dynamically register the referral partner as a customer in the directory
-                                    existingC = await addCustomer({
-                                      customerId: generatedCustomerId,
-                                      name: r.name,
-                                      company: "Referral Partner",
-                                      email: r.email || `${r.referralId.toLowerCase()}@partner.com`,
-                                      mobileNumber: r.mobileNumber || '',
-                                      address: r.address || 'Referral Directory',
-                                      state: 'Maharashtra', // Default standard
-                                      district: 'Mumbai',
-                                      pincode: '',
-                                      totalSpent: 0,
-                                      dealsClosed: 0,
-                                      satisfactionScore: 5,
-                                      lastOrderDate: new Date().toISOString().split('T')[0],
-                                      tier: 'Silver',
-                                      referralCode: r.referralId,
-                                      partnerName: r.name
-                                    }, true); // bypass permissions true
-                                  }
-
-                                  if (existingC) {
-                                    handleCustomerSelect(existingC.id);
-                                    // Set referral code for the order flow to self for Level-1 and upward chain support
-                                    setReferralCode(r.referralId);
-                                    setReferralValid(true);
-                                    setReferralError('');
-                                    setReferralSearchQuery(r.name);
-                                  }
-                                  setIsCustomerDropdownOpen(false);
-                                  setCustomerSearchQuery('');
-                                }}
-                                className={`w-full text-left px-4 py-2.5 text-xs bg-[#0b0f0b] hover:bg-lime-950/25 border-l-2 border-lime-500/40 transition flex flex-col gap-0.5 ${
-                                  isSelected ? 'bg-lime-950/30 text-lime-100 font-bold' : 'text-slate-350'
-                                }`}
-                              >
-                                <div className="flex justify-between items-center w-full">
-                                  <span className="font-extrabold text-lime-300">{r.name}</span>
-                                  <span className="text-[9px] font-mono text-lime-400 bg-lime-950/60 px-1.5 py-0.5 border border-lime-800/30 rounded font-black uppercase">PARTNER #{r.referralId}</span>
-                                </div>
-                                <div className="flex justify-between items-center text-[10px] text-slate-400 w-full font-sans mt-0.5">
-                                  <span className="truncate text-lime-400/70 font-semibold">Auto-calculates MLM Multi-level Commissions</span>
-                                  <span className="font-mono text-lime-400/80">{r.mobileNumber || 'No Mobile'}</span>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </>
-                      )}
-                    </div>
-                  )}
+                {/* Field 1: Customer Selection (Directory) */}
+                <div className="md:col-span-2">
+                  <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-1.5">Customer Selection (Directory) *</label>
+                  <input
+                    type="text"
+                    disabled
+                    readOnly
+                    placeholder="Customer Name"
+                    value={
+                      selectedCustomerObj
+                        ? selectedCustomerObj.name
+                        : (salesOrders.find(o => o.id === editingOrderId)?.customerName || '')
+                    }
+                    className="w-full bg-[#0d0d10]/60 border border-slate-800 rounded-xl text-xs py-2.5 px-3 text-slate-200 font-semibold cursor-not-allowed opacity-80"
+                  />
                 </div>
 
                 {/* Field 2: Contact No */}
                 <div>
-                  <label className="text-[10px] uppercase font-bold tracking-widest text-slate-455 block mb-1.5">Contact No (Phone) *</label>
+                  <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-1.5">Contact No (Phone) *</label>
                   <input
                     type="text"
-                    required
+                    disabled
+                    readOnly
                     placeholder="Contact number"
-                    value={contactNo}
-                    onChange={e => setContactNo(e.target.value)}
-                    className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200"
+                    value={
+                      contactNo ||
+                      selectedCustomerObj?.mobileNumber ||
+                      ''
+                    }
+                    className="w-full bg-[#0d0d10]/60 border border-slate-800 rounded-xl text-xs py-2.5 px-3 text-slate-200 font-semibold cursor-not-allowed opacity-80"
                   />
                 </div>
 
-                {/* Field 3: Sales Platform Combo Box */}
+                {/* Field 3: Sales Platform */}
                 <div>
                   <label className="text-[10px] uppercase font-bold tracking-widest text-[#a5b4fc] block mb-1.5">Sales Platform *</label>
-                  <select
-                    value={orderType}
-                    onChange={e => setOrderType(e.target.value as any)}
-                    className="w-full bg-[#0d0d10] border border-slate-800 focus:border-indigo-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200 font-bold"
-                  >
-                    <option value="Online">Online Sales</option>
-                    <option value="Shop">Shop Sales</option>
-                  </select>
-                </div>
-
-                {/* Field 3.5: Sales Channel Combo Box */}
-                <div>
-                  <label className="text-[10px] uppercase font-bold tracking-widest text-emerald-400 block mb-1.5">Sales Channel *</label>
-                  <select
-                    value={salesChannel}
-                    onChange={e => setSalesChannel(e.target.value as any)}
-                    className="w-full bg-[#0d0d10] border border-slate-800 focus:border-emerald-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200 font-bold"
-                  >
-                    <option value="Amazon">Amazon</option>
-                    <option value="Flipkart">Flipkart</option>
-                    <option value="Vamjo">Vamjo</option>
-                    <option value="Meesho">Meesho</option>
-                    <option value="Shop">Shop</option>
-                  </select>
-                </div>
-
-                {/* Field 4: Date of Invoice */}
-                <div>
-                  <label className="text-[10px] uppercase font-bold tracking-widest text-[#a5b4fc] block mb-1.5 font-mono">Date of Invoice *</label>
                   <input
-                    type="date"
-                    required
-                    value={invoiceDate}
-                    onChange={e => setInvoiceDate(e.target.value)}
-                    className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2 px-3 text-slate-200 font-mono"
+                    type="text"
+                    disabled
+                    readOnly
+                    placeholder="Sales Platform"
+                    value={salesPlatformState || 'webleafyearth'}
+                    className="w-full bg-[#0d0d10]/60 border border-slate-800 rounded-xl text-xs py-2.5 px-3 text-slate-200 font-bold cursor-not-allowed opacity-80"
                   />
                 </div>
 
-                {/* Field 5: Pickup Date */}
-                <div>
-                  <label className="text-[10px] uppercase font-bold tracking-widest text-[#a5b4fc] block mb-1.5 font-mono">Pickup Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={pickupDate}
-                    onChange={e => setPickupDate(e.target.value)}
-                    className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2 px-3 text-slate-200 font-mono"
-                  />
-                </div>
 
-                {/* Field 6: Courier Agency & Charges */}
-                <div className="grid grid-cols-2 gap-3" id="field-courier-config">
+                {/* Row 2: 5 fields in the same line */}
+                <div className="md:col-span-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-1">
+                  {/* Field 1: Invoice No */}
                   <div>
-                    <label className="text-[10px] uppercase font-bold tracking-widest text-slate-455 block mb-1.5">Courier Agency</label>
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-[#a5b4fc] block mb-1.5 font-mono">Invoice No *</label>
+                    <input
+                      type="text"
+                      disabled
+                      readOnly
+                      placeholder="Invoice No"
+                      value={invoiceIdState || (salesOrders.find(o => o.id === editingOrderId)?.invoiceId || salesOrders.find(o => o.id === editingOrderId)?.id || '')}
+                      onChange={e => setInvoiceIdState(e.target.value)}
+                      className="w-full bg-[#0d0d10]/60 border border-slate-800 rounded-xl text-xs py-2 px-3 text-slate-400 font-mono cursor-not-allowed opacity-80"
+                    />
+                  </div>
+
+                  {/* Field 2: Date of Invoice */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-[#a5b4fc] block mb-1.5 font-mono">Date of Invoice *</label>
+                    <input
+                      type="date"
+                      required
+                      value={invoiceDate}
+                      onChange={e => setInvoiceDate(e.target.value)}
+                      className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2 px-3 text-slate-200 font-mono"
+                    />
+                  </div>
+
+                  {/* Field 3: Pickup Date */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-[#a5b4fc] block mb-1.5 font-mono">Pickup Date *</label>
+                    <input
+                      type="date"
+                      required
+                      value={pickupDate}
+                      onChange={e => setPickupDate(e.target.value)}
+                      className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2 px-3 text-slate-200 font-mono"
+                    />
+                  </div>
+
+                  {/* Field 4: Courier Agency */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-1.5 font-mono">Courier Agency</label>
                     <select
                       value={courierAgency}
                       onChange={e => setCourierAgency(e.target.value)}
-                      className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200 cursor-pointer"
+                      className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2 px-3 text-slate-200 cursor-pointer font-mono"
                     >
                       <option value="Amazon">Amazon</option>
                       <option value="Delhivery">Delhivery</option>
@@ -1372,8 +1280,10 @@ export default function SalesOrdersView() {
                       <option value="BlueDart">BlueDart</option>
                     </select>
                   </div>
+
+                  {/* Field 5: Charges (₹) */}
                   <div>
-                    <label className="text-[10px] uppercase font-bold tracking-widest text-slate-455 block mb-1.5">Charges (₹)</label>
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-1.5 font-mono">Charges (₹)</label>
                     <input
                       type="number"
                       min="0"
@@ -1384,7 +1294,7 @@ export default function SalesOrdersView() {
                         const val = Number(e.target.value);
                         setCourierCharges(Math.round(val * 100) / 100);
                       }}
-                      className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200 font-mono"
+                      className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2 px-3 text-slate-200 font-mono"
                     />
                   </div>
                 </div>
@@ -1399,7 +1309,7 @@ export default function SalesOrdersView() {
                       </span>
                     )}
                   </div>
-                  
+
                   {isReferralCodeDisabled ? (
                     <div className="flex gap-1">
                       <input
@@ -1428,13 +1338,12 @@ export default function SalesOrdersView() {
                             setReferralSearchQuery(matchedName || referralCode);
                             setIsReferralDropdownOpen(true);
                           }}
-                          className={`flex-1 bg-[#0d0d10] border focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200 font-semibold transition-all ${
-                            referralValid 
-                              ? 'border-emerald-500/50 focus:border-emerald-500' 
-                              : referralError 
-                                ? 'border-rose-500/50 focus:border-rose-500' 
-                                : 'border-slate-800 focus:border-violet-500'
-                          }`}
+                          className={`flex-1 bg-[#0d0d10] border focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200 font-semibold transition-all ${referralValid
+                            ? 'border-emerald-500/50 focus:border-emerald-500'
+                            : referralError
+                              ? 'border-rose-500/50 focus:border-rose-500'
+                              : 'border-slate-800 focus:border-violet-500'
+                            }`}
                         />
                         <button
                           type="button"
@@ -1467,9 +1376,8 @@ export default function SalesOrdersView() {
                                   setReferralError('');
                                   setIsReferralDropdownOpen(false);
                                 }}
-                                className={`w-full text-left px-3 py-2.5 hover:bg-violet-950/40 text-slate-300 transition ${
-                                  referralCode === p.referralId ? 'bg-violet-900/20 text-white font-bold' : ''
-                                }`}
+                                className={`w-full text-left px-3 py-2.5 hover:bg-violet-950/40 text-slate-300 transition ${referralCode === p.referralId ? 'bg-violet-900/20 text-white font-bold' : ''
+                                  }`}
                               >
                                 <div className="flex justify-between items-center">
                                   <div>
@@ -1538,19 +1446,9 @@ export default function SalesOrdersView() {
                   <div className="sm:col-span-5">
                     <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-1">Choose Product Item *</label>
                     <select
+                      disabled
                       value={currentItemId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setCurrentItemId(id);
-                        const p = products.find(prod => prod.id === id);
-                        if (p) {
-                          const defaultPrice = orderType === 'Online' ? p.onlinePrice : (p.shopPrice || p.onlinePrice);
-                          setCustomPriceInput(defaultPrice);
-                        } else {
-                          setCustomPriceInput(null);
-                        }
-                      }}
-                      className="w-full bg-[#141418] border border-slate-800 focus:border-violet-500 rounded-lg text-xs py-2 px-2.5 text-slate-200"
+                      className="w-full bg-[#141418] border border-slate-800 rounded-lg text-xs py-2 px-2.5 text-slate-400 cursor-not-allowed opacity-60"
                     >
                       <option value="">-- Choose Product Item --</option>
                       {products.map(p => {
@@ -1568,10 +1466,10 @@ export default function SalesOrdersView() {
                     <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-1">Qty</label>
                     <input
                       type="number"
+                      disabled
                       min="1"
                       value={currentQty}
-                      onChange={(e) => setCurrentQty(parseInt(e.target.value) || 1)}
-                      className="w-full bg-[#141418] border border-slate-800 focus:border-violet-500 rounded-lg text-xs py-2 px-2 text-slate-200 text-center font-mono"
+                      className="w-full bg-[#141418] border border-slate-800 rounded-lg text-xs py-2 px-2 text-slate-400 text-center font-mono cursor-not-allowed opacity-60"
                     />
                   </div>
 
@@ -1581,12 +1479,12 @@ export default function SalesOrdersView() {
                       <span className="absolute left-2.5 top-2.5 text-slate-500 text-xs font-mono">₹</span>
                       <input
                         type="number"
+                        disabled
                         min="0"
                         step="any"
                         placeholder="Price"
                         value={customPriceInput !== null ? customPriceInput : ''}
-                        onChange={(e) => setCustomPriceInput(parseFloat(e.target.value) || 0)}
-                        className="w-full bg-[#141418] border border-slate-800 focus:border-violet-500 rounded-lg text-xs py-2 pl-6 pr-2 text-slate-200 font-semibold font-mono"
+                        className="w-full bg-[#141418] border border-slate-800 rounded-lg text-xs py-2 pl-6 pr-2 text-slate-400 font-semibold font-mono cursor-not-allowed opacity-60"
                       />
                     </div>
                   </div>
@@ -1594,8 +1492,9 @@ export default function SalesOrdersView() {
                   <div className="sm:col-span-2">
                     <button
                       type="button"
-                      onClick={handleAddLineItem}
-                      className="w-full bg-green-600 hover:bg-green-300 text-white hover:text-slate-900 text-xs py-2.5 rounded-lg font-bold transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shadow"
+                      disabled
+                      className="w-full bg-slate-800 text-slate-500 text-xs py-2.5 rounded-lg font-bold transition flex items-center justify-center gap-1.5 cursor-not-allowed opacity-50 shadow-none"
+                      title="Add Item Disabled"
                     >
                       <Plus className="w-3.5 h-3.5" /> Add Item
                     </button>
@@ -1630,7 +1529,7 @@ export default function SalesOrdersView() {
                             const priceExclGst = unitPrice - gstAmountPerUnit;
                             const totalGstAmountForLine = gstAmountPerUnit * item.quantity;
                             const totalExclGstForLine = priceExclGst * item.quantity;
-                            
+
                             const updateLineItemQty = (val: number) => {
                               if (prod && val > prod.stock) {
                                 setErrorMessage(`Insufficient stock. Only ${prod.stock} left for ${prod.name}`);
@@ -1764,17 +1663,14 @@ export default function SalesOrdersView() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-5 bg-[#141418] rounded-2xl border border-slate-800" id="fulfillment-settings">
                 <div>
                   <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-1.5 font-sans">Payment Method</label>
-                  <select
-                    value={selectedMethod}
-                    onChange={(e) => setSelectedMethod(e.target.value as any)}
-                    className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200 font-bold"
-                  >
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="UPI">UPI (Unified Payments)</option>
-                    <option value="Stripe">Stripe API Gateway</option>
-                    <option value="Cash">Cash on Counter</option>
-                    <option value="Credit Card">Credit Card Terminal</option>
-                  </select>
+                  <input
+                    type="text"
+                    disabled
+                    readOnly
+                    placeholder="Payment Method"
+                    value={selectedMethod || 'Bank Transfer'}
+                    className="w-full bg-[#0d0d10]/60 border border-slate-800 rounded-xl text-xs py-2.5 px-3 text-slate-200 font-bold cursor-not-allowed opacity-80"
+                  />
                 </div>
 
                 <div>
@@ -1784,9 +1680,10 @@ export default function SalesOrdersView() {
                     onChange={(e) => setPaymentStatus(e.target.value as any)}
                     className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200"
                   >
-                    <option value="Paid">Paid (Clearing Settled)</option>
-                    <option value="Pending">Pending (Awaiting Wire)</option>
-                    <option value="Overdue">Overdue (Past Credit Limit)</option>
+                    <option value="Paid">PAID</option>
+                    <option value="Pending">PENDING</option>
+                    <option value="Overdue">OVERDUE</option>
+                    <option value="Refunded">REFUNDED</option>
                   </select>
                 </div>
 
@@ -1797,9 +1694,17 @@ export default function SalesOrdersView() {
                     onChange={(e) => setDeliveryStatus(e.target.value as any)}
                     className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200"
                   >
-                    <option value="Pending">Pending Fulfillment</option>
-                    <option value="Shipped">Shipped in Transit</option>
-                    <option value="Delivered">Delivered & Signed</option>
+                    <option value="NOT_STARTED">NOT_STARTED</option>
+                    <option value="PACKING">PACKING</option>
+                    <option value="PACKED">PACKED</option>
+                    <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
+                    <option value="DISPATCHED">DISPATCHED</option>
+                    <option value="IN_TRANSIT">IN_TRANSIT</option>
+                    <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY</option>
+                    <option value="DELIVERED">DELIVERED</option>
+                    <option value="RETURN_IN_PROGRESS">RETURN_IN_PROGRESS</option>
+                    <option value="COMPLETED">COMPLETED</option>
+
                   </select>
                 </div>
               </div>
@@ -1809,7 +1714,6 @@ export default function SalesOrdersView() {
                 <button
                   type="button"
                   onClick={() => {
-                    setIsAdding(false);
                     setEditingOrderId(null);
                     setSelectedCustomerId('');
                     setLineItems([]);
@@ -1822,13 +1726,13 @@ export default function SalesOrdersView() {
                   }}
                   className="py-2.5 px-5 bg-[#141418] hover:bg-[#1a1a22] text-slate-400 border border-slate-800 rounded-xl text-xs font-bold transition cursor-pointer"
                 >
-                  {editingOrderId ? 'Cancel Edit' : 'Cancel Builder'}
+                  Cancel Edit
                 </button>
                 <button
                   type="submit"
                   className="py-2.5 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-700/10 transition cursor-pointer flex items-center gap-1.5 font-sans"
                 >
-                  <Check className="w-4 h-4" /> {editingOrderId ? 'Update Invoice & Save changes' : 'Finalize Invoice & Save Order'}
+                  <Check className="w-4 h-4" /> Update Invoice & Save changes
                 </button>
               </div>
             </div>
@@ -1884,13 +1788,75 @@ export default function SalesOrdersView() {
 
       {/* 5. Transactions Table */}
       <div className="bg-[#0d0d10] border border-slate-800 rounded-2xl shadow overflow-hidden" id="sales-ledgers-wrapper">
+        {/* Top Grid Pagination Toolbar */}
+        <div className="p-4 bg-[#141418] border-b border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4" id="grid-pagination-top">
+          <div className="text-xs text-slate-400 font-medium flex items-center gap-2">
+            <span>Showing</span>
+            <span className="font-extrabold text-white">{filteredOrders.length > 0 ? startIndex + 1 : 0} - {endIndex}</span>
+            <span>of</span>
+            <span className="font-extrabold text-white">{filteredOrders.length}</span>
+            <span>invoices</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(1)}
+              disabled={safeCurrentPage <= 1}
+              className="px-3 py-1.5 bg-[#1f1f26] hover:bg-[#282833] disabled:bg-[#141418] disabled:text-slate-600 text-slate-200 border border-slate-700/60 disabled:border-slate-800/40 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed shadow-sm"
+              id="btn-page-first"
+              title="First Page"
+            >
+              <ChevronsLeft className="w-3.5 h-3.5 text-slate-400" />
+              <span>First</span>
+            </button>
+
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              disabled={safeCurrentPage <= 1}
+              className="px-3 py-1.5 bg-[#1f1f26] hover:bg-[#282833] disabled:bg-[#141418] disabled:text-slate-600 text-slate-200 border border-slate-700/60 disabled:border-slate-800/40 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed shadow-sm"
+              id="btn-page-back"
+              title="Previous Page"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+              <span>Back</span>
+            </button>
+
+            <div className="px-3 py-1 text-xs text-slate-200 font-extrabold bg-[#0d0d10] border border-slate-800 rounded-lg min-w-[100px] text-center font-mono">
+              Page {safeCurrentPage} / {totalPages}
+            </div>
+
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              disabled={safeCurrentPage >= totalPages}
+              className="px-3 py-1.5 bg-[#1f1f26] hover:bg-[#282833] disabled:bg-[#141418] disabled:text-slate-600 text-slate-200 border border-slate-700/60 disabled:border-slate-800/40 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed shadow-sm"
+              id="btn-page-next"
+              title="Next Page"
+            >
+              <span>Next</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+
+            <button
+              onClick={() => setCurrentPage(totalPages)}
+              disabled={safeCurrentPage >= totalPages}
+              className="px-3 py-1.5 bg-[#1f1f26] hover:bg-[#282833] disabled:bg-[#141418] disabled:text-slate-600 text-slate-200 border border-slate-700/60 disabled:border-slate-800/40 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed shadow-sm"
+              id="btn-page-last"
+              title="Last Page"
+            >
+              <span>Last</span>
+              <ChevronsRight className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs min-w-[850px]" id="sales-results-table">
             <thead className="bg-[#141418] text-slate-400 uppercase text-[9px] font-bold tracking-widest border-b border-slate-800">
               <tr>
                 <th className="p-4">Order Number</th>
+                <th className="p-4">Invoice Date</th>
+                <th className="p-4">Invoice ID</th>
                 <th className="p-4">Account Partner</th>
-                <th className="p-4">Billing Date</th>
                 <th className="p-4 text-right">Invoice Sum</th>
                 <th className="p-4">Payment Status</th>
                 <th className="p-4">Fulfillment</th>
@@ -1900,27 +1866,32 @@ export default function SalesOrdersView() {
             <tbody className="divide-y divide-slate-850">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={currentUser?.role === 'Referral Team' ? 6 : 7} className="p-8 text-center text-slate-500">
+                  <td colSpan={currentUser?.role === 'Referral Team' ? 7 : 8} className="p-8 text-center text-slate-500">
                     No sales orders matched active search configurations.
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map(order => (
+                paginatedOrders.map(order => (
                   <tr key={order.id} className="hover:bg-lime-50 hover:text-slate-900 group transition-colors animate-fadeIn" id={`row-${order.id}`}>
                     <td className="p-4 font-mono font-bold text-violet-400 group-hover:text-violet-850">
-                      <div>{order.orderNumber}</div>
+                      <div>{order.orderId || order.orderNumber || order.id}</div>
                       {order.salesChannel && (
                         <span className="inline-block mt-1 text-[9px] font-sans font-extrabold uppercase tracking-widest px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-900/30 group-hover:bg-emerald-100 group-hover:text-emerald-800 group-hover:border-emerald-300">
                           {order.salesChannel}
                         </span>
                       )}
                     </td>
+                    <td className="p-4 font-mono text-[11px] text-slate-300 group-hover:text-slate-900 whitespace-nowrap">
+                      {order.invoiceDate
+                        ? (order.invoiceDate.includes('T') ? new Date(order.invoiceDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : order.invoiceDate)
+                        : (order.createdAt ? new Date(order.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A')}
+                    </td>
+                    <td className="p-4 font-mono text-[11px] font-semibold text-indigo-400 group-hover:text-indigo-800 whitespace-nowrap">
+                      {order.invoiceId || order.id || order.orderNumber}
+                    </td>
                     <td className="p-4">
                       <div className="font-bold text-white group-hover:text-slate-900">{order.customerName}</div>
                       <div className="text-[10px] text-slate-400 font-medium mt-0.5 group-hover:text-slate-600">{order.customerCompany}</div>
-                    </td>
-                    <td className="p-4 text-slate-305 group-hover:text-slate-700 font-mono text-[11px]">
-                      {new Date(order.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                     </td>
                     <td className="p-4 text-right font-black font-mono text-white group-hover:text-slate-900 text-[13px]">
                       ₹{(order.totalValue ?? 0).toLocaleString()}
@@ -1928,12 +1899,11 @@ export default function SalesOrdersView() {
                     <td className="p-4">
                       {/* Static Payment Status Badge */}
                       <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-extrabold select-none ${
-                          order.paymentStatus === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-105 group-hover:text-emerald-805 group-hover:border-emerald-300' :
-                          order.paymentStatus === 'Pending' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 group-hover:bg-orange-105 group-hover:text-orange-855 group-hover:border-orange-300' :
-                          order.paymentStatus === 'Overdue' ? 'bg-rose-500/10 text-rose-450 border border-rose-500/20 group-hover:bg-rose-105 group-hover:text-rose-805 group-hover:border-rose-300' :
-                          'bg-slate-700/10 text-slate-400 border border-slate-700/20'
-                        }`}
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-extrabold select-none ${isPaid(order.paymentStatus) ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-105 group-hover:text-emerald-805 group-hover:border-emerald-300' :
+                          (order.paymentStatus || '').toLowerCase() === 'pending' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 group-hover:bg-orange-105 group-hover:text-orange-855 group-hover:border-orange-300' :
+                            (order.paymentStatus || '').toLowerCase() === 'overdue' ? 'bg-rose-500/10 text-rose-450 border border-rose-500/20 group-hover:bg-rose-105 group-hover:text-rose-805 group-hover:border-rose-300' :
+                              'bg-slate-700/10 text-slate-400 border border-slate-700/20'
+                          }`}
                       >
                         {order.paymentStatus}
                       </span>
@@ -1941,12 +1911,11 @@ export default function SalesOrdersView() {
                     <td className="p-4">
                       {/* Static Delivery Status Badge */}
                       <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-extrabold select-none ${
-                          order.deliveryStatus === 'Delivered' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-105 group-hover:text-emerald-805' :
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-extrabold select-none ${order.deliveryStatus === 'Delivered' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-105 group-hover:text-emerald-805' :
                           order.deliveryStatus === 'Shipped' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 group-hover:bg-indigo-105 group-hover:text-indigo-805' :
-                          order.deliveryStatus === 'Pending' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20 group-hover:bg-amber-105 group-hover:text-amber-805' :
-                          'bg-[#220713] text-rose-400 border border-rose-900/30 group-hover:bg-rose-105 group-hover:text-rose-805'
-                        }`}
+                            order.deliveryStatus === 'Pending' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20 group-hover:bg-amber-105 group-hover:text-amber-805' :
+                              'bg-[#220713] text-rose-400 border border-rose-900/30 group-hover:bg-rose-105 group-hover:text-rose-805'
+                          }`}
                       >
                         {order.deliveryStatus}
                       </span>
@@ -1973,12 +1942,12 @@ export default function SalesOrdersView() {
                               Edit
                             </button>
                           )}
-   
+
                           {hasAccess('Sales Orders', 'delete') && (
                             <button
-                              onClick={() => setOrderToDelete(order)}
-                              className="p-1.5 hover:bg-red-950/20 text-slate-500 hover:text-red-400 rounded-lg transition border border-transparent hover:border-red-900/40 cursor-pointer animate-fadeIn"
-                              title="Delete Ledger"
+                              disabled
+                              className="p-1.5 opacity-40 cursor-not-allowed text-slate-500 rounded-lg border border-transparent animate-fadeIn"
+                              title="Delete Disabled"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1998,7 +1967,7 @@ export default function SalesOrdersView() {
       {selectedInvoice && (
         <div className="fixed inset-0 bg-[#000]/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" id="invoice-modal-overlay">
           <div className="bg-white text-slate-900 w-full max-w-2xl rounded-2xl shadow-2xl p-6 relative overflow-hidden animate-scaleIn select-text">
-            
+
             {/* Header watermarking decoration */}
             <div className="absolute right-0 top-0 w-32 h-32 bg-slate-100 rounded-full translate-x-12 -translate-y-12 shrink-0 select-none pointer-events-none" />
 
@@ -2012,7 +1981,7 @@ export default function SalesOrdersView() {
 
             {/* Invoice Printable document container */}
             <div className="space-y-6">
-              
+
               {/* Document Header */}
               <div className="flex justify-between items-start border-b border-slate-200 pb-5">
                 <div>
@@ -2104,7 +2073,7 @@ export default function SalesOrdersView() {
                           <td className="p-3">
                             <p className="font-bold text-slate-900">{p.productName}</p>
                             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                              <span className="text-[9px] text-slate-400 font-mono">SKU reference identifier #{idx+1}</span>
+                              <span className="text-[9px] text-slate-400 font-mono">SKU reference identifier #{idx + 1}</span>
                               <span className="text-[9px] bg-slate-100 text-slate-605 px-1.5 py-0.2 rounded font-mono font-semibold">
                                 {gstRate}% GST Incl.
                               </span>
@@ -2199,10 +2168,10 @@ export default function SalesOrdersView() {
       {orderToDelete && (
         <div className="fixed inset-0 bg-black/65 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn" id="delete-order-modal">
           <div className="bg-[#141418] border border-slate-800 text-slate-100 w-full max-w-md rounded-2xl shadow-2xl p-6 relative overflow-hidden animate-scaleIn">
-            
+
             {/* Header watermarking decoration */}
             <div className="absolute right-0 top-0 w-24 h-24 bg-red-500/5 rounded-full translate-x-8 -translate-y-8 pointer-events-none" />
-            
+
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-full bg-red-950/40 border border-red-900/40 flex items-center justify-center text-red-400 shrink-0 font-bold">
                 <Trash2 className="w-5 h-5 animate-pulse" />
@@ -2245,55 +2214,48 @@ export default function SalesOrdersView() {
         </div>
       )}
 
-      {/* 8. Custom Elegant Update/Edits Confirmation Modal */}
-      {showUpdateConfirm && updatePayload && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn" id="update-order-confirm-modal">
+
+
+      {/* 8. Save Changes Confirmation Popup Modal */}
+      {showUpdateConfirm && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn" id="save-changes-confirm-modal">
           <div className="bg-[#141418] border border-slate-800 text-slate-100 w-full max-w-md rounded-2xl shadow-2xl p-6 relative overflow-hidden animate-scaleIn">
-            
-            {/* Header watermarking decoration */}
-            <div className="absolute right-3.5 top-3.5 w-24 h-24 bg-violet-500/5 rounded-full pointer-events-none" />
-            
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-full bg-violet-950/40 border border-violet-900/40 flex items-center justify-center text-violet-400 shrink-0 font-bold">
                 <AlertCircle className="w-5 h-5 animate-pulse" />
               </div>
-              <div className="space-y-1.5 flex-1 text-left">
-                <h3 className="text-base font-extrabold text-white tracking-tight leading-none">Confirm Invoice Changes</h3>
+              <div className="space-y-2 flex-1 text-left">
+                <h3 className="text-base font-extrabold text-white tracking-tight leading-none">Save Changes?</h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Are you sure you want to update and save the changes for this invoice & order?
+                  Are you sure you want to update & save changes for this invoice and order?
                 </p>
-                <div className="bg-[#0e0e11] border border-slate-800 p-3 rounded-lg text-[11px] space-y-1 text-slate-400 font-mono">
-                  <div>Customer: <strong className="text-slate-200">{updatePayload.data.customerName}</strong></div>
-                  <div>Total Value: <strong className="text-emerald-450 font-black">₹{(updatePayload.data.totalValue ?? 0).toLocaleString()}</strong></div>
-                  <div>Payment Status: <span className="text-slate-300 font-medium">{updatePayload.data.paymentStatus}</span></div>
-                  <div>Fulfillment Status: <span className="text-slate-300 font-medium">{updatePayload.data.deliveryStatus}</span></div>
+                <div className="bg-[#0e0e11] border border-slate-800 p-3 rounded-lg text-[11px] space-y-1 text-slate-300 font-mono">
+                  <div>Date of Invoice: <strong className="text-white">{invoiceDate}</strong></div>
+                  <div>Pickup Date: <strong className="text-white">{pickupDate}</strong></div>
+                  <div>Courier Agency: <strong className="text-white">{courierAgency}</strong></div>
+                  <div>Charges (₹): <strong className="text-emerald-400">₹{courierCharges}</strong></div>
+                  <div>Settlement Status: <strong className="text-violet-300">{paymentStatus}</strong></div>
+                  <div>Fulfillment Status: <strong className="text-violet-300">{deliveryStatus}</strong></div>
                 </div>
-                <p className="text-[10px] text-amber-500 italic font-medium mt-2">
-                  * Note: product level performance and multilevel referral commissions will be automatically recalculated inside the core ledger with pristine accuracy.
-                </p>
               </div>
             </div>
 
             <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800/60 font-sans">
               <button
                 type="button"
-                onClick={() => {
-                  setShowUpdateConfirm(false);
-                  setUpdatePayload(null);
-                }}
-                className="py-1.5 px-3.5 bg-slate-900 hover:bg-slate-850 text-slate-300 rounded-lg text-xs font-bold transition border border-slate-800 cursor-pointer"
+                onClick={() => setShowUpdateConfirm(false)}
+                className="py-2 px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition border border-slate-700 cursor-pointer"
               >
-                No, Keep Editing
+                No
               </button>
               <button
                 type="button"
-                onClick={handleConfirmUpdate}
-                className="py-1.5 px-4 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-violet-950/30 border border-violet-800/30 cursor-pointer"
+                onClick={handleConfirmSaveInvoiceUpdate}
+                className="py-2 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-950/30 border border-emerald-500/30 cursor-pointer flex items-center gap-1.5"
               >
-                Yes, Update Invoice
+                <Check className="w-4 h-4" /> Yes
               </button>
             </div>
-
           </div>
         </div>
       )}
@@ -2302,10 +2264,10 @@ export default function SalesOrdersView() {
       {showPurgeAllConfirm && (
         <div className="fixed inset-0 bg-black/65 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn" id="purge-all-orders-modal">
           <div className="bg-[#141418] border border-slate-800 text-slate-100 w-full max-w-md rounded-2xl shadow-2xl p-6 relative overflow-hidden animate-scaleIn">
-            
+
             {/* Header watermarking decoration */}
             <div className="absolute right-0 top-0 w-24 h-24 bg-red-500/5 rounded-full translate-x-8 -translate-y-8 pointer-events-none" />
-            
+
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-full bg-red-950/40 border border-red-900/40 flex items-center justify-center text-red-400 shrink-0 font-bold">
                 <Trash2 className="w-5 h-5 animate-pulse" />

@@ -316,6 +316,12 @@ export class UnitMasterRepository extends BaseRepository<UnitMaster> {
   }
 }
 
+export class InvoiceRepository extends BaseRepository<any> {
+  constructor() {
+    super('invoices');
+  }
+}
+
 export const userRepository = new UserRepository();
 export const productRepository = new ProductRepository();
 export const shoppingRepository = new ShoppingRepository();
@@ -350,5 +356,7 @@ export const categoryRepository = new CategoryRepository();
 export const brandRepository = new BrandRepository();
 export const brandOwnerRepository = new BrandOwnerRepository();
 export const unitMasterRepository = new UnitMasterRepository();
+export const invoiceRepository = new InvoiceRepository();
+
 
 

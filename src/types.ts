@@ -104,11 +104,12 @@ export interface ProductPerformance {
 
 export interface CustomerPerformance {
   id: string;
-  customerId: string;
+  customerId?: string;
   name: string;
   company: string;
   email: string;
   mobileNumber: string;
+  phone?: string;
   countrymobilecode?: string;
   mobilenumberwithcountrycode?: string;
   address: string;
@@ -132,6 +133,7 @@ export interface CustomerPerformance {
   commissionEarned?: number;
   commissionPayable?: number;
   commissionPaid?: number;
+  isFromLead?: boolean;
 }
 
 export interface MarketingCampaign {
@@ -146,6 +148,7 @@ export interface MarketingCampaign {
   roi: number; // ROI percentage
   startDate: string;
   endDate: string;
+  leadsGenerated?: number;
 }
 
 export interface WhatsAppTemplate {
@@ -171,6 +174,7 @@ export interface WhatsAppMessage {
   timestamp: string;
   status: 'sent' | 'delivered' | 'read' | 'failed';
   templateName?: string;
+  leadId?: string;
 }
 
 export interface SystemAuditLog {
@@ -185,7 +189,7 @@ export interface SystemAuditLog {
 
 export interface Referral {
   id: string;
-  referralId: string;
+  referralId?: string;
   name: string;
   mobileNumber: string;
   email?: string;
@@ -229,6 +233,7 @@ export interface SalesProduct {
 export interface SalesOrder {
   id: string;
   orderNumber: string;
+  orderId?: string;
   customerId: string;
   customerName: string;
   customerCompany: string;
@@ -236,14 +241,18 @@ export interface SalesOrder {
   totalValue: number;
   paymentStatus: 'Paid' | 'Pending' | 'Overdue' | 'Refunded';
   deliveryStatus: 'Pending' | 'Shipped' | 'Delivered' | 'Cancelled';
+  salesPlatform?: string;
   assignedTo: string;
   createdAt: string;
   paymentMethod: 'Cash' | 'Bank Transfer' | 'Stripe' | 'UPI' | 'Credit Card';
+  invoiceId?: string;
   invoiceDate?: string;
   pickupDate?: string;
   courierAgency?: string;
   courierCharges?: number;
   contactNo?: string;
+  customerMobile?: string;
+  deliveryFee?: number;
   referralCode?: string;
   orderType?: 'Online' | 'Shop';
   salesChannel?: 'Amazon' | 'Flipkart' | 'Vamjo' | 'Meesho' | 'Shop' | 'Website' | 'Distributor' | 'Other Marketplace' | string;
@@ -370,7 +379,7 @@ export interface ProductReview {
 
 export interface CustomerDeliveryAddress {
   id: string;
-  customerId: string;
+  customerId?: string;
   userId?: string;
   name: string;
   mobileNumber: string;

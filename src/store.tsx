@@ -135,7 +135,7 @@ export interface CRMContextType {
   deleteCampaign: (id: string) => Promise<void>;
   
   whatsAppMessages: WhatsAppMessage[];
-  sendWhatsAppMessage: (phone: string, content: string, templateName?: string) => Promise<void>;
+  sendWhatsAppMessage: (phone: string, content: string, leadId?: string, templateName?: string) => Promise<void>;
   deleteAllWhatsAppMessages: () => Promise<void>;
   whatsAppSequence: WhatsAppSequenceStep[];
   updateSequenceStep: (id: string, updates: Partial<WhatsAppSequenceStep>) => Promise<void>;
@@ -521,8 +521,19 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setRegisteredUsers(fetchedUsers);
       setProducts(fetchedProducts);
-      setSalesOrders(fetchedOrders);
+      const mappedOrders = fetchedOrders.map(o => ({
+        ...o,
+        salesPlatform: o.salesPlatform || 'webleafyearth'
+      }));
+      setSalesOrders(mappedOrders);
       setCustomers(fetchedCustomers);
+
+      // Mass update existing sales_orders records in Firestore if missing salesPlatform
+      fetchedOrders.forEach(o => {
+        if (!o.salesPlatform) {
+          orderRepository.update(o.id, { salesPlatform: 'webleafyearth' }).catch(() => {});
+        }
+      });
       setTasks(fetchedTasks);
       setCalendarEvents(fetchedEvents);
       setCampaigns(fetchedCampaigns);
@@ -1384,12 +1395,13 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // WhatsApp Messages & Sequences
-  const sendWhatsAppMessage = useCallback(async (phone: string, content: string, templateName?: string) => {
+  const sendWhatsAppMessage = useCallback(async (phone: string, content: string, leadId?: string, templateName?: string) => {
     try {
       const msg: Omit<WhatsAppMessage, 'id'> = {
         phone,
         direction: 'Outgoing' as const,
         content,
+        leadId,
         templateName,
         timestamp: new Date().toISOString(),
         status: 'sent'
@@ -1522,6 +1534,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const fullOrder = {
         ...orderData,
+        salesPlatform: orderData.salesPlatform || 'webleafyearth',
         orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
         createdAt: new Date().toISOString()
       };
@@ -2243,9 +2256,15 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (existing) {
         return prev.map(i => i.productId === productId ? { ...i, quantity: i.quantity + quantity } : i);
       }
-      return [...prev, { productId, quantity }];
+      const newItem: ShoppingCartItem = {
+        id: `cart-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        userId: currentUser?.id || 'guest',
+        productId,
+        quantity
+      };
+      return [...prev, newItem];
     });
-  }, []);
+  }, [currentUser]);
 
   const removeFromCart = useCallback((productId: string) => {
     setShoppingCart(prev => prev.filter(i => i.productId !== productId));
@@ -2258,8 +2277,14 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const clearCart = useCallback(() => setShoppingCart([]), []);
 
   const toggleWishlist = useCallback((productId: string) => {
-    setWishlist(prev => prev.some(w => w.productId === productId) ? prev.filter(w => w.productId !== productId) : [...prev, { productId }]);
-  }, []);
+    const newItem: WishlistItem = {
+      id: `wish-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      userId: currentUser?.id || 'guest',
+      productId,
+      createdAt: new Date().toISOString()
+    };
+    setWishlist(prev => prev.some(w => w.productId === productId) ? prev.filter(w => w.productId !== productId) : [...prev, newItem]);
+  }, [currentUser]);
 
   const addProductReview = useCallback((review: Omit<ProductReview, 'id' | 'createdAt'>) => {
     setProductReviews(prev => [...prev, { ...review, id: `rev-${Date.now()}`, createdAt: new Date().toISOString() }]);
@@ -2329,11 +2354,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true, transaction: tx };
   }, []);
 
-  const verifyPaymentFlow = useCallback(async (transactionId: string, gatewayResponse: any) => {
+  const verifyPaymentFlow = useCallback(async (transactionId: string, gatewayResponse: any): Promise<{ success: boolean; order?: SalesOrder; transaction?: PaymentTransaction; error?: string }> => {
     const tx = paymentTransactions.find(t => t.id === transactionId);
     if (tx) {
       updatePaymentTransaction(transactionId, { status: 'Success' });
-      return { success: true, transaction: { ...tx, status: 'Success' } };
+      const updatedTx: PaymentTransaction = { ...tx, status: 'Success' };
+      return { success: true, transaction: updatedTx };
     }
     return { success: false, error: 'Transaction not found' };
   }, [paymentTransactions, updatePaymentTransaction]);

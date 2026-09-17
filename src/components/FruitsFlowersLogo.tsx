@@ -85,7 +85,7 @@ export default function FruitsFlowersLogo({ className = '', size = '100%' }: Fru
             fontSize="18px" 
             fontFamily="Georgia, ui-serif, Cambria, serif"
             fontStyle="italic"
-            textAnchor="center"
+            textAnchor="middle"
           >
             n
           </text>

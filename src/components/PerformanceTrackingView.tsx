@@ -109,6 +109,7 @@ export default function PerformanceTrackingView() {
   const [editFlipkartWeblink, setEditFlipkartWeblink] = useState<string>('');
   const [editMeeshoWeblink, setEditMeeshoWeblink] = useState<string>('');
   const [editCategory, setEditCategory] = useState<string>('');
+  const [editCategories, setEditCategories] = useState<string[]>([]);
   const [editBrand, setEditBrand] = useState<string>('');
   const [editBrandOwner, setEditBrandOwner] = useState<string>('');
   const [editImages, setEditImages] = useState<string[]>([]);
@@ -171,6 +172,7 @@ export default function PerformanceTrackingView() {
   const [prodFlipkartWeblink, setProdFlipkartWeblink] = useState('');
   const [prodMeeshoWeblink, setProdMeeshoWeblink] = useState('');
   const [prodCategory, setProdCategory] = useState('');
+  const [prodCategories, setProdCategories] = useState<string[]>([]);
   const [prodBrand, setProdBrand] = useState('');
   const [prodBrandOwner, setProdBrandOwner] = useState('');
   const [prodImages, setProdImages] = useState<string[]>([]);
@@ -839,7 +841,8 @@ export default function PerformanceTrackingView() {
       amazonWeblink: editAmazonWeblink,
       flipkartWeblink: editFlipkartWeblink,
       meeshoWeblink: editMeeshoWeblink,
-      category: editCategory,
+      category: editCategories[0] || editCategory || '',
+      categories: editCategories,
       brand: editBrand,
       brandOwner: editBrandOwner,
       images: parsedEditImages,
@@ -876,7 +879,11 @@ export default function PerformanceTrackingView() {
     setEditAmazonWeblink(p.amazonWeblink || '');
     setEditFlipkartWeblink(p.flipkartWeblink || '');
     setEditMeeshoWeblink(p.meeshoWeblink || '');
-    setEditCategory(p.category || '');
+    const initialEditCats = Array.isArray(p.categories) && p.categories.length > 0
+      ? p.categories
+      : (p.category ? [p.category] : []);
+    setEditCategories(initialEditCats);
+    setEditCategory(initialEditCats[0] || '');
     setEditBrand(p.brand || '');
     setEditBrandOwner(p.brandOwner || '');
     setEditCatSearchQuery(p.category || '');
@@ -958,7 +965,8 @@ export default function PerformanceTrackingView() {
       fd.append('amazonWeblink', prodAmazonWeblink);
       fd.append('flipkartWeblink', prodFlipkartWeblink);
       fd.append('meeshoWeblink', prodMeeshoWeblink);
-      fd.append('category', prodCategory);
+      fd.append('category', prodCategories[0] || prodCategory || '');
+      fd.append('categories', JSON.stringify(prodCategories));
       fd.append('brand', prodBrand);
       fd.append('brandOwner', prodBrandOwner);
       fd.append('images', JSON.stringify(parsedProdImages));
@@ -1016,7 +1024,8 @@ export default function PerformanceTrackingView() {
             amazonWeblink: prodAmazonWeblink,
             flipkartWeblink: prodFlipkartWeblink,
             meeshoWeblink: prodMeeshoWeblink,
-            category: prodCategory,
+            category: prodCategories[0] || prodCategory || '',
+            categories: prodCategories,
             brand: prodBrand,
             brandOwner: prodBrandOwner,
             imageUrl: uploadRes.downloadUrl,
@@ -1065,7 +1074,8 @@ export default function PerformanceTrackingView() {
             amazonWeblink: prodAmazonWeblink,
             flipkartWeblink: prodFlipkartWeblink,
             meeshoWeblink: prodMeeshoWeblink,
-            category: prodCategory,
+            category: prodCategories[0] || prodCategory || '',
+            categories: prodCategories,
             brand: prodBrand,
             brandOwner: prodBrandOwner,
             imageUrl: uploadRes.downloadUrl,
@@ -1112,7 +1122,8 @@ export default function PerformanceTrackingView() {
             amazonWeblink: prodAmazonWeblink,
             flipkartWeblink: prodFlipkartWeblink,
             meeshoWeblink: prodMeeshoWeblink,
-            category: prodCategory,
+            category: prodCategories[0] || prodCategory || '',
+            categories: prodCategories,
             brand: prodBrand,
             brandOwner: prodBrandOwner,
             images: parsedProdImages,
@@ -1158,7 +1169,8 @@ export default function PerformanceTrackingView() {
         amazonWeblink: prodAmazonWeblink,
         flipkartWeblink: prodFlipkartWeblink,
         meeshoWeblink: prodMeeshoWeblink,
-        category: prodCategory,
+        category: prodCategories[0] || prodCategory || '',
+        categories: prodCategories,
         brand: prodBrand,
         brandOwner: prodBrandOwner,
         // Firebase Storage fields - empty when no image
@@ -1184,8 +1196,8 @@ export default function PerformanceTrackingView() {
     setProdHsnCode('');
     setProdPackingSize('500ml Bottle');
     setProdUnit('NOS');
-    setProdOnlinePrice(12);
-    setProdShopPrice(15);
+    setProdOnlinePrice(0);
+    setProdShopPrice(0);
     setProdGstPercentage(18);
     setProdNotes('');
     setProdImageFile(null);
@@ -1199,6 +1211,7 @@ export default function PerformanceTrackingView() {
     setProdFlipkartWeblink('');
     setProdMeeshoWeblink('');
     setProdCategory('');
+    setProdCategories([]);
     setProdBrand('');
     setProdBrandOwner('');
     
@@ -1967,33 +1980,69 @@ export default function PerformanceTrackingView() {
                     <option value={0}>0% GST (Exempt)</option>
                   </select>
                 </div>
-                {/* CATEGORY SEARCHABLE COMBOBOX */}
+                {/* CATEGORIES SEARCHABLE MULTI-SELECT COMBOBOX */}
                 <div className="relative" ref={catDropdownRef}>
-                  <label className="block text-[10px] font-bold text-sky-400 mb-1.5 uppercase tracking-wider">CATEGORY:</label>
+                  <label className="block text-[10px] font-bold text-sky-400 mb-1.5 uppercase tracking-wider">
+                    CATEGORIES (SELECT MULTIPLE):
+                  </label>
+                  
+                  {/* Selected Category Badges */}
+                  {prodCategories.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {prodCategories.map(cat => (
+                        <span 
+                          key={cat} 
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-950/80 text-sky-300 border border-sky-800/60 shadow-sm transition hover:bg-sky-900/80"
+                        >
+                          <span>{cat}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = prodCategories.filter(c => c.toLowerCase() !== cat.toLowerCase());
+                              setProdCategories(updated);
+                              setProdCategory(updated[0] || '');
+                            }}
+                            className="hover:text-rose-400 text-sky-400 transition cursor-pointer p-0.5 rounded-full hover:bg-sky-950"
+                            title="Remove category"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="relative">
                     <input 
                       type="text" 
-                      placeholder="e.g. Fruits & Flowers" 
-                      value={isCatDropdownOpen ? catSearchQuery : prodCategory}
+                      placeholder="Type to search or add categories..." 
+                      value={catSearchQuery}
                       onChange={e => {
-                        const val = e.target.value;
-                        setProdCategory(val);
-                        setCatSearchQuery(val);
+                        setCatSearchQuery(e.target.value);
                         setIsCatDropdownOpen(true);
                       }}
                       onFocus={() => {
                         setIsCatDropdownOpen(true);
-                        setCatSearchQuery(prodCategory);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && catSearchQuery.trim()) {
+                          e.preventDefault();
+                          const trimmed = catSearchQuery.trim();
+                          if (!prodCategories.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+                            const updated = [...prodCategories, trimmed];
+                            setProdCategories(updated);
+                            setProdCategory(updated[0] || '');
+                          }
+                          setCatSearchQuery('');
+                        }
                       }}
                       className="w-full text-xs p-2.5 pr-14 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      required
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                      {prodCategory && (
+                      {catSearchQuery && (
                         <button
                           type="button"
                           onClick={() => {
-                            setProdCategory('');
                             setCatSearchQuery('');
                           }}
                           className="hover:text-rose-400 text-slate-500 transition cursor-pointer p-0.5"
@@ -2006,9 +2055,6 @@ export default function PerformanceTrackingView() {
                         type="button"
                         onClick={() => {
                           setIsCatDropdownOpen(!isCatDropdownOpen);
-                          if (!isCatDropdownOpen) {
-                            setCatSearchQuery(prodCategory);
-                          }
                         }}
                         className="hover:text-indigo-400 text-slate-500 transition cursor-pointer p-0.5"
                         title="Toggle dropdown"
@@ -2020,28 +2066,56 @@ export default function PerformanceTrackingView() {
 
                   {isCatDropdownOpen && (
                     <div className="absolute z-50 left-0 right-0 mt-1.5 bg-[#0d0d10] border border-slate-850 rounded-xl max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-850 animate-fadeIn scrollbar-thin">
+                      {catSearchQuery.trim() && !dynamicCategories.some(c => c.toLowerCase() === catSearchQuery.trim().toLowerCase()) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const trimmed = catSearchQuery.trim();
+                            if (!prodCategories.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+                              const updated = [...prodCategories, trimmed];
+                              setProdCategories(updated);
+                              setProdCategory(updated[0] || '');
+                            }
+                            setCatSearchQuery('');
+                          }}
+                          className="w-full text-left px-3 py-2 text-[11px] text-indigo-400 font-semibold hover:bg-indigo-950/40 transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add custom category "{catSearchQuery.trim()}"</span>
+                        </button>
+                      )}
                       {filteredCategories.length === 0 ? (
                         <div className="px-3 py-2 text-[11px] text-slate-500 italic">
-                          No matching categories. Type to use custom category.
+                          No matching categories. Type & press Enter to add custom category.
                         </div>
                       ) : (
-                        filteredCategories.map(cat => (
-                          <button
-                            key={cat}
-                            type="button"
-                            onClick={() => {
-                              setProdCategory(cat);
-                              setCatSearchQuery(cat);
-                              setIsCatDropdownOpen(false);
-                            }}
-                            className="w-full text-left px-3 py-2 text-[11px] hover:bg-slate-900 text-slate-300 hover:text-white transition flex items-center justify-between cursor-pointer"
-                          >
-                            <span>{cat}</span>
-                            {prodCategory.toLowerCase() === cat.toLowerCase() && (
-                              <Check className="w-3 h-3 text-sky-400 shrink-0" />
-                            )}
-                          </button>
-                        ))
+                        filteredCategories.map(cat => {
+                          const isSelected = prodCategories.some(c => c.toLowerCase() === cat.toLowerCase());
+                          return (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => {
+                                let updated: string[];
+                                if (isSelected) {
+                                  updated = prodCategories.filter(c => c.toLowerCase() !== cat.toLowerCase());
+                                } else {
+                                  updated = [...prodCategories, cat];
+                                }
+                                setProdCategories(updated);
+                                setProdCategory(updated[0] || '');
+                              }}
+                              className={`w-full text-left px-3 py-2 text-[11px] hover:bg-slate-900 transition flex items-center justify-between cursor-pointer ${
+                                isSelected ? 'text-sky-300 font-semibold bg-sky-950/30' : 'text-slate-300 hover:text-white'
+                              }`}
+                            >
+                              <span>{cat}</span>
+                              {isSelected && (
+                                <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })
                       )}
                     </div>
                   )}
@@ -3433,33 +3507,69 @@ export default function PerformanceTrackingView() {
                         </select>
                       </div>
 
-                      {/* EDIT CATEGORY SEARCHABLE COMBOBOX */}
+                      {/* EDIT CATEGORIES SEARCHABLE MULTI-SELECT COMBOBOX */}
                       <div className="relative" ref={editCatDropdownRef}>
-                        <label className="block text-[10px] font-bold text-sky-400 mb-1.5 uppercase tracking-wider">CATEGORY:</label>
+                        <label className="block text-[10px] font-bold text-sky-400 mb-1.5 uppercase tracking-wider">
+                          CATEGORIES (SELECT MULTIPLE):
+                        </label>
+
+                        {/* Selected Category Badges */}
+                        {editCategories.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {editCategories.map(cat => (
+                              <span 
+                                key={cat} 
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-950/80 text-sky-300 border border-sky-800/60 shadow-sm transition hover:bg-sky-900/80"
+                              >
+                                <span>{cat}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = editCategories.filter(c => c.toLowerCase() !== cat.toLowerCase());
+                                    setEditCategories(updated);
+                                    setEditCategory(updated[0] || '');
+                                  }}
+                                  className="hover:text-rose-400 text-sky-400 transition cursor-pointer p-0.5 rounded-full hover:bg-sky-950"
+                                  title="Remove category"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
                         <div className="relative">
                           <input 
                             type="text" 
-                            placeholder="e.g. Fruits & Flowers" 
-                            value={isEditCatDropdownOpen ? editCatSearchQuery : editCategory}
+                            placeholder="Type to search or add categories..." 
+                            value={editCatSearchQuery}
                             onChange={e => {
-                              const val = e.target.value;
-                              setEditCategory(val);
-                              setEditCatSearchQuery(val);
+                              setEditCatSearchQuery(e.target.value);
                               setIsEditCatDropdownOpen(true);
                             }}
                             onFocus={() => {
                               setIsEditCatDropdownOpen(true);
-                              setEditCatSearchQuery(editCategory);
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && editCatSearchQuery.trim()) {
+                                e.preventDefault();
+                                const trimmed = editCatSearchQuery.trim();
+                                if (!editCategories.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+                                  const updated = [...editCategories, trimmed];
+                                  setEditCategories(updated);
+                                  setEditCategory(updated[0] || '');
+                                }
+                                setEditCatSearchQuery('');
+                              }
                             }}
                             className="w-full text-xs p-2.5 pr-14 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                            required
                           />
                           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                            {editCategory && (
+                            {editCatSearchQuery && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setEditCategory('');
                                   setEditCatSearchQuery('');
                                 }}
                                 className="hover:text-rose-400 text-slate-500 transition cursor-pointer p-0.5"
@@ -3472,9 +3582,6 @@ export default function PerformanceTrackingView() {
                               type="button"
                               onClick={() => {
                                 setIsEditCatDropdownOpen(!isEditCatDropdownOpen);
-                                if (!isEditCatDropdownOpen) {
-                                  setEditCatSearchQuery(editCategory);
-                                }
                               }}
                               className="hover:text-indigo-400 text-slate-500 transition cursor-pointer p-0.5"
                               title="Toggle dropdown"
@@ -3486,28 +3593,56 @@ export default function PerformanceTrackingView() {
 
                         {isEditCatDropdownOpen && (
                           <div className="absolute z-50 left-0 right-0 mt-1.5 bg-[#0d0d10] border border-slate-850 rounded-xl max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-850 animate-fadeIn scrollbar-thin">
+                            {editCatSearchQuery.trim() && !dynamicCategories.some(c => c.toLowerCase() === editCatSearchQuery.trim().toLowerCase()) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const trimmed = editCatSearchQuery.trim();
+                                  if (!editCategories.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+                                    const updated = [...editCategories, trimmed];
+                                    setEditCategories(updated);
+                                    setEditCategory(updated[0] || '');
+                                  }
+                                  setEditCatSearchQuery('');
+                                }}
+                                className="w-full text-left px-3 py-2 text-[11px] text-indigo-400 font-semibold hover:bg-indigo-950/40 transition flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Add custom category "{editCatSearchQuery.trim()}"</span>
+                              </button>
+                            )}
                             {filteredEditCategories.length === 0 ? (
                               <div className="px-3 py-2 text-[11px] text-slate-500 italic">
-                                No matching categories. Type to use custom category.
+                                No matching categories. Type & press Enter to add custom category.
                               </div>
                             ) : (
-                              filteredEditCategories.map(cat => (
-                                <button
-                                  key={cat}
-                                  type="button"
-                                  onClick={() => {
-                                    setEditCategory(cat);
-                                    setEditCatSearchQuery(cat);
-                                    setIsEditCatDropdownOpen(false);
-                                  }}
-                                  className="w-full text-left px-3 py-2 text-[11px] hover:bg-slate-900 text-slate-300 hover:text-white transition flex items-center justify-between cursor-pointer"
-                                >
-                                  <span>{cat}</span>
-                                  {editCategory.toLowerCase() === cat.toLowerCase() && (
-                                    <Check className="w-3 h-3 text-sky-400 shrink-0" />
-                                  )}
-                                </button>
-                              ))
+                              filteredEditCategories.map(cat => {
+                                const isSelected = editCategories.some(c => c.toLowerCase() === cat.toLowerCase());
+                                return (
+                                  <button
+                                    key={cat}
+                                    type="button"
+                                    onClick={() => {
+                                      let updated: string[];
+                                      if (isSelected) {
+                                        updated = editCategories.filter(c => c.toLowerCase() !== cat.toLowerCase());
+                                      } else {
+                                        updated = [...editCategories, cat];
+                                      }
+                                      setEditCategories(updated);
+                                      setEditCategory(updated[0] || '');
+                                    }}
+                                    className={`w-full text-left px-3 py-2 text-[11px] hover:bg-slate-900 transition flex items-center justify-between cursor-pointer ${
+                                      isSelected ? 'text-sky-300 font-semibold bg-sky-950/30' : 'text-slate-300 hover:text-white'
+                                    }`}
+                                  >
+                                    <span>{cat}</span>
+                                    {isSelected && (
+                                      <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                                    )}
+                                  </button>
+                                );
+                              })
                             )}
                           </div>
                         )}

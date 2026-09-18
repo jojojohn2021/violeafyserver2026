@@ -556,6 +556,30 @@ app.post('/api/products', requireAuthenticatedRequest, upload.single('image'), a
     const productId = String(body.id || body.productId || Date.now());
 
     const payload: any = { ...body, id: productId };
+    let parsedCategories: string[] = [];
+    if (Array.isArray(body.categories)) {
+      parsedCategories = body.categories.map((c: any) => String(c).trim()).filter(Boolean);
+    } else if (typeof body.categories === 'string' && body.categories.trim()) {
+      try {
+        const parsed = JSON.parse(body.categories);
+        if (Array.isArray(parsed)) {
+          parsedCategories = parsed.map((c: any) => String(c).trim()).filter(Boolean);
+        } else {
+          parsedCategories = body.categories.split(',').map((c: string) => c.trim()).filter(Boolean);
+        }
+      } catch {
+        parsedCategories = body.categories.split(',').map((c: string) => c.trim()).filter(Boolean);
+      }
+    } else if (body.category) {
+      parsedCategories = [String(body.category).trim()].filter(Boolean);
+    }
+    if (parsedCategories.length > 0) {
+      payload.categories = parsedCategories;
+      if (!payload.category) {
+        payload.category = parsedCategories[0];
+      }
+    }
+
     if (file) {
         const storagePath = `products/${productId}/main.jpg`;
       const bucket = adminStorage.bucket();

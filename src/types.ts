@@ -82,6 +82,7 @@ export interface ProductPerformance {
   flipkartWeblink?: string;
   meeshoWeblink?: string;
   category?: string;
+  categories?: string[];
   brand?: string;
   brandOwner?: string;
   // Firebase Storage - main product image

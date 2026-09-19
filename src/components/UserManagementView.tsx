@@ -239,9 +239,9 @@ export default function UserManagementView() {
   const filteredUsers = registeredUsers.filter(user => {
     const term = searchTerm.toLowerCase();
     const matchesSearch = 
-      user.name.toLowerCase().includes(term) ||
+      (user.name || '').toLowerCase().includes(term) ||
       (user.email || '').toLowerCase().includes(term) ||
-      (user.mobileNumber || '').includes(term) ||
+      (user.mobileNumber || '').toLowerCase().includes(term) ||
       (user.team || '').toLowerCase().includes(term);
 
     const matchesRole = selectedRoleFilter === 'all' || user.role === selectedRoleFilter;

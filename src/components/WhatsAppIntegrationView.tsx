@@ -72,9 +72,9 @@ export default function WhatsAppIntegrationView() {
     .filter(r => {
       if (!referralSearchQuery) return true;
       const query = referralSearchQuery.toLowerCase();
-      return r.name.toLowerCase().includes(query) || 
-             r.referralId.toLowerCase().includes(query) || 
-             r.mobileNumber.includes(query);
+      return (r.name || '').toLowerCase().includes(query) || 
+             (r.referralId || '').toLowerCase().includes(query) || 
+             (r.mobileNumber || '').includes(query);
     });
 
   // Current active profiles

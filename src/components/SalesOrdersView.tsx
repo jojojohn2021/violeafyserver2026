@@ -378,8 +378,8 @@ export default function SalesOrdersView() {
   const filteredCustomers = customers.filter(c => {
     const q = customerSearchQuery.toLowerCase();
     return (
-      c.name.toLowerCase().includes(q) ||
-      (c.mobileNumber || '').toLowerCase().includes(q) ||
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.mobileNumber || c.phone || '').toLowerCase().includes(q) ||
       (c.company || '').toLowerCase().includes(q)
     );
   });

@@ -363,9 +363,9 @@ export default function CustomerManagementView() {
     for (const c of customers) {
       if (excludeId && c.id === excludeId) continue;
       
-      const existingMobile = c.mobileNumber.replace(/\D/g, '');
+      const existingMobile = (c.mobileNumber || c.phone || '').replace(/\D/g, '');
 
-      if (existingMobile === normMobile) {
+      if (existingMobile && normMobile && existingMobile === normMobile) {
         setValidationError(`Database conflict: Mobile Number "${targetMobile}" is already assigned to a profile.`);
         setEditValError(`Database conflict: Mobile Number "${targetMobile}" is already assigned to a profile.`);
         return false;
@@ -606,13 +606,22 @@ export default function CustomerManagementView() {
 
   // Filter & Search Implementation
   const filteredCustomers = customers.filter(c => {
-    const matchesSearch = 
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.mobileNumber.includes(searchTerm) ||
-      c.district.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.state.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.pincode && c.pincode.toLowerCase().includes(searchTerm.toLowerCase()));
+    if (!c) return false;
+    const query = (searchTerm || '').toLowerCase().trim();
+
+    const matchesSearch = !query ||
+      (c.name || '').toLowerCase().includes(query) ||
+      (c.company || '').toLowerCase().includes(query) ||
+      (c.mobileNumber || '').toLowerCase().includes(query) ||
+      (c.phone || '').toLowerCase().includes(query) ||
+      (c.mobilenumberwithcountrycode || '').toLowerCase().includes(query) ||
+      (c.customerId || c.id || '').toLowerCase().includes(query) ||
+      (c.district || '').toLowerCase().includes(query) ||
+      (c.state || '').toLowerCase().includes(query) ||
+      (c.pincode || '').toLowerCase().includes(query) ||
+      (c.email || '').toLowerCase().includes(query) ||
+      (c.address || '').toLowerCase().includes(query) ||
+      (c.partnerName || '').toLowerCase().includes(query);
 
     const matchesState = stateFilter === 'all' || c.state === stateFilter;
     const matchesTier = tierFilter === 'all' || c.tier === tierFilter;

@@ -513,12 +513,13 @@ export default function PerformanceTrackingView() {
       if (order.products) {
         order.products.forEach(item => {
           if (item.productId === p.id) {
-            volume += (item.quantity || 0);
+            volume += Number(item.quantity) || 0;
           }
         });
       }
     });
-    return volume > 0 ? volume : (p.unitsSold || 0);
+    const finalVol = volume > 0 ? volume : (Number(p.unitsSold) || 0);
+    return Number(finalVol) || 0;
   };
 
   const getProductRevenue = (p: ProductPerformance) => {
@@ -528,20 +529,23 @@ export default function PerformanceTrackingView() {
       if (order.products) {
         order.products.forEach(item => {
           if (item.productId === p.id) {
-            const gstRate = item.gstPercentage !== undefined ? item.gstPercentage : (p.gstPercentage !== undefined ? p.gstPercentage : 18);
-            const itemTotal = item.price * item.quantity;
+            const gstRate = Number(item.gstPercentage !== undefined ? item.gstPercentage : (p.gstPercentage !== undefined ? p.gstPercentage : 18)) || 0;
+            const itemPrice = Number(item.price) || 0;
+            const itemQty = Number(item.quantity) || 0;
+            const itemTotal = itemPrice * itemQty;
             const gstAmount = itemTotal * (gstRate / (100 + gstRate));
             const baseValue = itemTotal - gstAmount;
-            revenue += baseValue;
+            revenue += Number(baseValue) || 0;
           }
         });
       }
     });
     if (revenue === 0) {
-      const channelSum = (p.amazonSales ?? 0) + (p.flipkartSales ?? 0) + (p.meeshoSales ?? 0) + (p.vamjoSales ?? 0) + (p.whatsappSales ?? 0) + (p.countersaleSales ?? 0);
-      return channelSum > 0 ? channelSum : (p.revenue || 0);
+      const channelSum = Number(p.amazonSales ?? 0) + Number(p.flipkartSales ?? 0) + Number(p.meeshoSales ?? 0) + Number(p.vamjoSales ?? 0) + Number(p.whatsappSales ?? 0) + Number(p.countersaleSales ?? 0);
+      const finalRev = channelSum > 0 ? channelSum : (Number(p.revenue) || 0);
+      return Number(finalRev) || 0;
     }
-    return revenue;
+    return Number(revenue) || 0;
   };
 
   const getProductBrandOwner = (p: ProductPerformance) => {
@@ -4476,9 +4480,9 @@ export default function PerformanceTrackingView() {
               .map(cat => {
                 const catProducts = products.filter(p => (p.category || 'Uncategorized').toLowerCase() === cat.toLowerCase());
                 const totalProducts = catProducts.length;
-                const totalStock = catProducts.reduce((sum, p) => sum + (p.stock || 0), 0);
-                const totalRevenue = catProducts.reduce((sum, p) => sum + getProductRevenue(p), 0);
-                const totalUnitsSold = catProducts.reduce((sum, p) => sum + getProductVolume(p), 0);
+                const totalStock = catProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+                const totalRevenue = catProducts.reduce((sum, p) => sum + (Number(getProductRevenue(p)) || 0), 0);
+                const totalUnitsSold = catProducts.reduce((sum, p) => sum + (Number(getProductVolume(p)) || 0), 0);
                 
                 // Calculate Net Revenue (Before GST), Total Orders, Last Sales Date from non-cancelled orders
                 let netRevenueBeforeGst = 0;
@@ -4496,11 +4500,13 @@ export default function PerformanceTrackingView() {
                       if (itemCat.toLowerCase() === cat.toLowerCase()) {
                         hasCatProduct = true;
                         
-                        const gstRate = item.gstPercentage !== undefined ? item.gstPercentage : (pMaster?.gstPercentage !== undefined ? pMaster.gstPercentage : 18);
-                        const itemTotal = item.price * item.quantity;
+                        const gstRate = Number(item.gstPercentage !== undefined ? item.gstPercentage : (pMaster?.gstPercentage !== undefined ? pMaster.gstPercentage : 18)) || 0;
+                        const itemPrice = Number(item.price) || 0;
+                        const itemQty = Number(item.quantity) || 0;
+                        const itemTotal = itemPrice * itemQty;
                         const gstAmount = itemTotal * (gstRate / (100 + gstRate));
                         const baseValue = itemTotal - gstAmount;
-                        netRevenueBeforeGst += baseValue;
+                        netRevenueBeforeGst += Number(baseValue) || 0;
                       }
                     });
                   }
@@ -4635,15 +4641,15 @@ export default function PerformanceTrackingView() {
                       <div className="grid grid-cols-2 gap-3 mb-4">
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Sales Volume</span>
-                          <span className="text-xs font-bold text-slate-202">{totalUnitsSold.toLocaleString()} sold</span>
+                          <span className="text-xs font-bold text-slate-202">{(Number(totalUnitsSold) || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} sold</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Total Revenue</span>
-                          <span className="text-xs font-bold text-emerald-400 font-mono">₹{totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span className="text-xs font-bold text-emerald-400 font-mono">₹{(Number(totalRevenue) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Net Revenue (Excl GST)</span>
-                          <span className="text-xs font-bold text-indigo-400 font-mono">₹{netRevenueBeforeGst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span className="text-xs font-bold text-indigo-400 font-mono">₹{(Number(netRevenueBeforeGst) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Total Orders</span>
@@ -4695,9 +4701,9 @@ export default function PerformanceTrackingView() {
               .map(brand => {
                 const brandProducts = products.filter(p => (p.brand || 'Generic').toLowerCase() === brand.name.toLowerCase());
                 const totalProducts = brandProducts.length;
-                const totalStock = brandProducts.reduce((sum, p) => sum + (p.stock || 0), 0);
-                const totalRevenue = brandProducts.reduce((sum, p) => sum + getProductRevenue(p), 0);
-                const totalUnitsSold = brandProducts.reduce((sum, p) => sum + getProductVolume(p), 0);
+                const totalStock = brandProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+                const totalRevenue = brandProducts.reduce((sum, p) => sum + (Number(getProductRevenue(p)) || 0), 0);
+                const totalUnitsSold = brandProducts.reduce((sum, p) => sum + (Number(getProductVolume(p)) || 0), 0);
 
                 // Calculate Net Revenue (Before GST), Total Orders, Last Sales Date from non-cancelled orders
                 let netRevenueBeforeGst = 0;
@@ -4715,11 +4721,13 @@ export default function PerformanceTrackingView() {
                       if (itemBrand.toLowerCase() === brand.name.toLowerCase()) {
                         hasBrandProduct = true;
                         
-                        const gstRate = item.gstPercentage !== undefined ? item.gstPercentage : (pMaster?.gstPercentage !== undefined ? pMaster.gstPercentage : 18);
-                        const itemTotal = item.price * item.quantity;
+                        const gstRate = Number(item.gstPercentage !== undefined ? item.gstPercentage : (pMaster?.gstPercentage !== undefined ? pMaster.gstPercentage : 18)) || 0;
+                        const itemPrice = Number(item.price) || 0;
+                        const itemQty = Number(item.quantity) || 0;
+                        const itemTotal = itemPrice * itemQty;
                         const gstAmount = itemTotal * (gstRate / (100 + gstRate));
                         const baseValue = itemTotal - gstAmount;
-                        netRevenueBeforeGst += baseValue;
+                        netRevenueBeforeGst += Number(baseValue) || 0;
                       }
                     });
                   }
@@ -4865,15 +4873,15 @@ export default function PerformanceTrackingView() {
                       <div className="grid grid-cols-2 gap-3 mb-4 mt-4">
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Sales Volume</span>
-                          <span className="text-xs font-bold text-slate-202">{totalUnitsSold.toLocaleString()} sold</span>
+                          <span className="text-xs font-bold text-slate-202">{(Number(totalUnitsSold) || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} sold</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Total Revenue</span>
-                          <span className="text-xs font-bold text-emerald-400 font-mono">₹{totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span className="text-xs font-bold text-emerald-400 font-mono">₹{(Number(totalRevenue) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Net Revenue (Excl GST)</span>
-                          <span className="text-xs font-bold text-indigo-400 font-mono">₹{netRevenueBeforeGst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span className="text-xs font-bold text-indigo-400 font-mono">₹{(Number(netRevenueBeforeGst) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Total Orders</span>
@@ -4926,9 +4934,9 @@ export default function PerformanceTrackingView() {
                 const ownerBrandsCount = dynamicBrands.filter(b => b.owner.toLowerCase() === owner.toLowerCase()).length;
                 const ownerProducts = products.filter(p => getProductBrandOwner(p).toLowerCase() === owner.toLowerCase());
                 const totalProducts = ownerProducts.length;
-                const totalStock = ownerProducts.reduce((sum, p) => sum + (p.stock || 0), 0);
-                const totalRevenue = ownerProducts.reduce((sum, p) => sum + getProductRevenue(p), 0);
-                const totalUnitsSold = ownerProducts.reduce((sum, p) => sum + getProductVolume(p), 0);
+                const totalStock = ownerProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+                const totalRevenue = ownerProducts.reduce((sum, p) => sum + (Number(getProductRevenue(p)) || 0), 0);
+                const totalUnitsSold = ownerProducts.reduce((sum, p) => sum + (Number(getProductVolume(p)) || 0), 0);
 
                 // Calculate Net Revenue (Before GST), Total Orders, Last Sales Date from non-cancelled orders
                 let netRevenueBeforeGst = 0;
@@ -4946,11 +4954,13 @@ export default function PerformanceTrackingView() {
                       if (itemOwner.toLowerCase() === owner.toLowerCase()) {
                         hasOwnerProduct = true;
                         
-                        const gstRate = item.gstPercentage !== undefined ? item.gstPercentage : (pMaster?.gstPercentage !== undefined ? pMaster.gstPercentage : 18);
-                        const itemTotal = item.price * item.quantity;
+                        const gstRate = Number(item.gstPercentage !== undefined ? item.gstPercentage : (pMaster?.gstPercentage !== undefined ? pMaster.gstPercentage : 18)) || 0;
+                        const itemPrice = Number(item.price) || 0;
+                        const itemQty = Number(item.quantity) || 0;
+                        const itemTotal = itemPrice * itemQty;
                         const gstAmount = itemTotal * (gstRate / (100 + gstRate));
                         const baseValue = itemTotal - gstAmount;
-                        netRevenueBeforeGst += baseValue;
+                        netRevenueBeforeGst += Number(baseValue) || 0;
                       }
                     });
                   }
@@ -5086,15 +5096,15 @@ export default function PerformanceTrackingView() {
                       <div className="grid grid-cols-2 gap-3 mb-4">
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Sales Volume</span>
-                          <span className="text-xs font-bold text-slate-202">{totalUnitsSold.toLocaleString()} sold</span>
+                          <span className="text-xs font-bold text-slate-202">{(Number(totalUnitsSold) || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} sold</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Total Revenue</span>
-                          <span className="text-xs font-bold text-emerald-400 font-mono">₹{totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span className="text-xs font-bold text-emerald-400 font-mono">₹{(Number(totalRevenue) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Net Revenue (Excl GST)</span>
-                          <span className="text-xs font-bold text-indigo-400 font-mono">₹{netRevenueBeforeGst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <span className="text-xs font-bold text-indigo-400 font-mono">₹{(Number(netRevenueBeforeGst) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="bg-[#0d0d10]/55 p-2.5 rounded-xl border border-slate-900">
                           <span className="text-[10px] text-slate-550 uppercase tracking-wider block mb-0.5">Total Orders</span>

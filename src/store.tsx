@@ -992,7 +992,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateProduct = useCallback(async (id: string, updates: Partial<ProductPerformance>) => {
     try {
       await productRepository.update(id, updates);
-      setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+      setProducts(prev => prev.map(p => String(p.id || '').trim() === String(id || '').trim() ? { ...p, ...updates } : p));
     } catch (err: any) {
       setFirestoreError({
         hasError: true,
@@ -1007,7 +1007,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteProduct = useCallback(async (id: string) => {
     try {
       await productRepository.delete(id);
-      setProducts(prev => prev.filter(p => p.id !== id));
+      setProducts(prev => prev.filter(p => String(p.id || '').trim() !== String(id || '').trim()));
     } catch (err: any) {
       setFirestoreError({
         hasError: true,

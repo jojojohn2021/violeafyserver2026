@@ -67,6 +67,13 @@ export default function PerformanceTrackingView() {
   // Master record search filters
   const [masterSearchQuery, setMasterSearchQuery] = useState<string>('');
 
+  // Search states for All Products tab
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [productSearchName, setProductSearchName] = useState('');
+  const [productSearchCategory, setProductSearchCategory] = useState('all');
+  const [productSearchBrand, setProductSearchBrand] = useState('all');
+  const [productSearchOwner, setProductSearchOwner] = useState('all');
+
   // Modals / forms for adding master records
   const [showAddMasterModal, setShowAddMasterModal] = useState<'category' | 'brand' | 'owner' | 'unit' | null>(null);
   const [newMasterName, setNewMasterName] = useState('');
@@ -94,6 +101,7 @@ export default function PerformanceTrackingView() {
   const [skuError, setSkuError] = useState<string | null>(null);
   const [editName, setEditName] = useState<string>('');
   const [editSku, setEditSku] = useState<string>('');
+  const [editOriginalSku, setEditOriginalSku] = useState<string>('');
   const [editHsnCode, setEditHsnCode] = useState<string>('');
   const [editPackingSize, setEditPackingSize] = useState<string>('');
   const [editUnit, setEditUnit] = useState<string>('');
@@ -441,6 +449,62 @@ export default function PerformanceTrackingView() {
   const filteredEditOwners = dynamicBrandOwners.filter(owner => 
     owner.toLowerCase().includes(editOwnerSearchQuery.toLowerCase())
   );
+
+  // Filtered Products for All Products tab
+  const filteredProducts = products.filter(p => {
+    // 1. General Search Query (across name, category, brand, brandOwner, sku)
+    if (productSearchQuery.trim()) {
+      const q = productSearchQuery.trim().toLowerCase();
+      const pCats = Array.isArray(p.categories) && p.categories.length > 0 ? p.categories : (p.category ? [p.category] : []);
+      const matchesName = (p.name || '').toLowerCase().includes(q);
+      const matchesCategory = pCats.some(c => c.toLowerCase().includes(q)) || (p.category || '').toLowerCase().includes(q);
+      const matchesBrand = (p.brand || '').toLowerCase().includes(q);
+      const matchesOwner = (p.brandOwner || '').toLowerCase().includes(q);
+      const matchesSku = (p.sku || '').toLowerCase().includes(q);
+      if (!matchesName && !matchesCategory && !matchesBrand && !matchesOwner && !matchesSku) {
+        return false;
+      }
+    }
+    // 2. Specific PROD NAME search
+    if (productSearchName.trim()) {
+      const qName = productSearchName.trim().toLowerCase();
+      if (!(p.name || '').toLowerCase().includes(qName)) return false;
+    }
+    // 3. Specific CATEGORY filter
+    if (productSearchCategory !== 'all') {
+      const qCat = productSearchCategory.toLowerCase();
+      const pCats = Array.isArray(p.categories) && p.categories.length > 0 ? p.categories : (p.category ? [p.category] : []);
+      const matchesCat = pCats.some(c => c.toLowerCase() === qCat) || (p.category || '').toLowerCase() === qCat;
+      if (!matchesCat) return false;
+    }
+    // 4. Specific BRAND filter
+    if (productSearchBrand !== 'all') {
+      const qBrand = productSearchBrand.toLowerCase();
+      if ((p.brand || '').toLowerCase() !== qBrand) return false;
+    }
+    // 5. Specific BRAND OWNER filter
+    if (productSearchOwner !== 'all') {
+      const qOwner = productSearchOwner.toLowerCase();
+      if ((p.brandOwner || '').toLowerCase() !== qOwner) return false;
+    }
+    return true;
+  });
+
+  const hasActiveProductFilters = Boolean(
+    productSearchQuery.trim() ||
+    productSearchName.trim() ||
+    productSearchCategory !== 'all' ||
+    productSearchBrand !== 'all' ||
+    productSearchOwner !== 'all'
+  );
+
+  const clearProductSearchFilters = () => {
+    setProductSearchQuery('');
+    setProductSearchName('');
+    setProductSearchCategory('all');
+    setProductSearchBrand('all');
+    setProductSearchOwner('all');
+  };
 
   const getProductVolume = (p: ProductPerformance) => {
     let volume = 0;
@@ -805,6 +869,10 @@ export default function PerformanceTrackingView() {
   const handleSavePricing = (id: string) => {
     if (!hasAccess('Products & Clients', 'edit')) return;
 
+    if (!editSku.trim()) {
+      setSkuError('SKU PREFIX is required.');
+      return;
+    }
     if (!editHsnCode.trim()) {
       setSkuError('HSN Code is required.');
       return;
@@ -815,10 +883,18 @@ export default function PerformanceTrackingView() {
     }
 
     const cleanedSku = editSku.trim().toUpperCase();
-    const isDuplicate = products.some(p => p.id !== id && p.sku.trim().toUpperCase() === cleanedSku);
-    if (isDuplicate) {
-      setSkuError(`SKU PREFIX "${cleanedSku}" is already taken by another product. SKU PREFIX must be unique.`);
-      return;
+    const originalSku = editOriginalSku.trim().toUpperCase();
+
+    // Only perform duplicate check if the user modified the SKU prefix field
+    if (cleanedSku !== originalSku) {
+      const isDuplicate = products.some(p => 
+        String(p.id || '').trim() !== String(id || '').trim() && 
+        (p.sku || '').trim().toUpperCase() === cleanedSku
+      );
+      if (isDuplicate) {
+        setSkuError(`SKU PREFIX "${cleanedSku}" is already taken by another product. SKU PREFIX must be unique.`);
+        return;
+      }
     }
 
     setSkuError(null);
@@ -866,6 +942,7 @@ export default function PerformanceTrackingView() {
     setEditingProductId(p.id);
     setEditName(p.name);
     setEditSku(p.sku);
+    setEditOriginalSku((p.sku || '').trim().toUpperCase());
     setEditHsnCode(p.hsnCode || '');
     setEditPackingSize(p.packingSize || '500ml Bottle');
     setEditUnit(p.unit || 'NOS');
@@ -1832,6 +1909,116 @@ export default function PerformanceTrackingView() {
             </div>
           )}
 
+          {/* SEARCH & FILTERS HEADER BAR FOR ALL PRODUCTS */}
+          <div className="bg-[#0d0d10] border border-slate-800/80 rounded-2xl p-4 space-y-3.5 shadow-md" id="all-products-search-bar">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800/60 pb-3">
+              <div className="flex items-center gap-2">
+                <Search className="w-4 h-4 text-indigo-400" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">Search Products</span>
+                <span className="text-[10px] bg-slate-900 border border-slate-800 text-indigo-300 font-mono px-2 py-0.5 rounded-full font-bold">
+                  Showing {filteredProducts.length} of {products.length} Products
+                </span>
+              </div>
+
+              {hasActiveProductFilters && (
+                <button
+                  type="button"
+                  onClick={clearProductSearchFilters}
+                  className="px-2.5 py-1 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-900/50 text-rose-400 text-[11px] font-semibold rounded-lg transition-all flex items-center gap-1 cursor-pointer w-fit"
+                  title="Clear all search filters"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Clear Filters</span>
+                </button>
+              )}
+            </div>
+
+            {/* 4 SEARCH OPTIONS: PROD NAME, CATEGORY, BRAND, BRAND OWNER */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+              {/* 1. PROD NAME Search */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <Tag className="w-3 h-3 text-indigo-400" />
+                  PROD NAME:
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search product name..."
+                    value={productSearchName}
+                    onChange={(e) => setProductSearchName(e.target.value)}
+                    className="w-full text-xs pl-8 pr-7 py-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-500"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  {productSearchName && (
+                    <button
+                      type="button"
+                      onClick={() => setProductSearchName('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white p-0.5"
+                      title="Clear product name search"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. CATEGORY Filter */}
+              <div>
+                <label className="block text-[10px] font-bold text-sky-400 mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <Tag className="w-3 h-3 text-sky-400" />
+                  CATEGORY:
+                </label>
+                <select
+                  value={productSearchCategory}
+                  onChange={(e) => setProductSearchCategory(e.target.value)}
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
+                >
+                  <option value="all">All Categories ({dynamicCategories.length})</option>
+                  {dynamicCategories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 3. BRAND Filter */}
+              <div>
+                <label className="block text-[10px] font-bold text-amber-400 mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <Award className="w-3 h-3 text-amber-400" />
+                  BRAND:
+                </label>
+                <select
+                  value={productSearchBrand}
+                  onChange={(e) => setProductSearchBrand(e.target.value)}
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                >
+                  <option value="all">All Brands ({dynamicBrands.length})</option>
+                  {dynamicBrands.map(b => (
+                    <option key={b.name} value={b.name}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 4. BRAND OWNER Filter */}
+              <div>
+                <label className="block text-[10px] font-bold text-emerald-400 mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <Building2 className="w-3 h-3 text-emerald-400" />
+                  BRAND OWNER:
+                </label>
+                <select
+                  value={productSearchOwner}
+                  onChange={(e) => setProductSearchOwner(e.target.value)}
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                >
+                  <option value="all">All Brand Owners ({dynamicBrandOwners.length})</option>
+                  {dynamicBrandOwners.map(owner => (
+                    <option key={owner} value={owner}>{owner}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
           {/* Action section products */}
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
@@ -2711,7 +2898,27 @@ export default function PerformanceTrackingView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-xs">
-                  {products.map((p) => {
+                  {filteredProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={16} className="p-8 text-center bg-[#0d0d10]">
+                        <div className="flex flex-col items-center justify-center space-y-2">
+                          <Search className="w-8 h-8 text-slate-600" />
+                          <p className="text-sm font-semibold text-slate-300">No products match your search criteria</p>
+                          <p className="text-xs text-slate-500">Try adjusting your search criteria for Prod Name, Category, Brand, or Brand Owner.</p>
+                          {hasActiveProductFilters && (
+                            <button
+                              type="button"
+                              onClick={clearProductSearchFilters}
+                              className="mt-2 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                            >
+                              Clear Search Filters
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredProducts.map((p) => {
                     const isEditing = false;
 
                     return (
@@ -3346,7 +3553,7 @@ export default function PerformanceTrackingView() {
                       )}
                     </React.Fragment>
                   );
-                })}
+                }))}
                 </tbody>
               </table>
             </div>

@@ -290,12 +290,13 @@ export class BrandOwnerRepository extends BaseRepository<BrandOwner> {
     super('product_brand_owners');
   }
 
-  async uploadBrandOwnerImage(name: string, file: File, existingId?: string): Promise<BrandOwner> {
+  async uploadBrandOwnerImage(name: string, file: File, existingId?: string, extraFields?: Partial<BrandOwner>): Promise<BrandOwner> {
     const id = existingId || `owner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const uploaded = await uploadBrandOwnerImage(file, id);
     const data: BrandOwner = {
       id,
       name,
+      ...(extraFields || {}),
       imageUrl: uploaded.downloadUrl,
       storagePath: uploaded.storagePath,
       createdAt: new Date().toISOString(),

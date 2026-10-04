@@ -307,9 +307,18 @@ export interface Brand {
 export interface BrandOwner {
   id: string;
   name: string;
-  contactPerson?: string;
-  contactEmail?: string;
-  contactPhone?: string;
+  contactPerson?: string;     // Brand Owner Contact Name
+  contactName?: string;       // Brand Owner Contact Name
+  contactMobile?: string;     // Brand Owner Contact Mobile
+  contactPhone?: string;      // Brand Owner Contact Mobile (Alias)
+  whatsappNo?: string;        // Brand Owner Whatsappno
+  contactEmail?: string;      // Brand Owner email
+  email?: string;             // Brand Owner email (Alias)
+  address?: string;           // Brand Owner Address
+  gstNo?: string;             // Brand Owner Gstno
+  fssaiRegNo?: string;        // Brand Owner fssairegno
+  otherRegDetails?: string;   // Brand Owner otherRegdetails
+  gpsTracking?: string;       // Brand Owner gpstracking
   description?: string;
   imageUrl?: string;
   storagePath?: string;

@@ -81,25 +81,17 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     assert.equal(orders[1].paymentStatus, 'Pending');
   });
 
-  it('2. Should start and complete packing lifecycle without mutating sales_orders', async () => {
+  it('2. Should complete packing lifecycle without mutating sales_orders', async () => {
     const { collections, dbAccessor } = createMockDatabase();
     const service = new OperationsService(dbAccessor);
 
     const initialSalesOrderCopy = JSON.stringify(collections.sales_orders);
 
-    // Start packing
-    const packing1 = await service.startPacking('ord_1001', 'Packer-Alpha');
-    assert.equal(packing1.status, 'PACKING');
-    assert.equal(packing1.packedBy, 'Packer-Alpha');
-
-    let details = await service.getOrderDetails('ord_1001');
-    assert.equal(details.fulfilment.status, 'PACKING');
-
     // Complete packing
     const packing2 = await service.completePacking('ord_1001', 'Packer-Alpha', 'Verified seals and item counts');
     assert.equal(packing2.status, 'PACKED');
 
-    details = await service.getOrderDetails('ord_1001');
+    const details = await service.getOrderDetails('ord_1001');
     assert.equal(details.fulfilment.status, 'PACKED');
 
     // Verify original sales_orders records remained completely untouched
@@ -229,37 +221,13 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     assert.equal(resolved.status, 'REFUNDED');
   });
 
-  it('8. Should handle payment reminders for unpaid orders', async () => {
-    const { collections, dbAccessor } = createMockDatabase();
-    const service = new OperationsService(dbAccessor);
-
-    // Standard reminder
-    const reminder1 = await service.sendPaymentReminder('ord_1002');
-    assert.equal(reminder1.status, 'SENT');
-
-    // WhatsApp reminder
-    const reminder2 = await service.sendWhatsAppPaymentReminder('ord_1002');
-    assert.equal(reminder2.status, 'SENT');
-    assert.equal(reminder2.sentToPhone, '+919876543210');
-
-    // Verify WhatsApp message logged to collection
-    assert.equal(collections.whatsapp_messages.length, 1);
-    assert.equal(collections.whatsapp_messages[0].phone, '+919876543210');
-
-    // Attempting to send reminder for paid order must throw error
-    await assert.rejects(
-      async () => service.sendPaymentReminder('ord_1001'),
-      (err: any) => err.message.includes('already paid')
-    );
-  });
-
-  it('9. Should support Idempotency-Key header to prevent duplicate operations', async () => {
+  it('8. Should support Idempotency-Key header to prevent duplicate operations', async () => {
     const { dbAccessor } = createMockDatabase();
     const service = new OperationsService(dbAccessor);
 
     const key = 'idem_key_unique_001';
-    const packing1 = await service.startPacking('ord_1001', 'Packer-A', key);
-    const packing2 = await service.startPacking('ord_1001', 'Packer-B', key);
+    const packing1 = await service.completePacking('ord_1001', 'Packer-A', 'Notes A', key);
+    const packing2 = await service.completePacking('ord_1001', 'Packer-B', 'Notes B', key);
 
     // Repeated call with same idempotency key must return cached exact result
     assert.equal(packing1.id, packing2.id);

@@ -118,12 +118,22 @@ describe('Brand Masters & Brand Owners Master API & Database Verification Tests'
     assert.strictEqual(owners.length, 0);
   });
 
-  it('7. Should create a new Brand Owner Master document in product_brand_owners collection', async () => {
+  it('7. Should create a new Brand Owner Master document with full details in product_brand_owners collection', async () => {
     const newOwner: BrandOwner = {
       id: 'owner_001',
       name: 'CleanseCorp India Ltd',
       contactPerson: 'Rajesh Malhotra',
+      contactName: 'Rajesh Malhotra',
+      contactMobile: '+91 9876543210',
+      contactPhone: '+91 9876543210',
+      whatsappNo: '+91 9876543210',
       contactEmail: 'rajesh@cleansecorp.in',
+      email: 'rajesh@cleansecorp.in',
+      address: 'Plot 45, Industrial Area Phase II, Mohali, Punjab',
+      gstNo: '03AAACC1234H1Z5',
+      fssaiRegNo: '10021064000123',
+      otherRegDetails: 'MSME Reg: UDYAM-PB-12-0001234',
+      gpsTracking: 'https://maps.google.com/?q=30.7046,76.7179',
       description: 'Parent corporate manufacturer',
       imageUrl: 'https://example.com/cleansecorp_logo.jpg',
       createdAt: new Date().toISOString(),
@@ -135,12 +145,24 @@ describe('Brand Masters & Brand Owners Master API & Database Verification Tests'
     assert.strictEqual(owners.length, 1);
     assert.strictEqual(owners[0].id, 'owner_001');
     assert.strictEqual(owners[0].name, 'CleanseCorp India Ltd');
+    assert.strictEqual(owners[0].contactName, 'Rajesh Malhotra');
+    assert.strictEqual(owners[0].contactMobile, '+91 9876543210');
+    assert.strictEqual(owners[0].whatsappNo, '+91 9876543210');
+    assert.strictEqual(owners[0].contactEmail, 'rajesh@cleansecorp.in');
+    assert.strictEqual(owners[0].address, 'Plot 45, Industrial Area Phase II, Mohali, Punjab');
+    assert.strictEqual(owners[0].gstNo, '03AAACC1234H1Z5');
+    assert.strictEqual(owners[0].fssaiRegNo, '10021064000123');
+    assert.strictEqual(owners[0].otherRegDetails, 'MSME Reg: UDYAM-PB-12-0001234');
+    assert.strictEqual(owners[0].gpsTracking, 'https://maps.google.com/?q=30.7046,76.7179');
     assert.strictEqual(owners[0].imageUrl, 'https://example.com/cleansecorp_logo.jpg');
   });
 
-  it('8. Should update Brand Owner Master document in product_brand_owners collection', async () => {
+  it('8. Should update Brand Owner Master document fields in product_brand_owners collection', async () => {
     await brandOwnerRepo.update('owner_001', {
       contactPerson: 'Sanjay Malhotra',
+      contactName: 'Sanjay Malhotra',
+      whatsappNo: '+91 9123456789',
+      gstNo: '03AAACC1234H1Z9',
       description: 'Leading organic FMCG conglomerate',
     });
 
@@ -148,6 +170,9 @@ describe('Brand Masters & Brand Owners Master API & Database Verification Tests'
     const updated = owners.find(o => o.id === 'owner_001');
     assert.ok(updated);
     assert.strictEqual(updated.contactPerson, 'Sanjay Malhotra');
+    assert.strictEqual(updated.contactName, 'Sanjay Malhotra');
+    assert.strictEqual(updated.whatsappNo, '+91 9123456789');
+    assert.strictEqual(updated.gstNo, '03AAACC1234H1Z9');
     assert.strictEqual(updated.description, 'Leading organic FMCG conglomerate');
   });
 

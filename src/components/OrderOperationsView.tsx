@@ -199,25 +199,7 @@ export const OrderOperationsView: React.FC = () => {
   };
 
   // API Triggers
-  const handleStartPacking = async (orderId: string) => {
-    try {
-      const res = await fetch(`/api/operations/orders/${orderId}/packing/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packerId: packerIdInput }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showStatus('Packing started successfully!');
-        fetchOrders();
-        fetchOrderDetails(orderId);
-      } else {
-        showStatus(data.error || 'Failed to start packing', 'error');
-      }
-    } catch (err: any) {
-      showStatus(err.message, 'error');
-    }
-  };
+
 
   const handleCompletePacking = async (orderId: string) => {
     try {
@@ -374,28 +356,7 @@ export const OrderOperationsView: React.FC = () => {
     }
   };
 
-  const handleSendPaymentReminder = async (orderId: string, type: 'standard' | 'whatsapp') => {
-    try {
-      const endpoint = type === 'whatsapp'
-        ? `/api/operations/orders/${orderId}/whatsapp-payment-reminder`
-        : `/api/operations/orders/${orderId}/payment-reminder`;
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sentBy: 'Ops Desk' }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showStatus(`${type === 'whatsapp' ? 'WhatsApp' : 'Standard'} payment reminder sent successfully!`);
-        fetchOrderDetails(orderId);
-      } else {
-        showStatus(data.error || 'Failed to send reminder', 'error');
-      }
-    } catch (err: any) {
-      showStatus(err.message, 'error');
-    }
-  };
 
   const handleSaveStatus = async () => {
     if (!selectedOrder) return;
@@ -611,15 +572,7 @@ VioLeafy E-Commerce Platform`;
           Returns & Reverse Logistics
         </button>
 
-        <button
-          onClick={() => setActiveSubTab('unpaid')}
-          className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === 'unpaid' ? 'bg-amber-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          <Send className="w-4 h-4" />
-          Payment Reminders
-        </button>
+
       </div>
 
       {/* Filter and Search Bar */}
@@ -848,12 +801,7 @@ VioLeafy E-Commerce Platform`;
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                     <h4 className="font-black text-slate-700 uppercase text-[10px] tracking-wider">Fulfilment Action Pipeline</h4>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handleStartPacking(selectedOrder.id)}
-                        className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Package className="w-3.5 h-3.5" /> Start Packing
-                      </button>
+
 
                       <button
                         onClick={() => setActiveModal('packing')}
@@ -890,19 +838,7 @@ VioLeafy E-Commerce Platform`;
                         <RotateCcw className="w-3.5 h-3.5" /> Process Return
                       </button>
 
-                      <button
-                        onClick={() => handleSendPaymentReminder(selectedOrder.id, 'standard')}
-                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Send className="w-3.5 h-3.5" /> Payment Reminder
-                      </button>
 
-                      <button
-                        onClick={() => handleSendPaymentReminder(selectedOrder.id, 'whatsapp')}
-                        className="px-3.5 py-2 bg-green-600 hover:bg-green-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" /> WhatsApp Reminder
-                      </button>
 
                       <button
                         onClick={() => openPrintOrderModal(selectedOrder)}

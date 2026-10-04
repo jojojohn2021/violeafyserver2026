@@ -1688,18 +1688,7 @@ const handleUpdateStatus = async (req: express.Request, res: express.Response) =
 app.post("/api/operations/orders/:orderId/status", handleUpdateStatus);
 app.post("/api/v1/operations/orders/:orderId/status", handleUpdateStatus);
 
-// 8. POST /api/operations/orders/:orderId/packing/start & /api/v1/...
-const handleStartPacking = async (req: express.Request, res: express.Response) => {
-  try {
-    const { packerId } = req.body || {};
-    const packing = await operationsService.startPacking(req.params.orderId, packerId, getIdempotencyKey(req));
-    return res.json({ success: true, packing });
-  } catch (error: any) {
-    return res.status(400).json({ error: error?.message || "Failed to start packing" });
-  }
-};
-app.post("/api/operations/orders/:orderId/packing/start", handleStartPacking);
-app.post("/api/v1/operations/orders/:orderId/packing/start", handleStartPacking);
+
 
 // 9. POST /api/operations/orders/:orderId/packing/complete & /api/v1/...
 const handleCompletePacking = async (req: express.Request, res: express.Response) => {
@@ -1856,31 +1845,7 @@ const handleResolveReturn = async (req: express.Request, res: express.Response) 
 app.post("/api/operations/returns/:returnId/resolve", handleResolveReturn);
 app.post("/api/v1/operations/returns/:returnId/resolve", handleResolveReturn);
 
-// 18. POST /api/operations/orders/:orderId/payment-reminder & /api/v1/...
-const handleSendPaymentReminder = async (req: express.Request, res: express.Response) => {
-  try {
-    const { sentBy } = req.body || {};
-    const reminder = await operationsService.sendPaymentReminder(req.params.orderId, sentBy, getIdempotencyKey(req));
-    return res.json({ success: true, reminder });
-  } catch (error: any) {
-    return res.status(400).json({ error: error?.message || "Failed to send payment reminder" });
-  }
-};
-app.post("/api/operations/orders/:orderId/payment-reminder", handleSendPaymentReminder);
-app.post("/api/v1/operations/orders/:orderId/payment-reminder", handleSendPaymentReminder);
 
-// 19. POST /api/operations/orders/:orderId/whatsapp-payment-reminder & /api/v1/...
-const handleSendWhatsAppPaymentReminder = async (req: express.Request, res: express.Response) => {
-  try {
-    const { phoneOverride, sentBy } = req.body || {};
-    const reminder = await operationsService.sendWhatsAppPaymentReminder(req.params.orderId, phoneOverride, sentBy, getIdempotencyKey(req));
-    return res.json({ success: true, reminder });
-  } catch (error: any) {
-    return res.status(400).json({ error: error?.message || "Failed to send WhatsApp payment reminder" });
-  }
-};
-app.post("/api/operations/orders/:orderId/whatsapp-payment-reminder", handleSendWhatsAppPaymentReminder);
-app.post("/api/v1/operations/orders/:orderId/whatsapp-payment-reminder", handleSendWhatsAppPaymentReminder);
 
 // 20. CATEGORY MASTER API ENDPOINTS (GET, POST, PUT, DELETE) -> violeafydb database
 const handleGetCategories = async (req: express.Request, res: express.Response) => {

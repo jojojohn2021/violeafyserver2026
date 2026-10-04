@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useCRM } from '../store';
-import { ProductPerformance, CustomerPerformance } from '../types';
+import { ProductPerformance, CustomerPerformance, BrandOwner } from '../types';
 import ProductReviewsSection from './ProductReviewsSection';
 import { uploadFileToStorage, uploadProductImage } from '../utils/storageUpload';
 import { auth } from '../firebase';
@@ -8,7 +8,8 @@ import {
   LineChart, ShoppingBag, Heart, BarChart3, TrendingUp, Grid, 
   Trash2, Plus, Edit, DollarSign, HelpCircle, Check, Award,
   Users, Tag, Building2, Search, FolderKanban, Sparkles,
-  ChevronDown, X, ArrowUpDown, Filter, RefreshCw, AlertTriangle, Shield
+  ChevronDown, X, ArrowUpDown, Filter, RefreshCw, AlertTriangle, Shield,
+  MapPin, Phone, Mail, FileText
 } from 'lucide-react';
 
 export const normalizeStringArray = (val: any): string[] => {
@@ -148,6 +149,29 @@ export default function PerformanceTrackingView() {
   const [newMasterOwnerFile, setNewMasterOwnerFile] = useState<File | null>(null);
   const [newMasterOwnerPreview, setNewMasterOwnerPreview] = useState<string>('');
   const [newMasterOwnerDescription, setNewMasterOwnerDescription] = useState<string>('');
+  const [newMasterOwnerContactName, setNewMasterOwnerContactName] = useState<string>('');
+  const [newMasterOwnerContactMobile, setNewMasterOwnerContactMobile] = useState<string>('');
+  const [newMasterOwnerWhatsappNo, setNewMasterOwnerWhatsappNo] = useState<string>('');
+  const [newMasterOwnerEmail, setNewMasterOwnerEmail] = useState<string>('');
+  const [newMasterOwnerAddress, setNewMasterOwnerAddress] = useState<string>('');
+  const [newMasterOwnerGstNo, setNewMasterOwnerGstNo] = useState<string>('');
+  const [newMasterOwnerFssaiRegNo, setNewMasterOwnerFssaiRegNo] = useState<string>('');
+  const [newMasterOwnerOtherRegDetails, setNewMasterOwnerOtherRegDetails] = useState<string>('');
+  const [newMasterOwnerGpsTracking, setNewMasterOwnerGpsTracking] = useState<string>('');
+
+  // Edit Brand Owner Modal State
+  const [editingOwnerDoc, setEditingOwnerDoc] = useState<BrandOwner | null>(null);
+  const [editOwnerName, setEditOwnerName] = useState<string>('');
+  const [editOwnerContactName, setEditOwnerContactName] = useState<string>('');
+  const [editOwnerContactMobile, setEditOwnerContactMobile] = useState<string>('');
+  const [editOwnerWhatsappNo, setEditOwnerWhatsappNo] = useState<string>('');
+  const [editOwnerEmail, setEditOwnerEmail] = useState<string>('');
+  const [editOwnerAddress, setEditOwnerAddress] = useState<string>('');
+  const [editOwnerGstNo, setEditOwnerGstNo] = useState<string>('');
+  const [editOwnerFssaiRegNo, setEditOwnerFssaiRegNo] = useState<string>('');
+  const [editOwnerOtherRegDetails, setEditOwnerOtherRegDetails] = useState<string>('');
+  const [editOwnerGpsTracking, setEditOwnerGpsTracking] = useState<string>('');
+  const [editOwnerDescription, setEditOwnerDescription] = useState<string>('');
 
   // Upload picture targets
   const [brandImageUploadTarget, setBrandImageUploadTarget] = useState<string | null>(null);
@@ -548,6 +572,29 @@ export default function PerformanceTrackingView() {
     return Number(revenue) || 0;
   };
 
+  const hasSalesTransactions = (p: ProductPerformance) => {
+    // 1. Check sales orders for items linked by productId or name
+    const hasOrderItems = salesOrders.some(order => 
+      order.products?.some(item => 
+        (item.productId && item.productId === p.id) ||
+        (item.productName && p.name && item.productName.trim().toLowerCase() === p.name.trim().toLowerCase())
+      )
+    );
+    if (hasOrderItems) return true;
+
+    // 2. Check calculated volume or revenue
+    if (getProductVolume(p) > 0 || getProductRevenue(p) > 0) return true;
+
+    // 3. Check recorded stats on product object
+    if ((p.unitsSold && p.unitsSold > 0) || (p.revenue && p.revenue > 0)) return true;
+
+    // 4. Check channel sales metrics
+    const channelSum = Number(p.amazonSales ?? 0) + Number(p.flipkartSales ?? 0) + Number(p.meeshoSales ?? 0) + Number(p.vamjoSales ?? 0) + Number(p.whatsappSales ?? 0) + Number(p.countersaleSales ?? 0);
+    if (channelSum > 0) return true;
+
+    return false;
+  };
+
   const getProductBrandOwner = (p: ProductPerformance) => {
     if (p.brandOwner && p.brandOwner.trim() !== '') return p.brandOwner;
     const brandName = p.brand || '';
@@ -763,22 +810,120 @@ export default function PerformanceTrackingView() {
     }
   };
 
-  const handleAddBrandOwner = async (name: string, description?: string, file?: File | null) => {
+  const handleAddBrandOwner = async (name: string, description?: string, file?: File | null, extraFields?: Partial<BrandOwner>) => {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
+
+    const rawMobile = extraFields?.contactMobile || extraFields?.contactPhone || '';
+    const mobileDigits = rawMobile.replace(/\D/g, '');
+    if (mobileDigits.length > 0 && mobileDigits.length !== 10) {
+      alert("Validation not successful: Brand Owner Contact Mobile must be a valid 10-digit phone number.");
+      return false;
+    }
+
+    const rawWhatsapp = extraFields?.whatsappNo || '';
+    const whatsappDigits = rawWhatsapp.replace(/\D/g, '');
+    if (whatsappDigits.length > 0 && whatsappDigits.length !== 10) {
+      alert("Validation not successful: Brand Owner Whatsappno must be a valid 10-digit phone number.");
+      return false;
+    }
+
+    const formattedMobile = mobileDigits.length === 10 ? `+91 ${mobileDigits}` : '';
+    const formattedWhatsapp = whatsappDigits.length === 10 ? `+91 ${whatsappDigits}` : '';
+
     if (dynamicBrandOwners.some(o => o.toLowerCase() === trimmed.toLowerCase())) {
       alert("Brand Owner already exists!");
-      return;
+      return false;
     }
     setCustomBrandOwners(prev => [...prev, trimmed]);
     try {
+      const ownerData: Omit<BrandOwner, 'id'> = {
+        name: trimmed,
+        description: description || '',
+        contactPerson: extraFields?.contactPerson || extraFields?.contactName || '',
+        contactName: extraFields?.contactName || extraFields?.contactPerson || '',
+        contactMobile: formattedMobile,
+        contactPhone: formattedMobile,
+        whatsappNo: formattedWhatsapp,
+        contactEmail: extraFields?.contactEmail || extraFields?.email || '',
+        email: extraFields?.email || extraFields?.contactEmail || '',
+        address: extraFields?.address || '',
+        gstNo: extraFields?.gstNo || '',
+        fssaiRegNo: extraFields?.fssaiRegNo || '',
+        otherRegDetails: extraFields?.otherRegDetails || '',
+        gpsTracking: extraFields?.gpsTracking || '',
+      };
+
       if (file) {
-        await uploadBrandOwnerPicture(trimmed, file);
+        await uploadBrandOwnerPicture(trimmed, file, ownerData);
       } else {
-        await createBrandOwner({ name: trimmed, description: description || '' });
+        await createBrandOwner(ownerData);
       }
+      return true;
     } catch (err) {
       console.error('Failed to create brand owner doc in DB:', err);
+      return false;
+    }
+  };
+
+  const handleSaveEditedBrandOwner = async () => {
+    if (!editingOwnerDoc) return;
+
+    const mobileDigits = editOwnerContactMobile.replace(/\D/g, '');
+    if (mobileDigits.length > 0 && mobileDigits.length !== 10) {
+      alert("Validation not successful: Brand Owner Contact Mobile must be a valid 10-digit phone number.");
+      return;
+    }
+
+    const whatsappDigits = editOwnerWhatsappNo.replace(/\D/g, '');
+    if (whatsappDigits.length > 0 && whatsappDigits.length !== 10) {
+      alert("Validation not successful: Brand Owner Whatsappno must be a valid 10-digit phone number.");
+      return;
+    }
+
+    const formattedMobile = mobileDigits.length === 10 ? `+91 ${mobileDigits}` : '';
+    const formattedWhatsapp = whatsappDigits.length === 10 ? `+91 ${whatsappDigits}` : '';
+
+    const oldName = editingOwnerDoc.name;
+    const trimmedNew = editOwnerName.trim() || oldName;
+
+    if (trimmedNew.toLowerCase() !== oldName.toLowerCase()) {
+      products.forEach(p => {
+        const currentOwner = getProductBrandOwner(p);
+        if ((p.brandOwner || '').toLowerCase() === oldName.toLowerCase() || currentOwner.toLowerCase() === oldName.toLowerCase()) {
+          updateProduct(p.id, { brandOwner: trimmedNew });
+        }
+      });
+      setCustomBrands(prev => prev.map(b => b.owner.toLowerCase() === oldName.toLowerCase() ? { ...b, owner: trimmedNew } : b));
+      setCustomBrandOwners(prev => {
+        const filtered = prev.filter(o => o.toLowerCase() !== oldName.toLowerCase());
+        return [...filtered, trimmedNew];
+      });
+    }
+
+    const updates: Partial<BrandOwner> = {
+      name: trimmedNew,
+      contactPerson: editOwnerContactName,
+      contactName: editOwnerContactName,
+      contactMobile: formattedMobile,
+      contactPhone: formattedMobile,
+      whatsappNo: formattedWhatsapp,
+      contactEmail: editOwnerEmail,
+      email: editOwnerEmail,
+      address: editOwnerAddress,
+      gstNo: editOwnerGstNo,
+      fssaiRegNo: editOwnerFssaiRegNo,
+      otherRegDetails: editOwnerOtherRegDetails,
+      gpsTracking: editOwnerGpsTracking,
+      description: editOwnerDescription,
+    };
+
+    try {
+      await updateBrandOwner(editingOwnerDoc.id, updates);
+    } catch (err) {
+      console.error('Failed to update brand owner in DB:', err);
+    } finally {
+      setEditingOwnerDoc(null);
     }
   };
 
@@ -2923,98 +3068,105 @@ export default function PerformanceTrackingView() {
                     </tr>
                   ) : (
                     filteredProducts.map((p) => {
-                    const isEditing = false;
+                      const isEditing = false;
+                      const hasSales = hasSalesTransactions(p);
 
-                    return (
-                      <React.Fragment key={p.id}>
-                        <tr className="hover:bg-[#1c1c21]/45 transition-colors">
-                        {/* 1. Product Picture */}
-                        <td className="p-4 pl-5">
-                          <div className="flex items-center gap-3">
-                            <img 
-                              src={p.imageUrl || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=80&auto=format&fit=crop&q=60'} 
-                              alt={p.name} 
-                              referrerPolicy="no-referrer"
-                              className="w-12 h-12 object-cover rounded-xl border border-slate-800 shadow-inner group-hover:scale-105 transition-transform shrink-0"
-                            />
-                            
-                            {/* Action Buttons next to the product picture */}
-                            <div className="flex flex-col gap-1.5 shrink-0">
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => {
-                                    setExpandedProductId(expandedProductId === p.id ? null : p.id);
-                                    if (expandedProductId !== p.id && editingProductId === p.id) {
-                                      handleStartProductEdit(p);
-                                    }
-                                  }}
-                                  className={`px-2 py-1 border rounded-lg text-[10px] font-bold transition cursor-pointer select-none whitespace-nowrap ${
-                                    expandedProductId === p.id 
-                                      ? 'border-indigo-500 bg-indigo-950 text-indigo-300' 
-                                      : 'border-indigo-900/40 bg-indigo-950/40 hover:bg-indigo-900/30 text-indigo-400 hover:text-indigo-300'
-                                  }`}
-                                  title={expandedProductId === p.id ? 'Hide Specifications' : 'View Specifications'}
-                                >
-                                  {expandedProductId === p.id ? 'Hide' : 'View'}
-                                </button>
-
-                                {hasAccess('Products & Clients', 'edit') && (
-                                  <button 
+                      return (
+                        <React.Fragment key={p.id}>
+                          <tr className="hover:bg-[#1c1c21]/45 transition-colors">
+                          {/* 1. Product Picture */}
+                          <td className="p-4 pl-5">
+                            <div className="flex items-center gap-3">
+                              <img 
+                                src={p.imageUrl || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=80&auto=format&fit=crop&q=60'} 
+                                alt={p.name} 
+                                referrerPolicy="no-referrer"
+                                className="w-12 h-12 object-cover rounded-xl border border-slate-800 shadow-inner group-hover:scale-105 transition-transform shrink-0"
+                              />
+                              
+                              {/* Action Buttons next to the product picture */}
+                              <div className="flex flex-col gap-1.5 shrink-0">
+                                <div className="flex items-center gap-1.5">
+                                  <button
                                     onClick={() => {
-                                      setDeletingProductId(null);
-                                      handleStartProductEdit(p);
-                                      setExpandedProductId(p.id); // auto expand on edit to edit specs as well
+                                      setExpandedProductId(expandedProductId === p.id ? null : p.id);
+                                      if (expandedProductId !== p.id && editingProductId === p.id) {
+                                        handleStartProductEdit(p);
+                                      }
                                     }}
-                                    className="px-2 py-1 border border-slate-800 bg-[#0d0d10] hover:bg-[#1c1c21] text-slate-400 hover:text-white rounded-lg text-[10px] font-semibold transition cursor-pointer select-none whitespace-nowrap"
-                                    id={`edit-product-${p.id}`}
-                                    title="Edit Product Details"
+                                    className={`px-2 py-1 border rounded-lg text-[10px] font-bold transition cursor-pointer select-none whitespace-nowrap ${
+                                      expandedProductId === p.id 
+                                        ? 'border-indigo-500 bg-indigo-950 text-indigo-300' 
+                                        : 'border-indigo-900/40 bg-indigo-950/40 hover:bg-indigo-900/30 text-indigo-400 hover:text-indigo-300'
+                                    }`}
+                                    title={expandedProductId === p.id ? 'Hide Specifications' : 'View Specifications'}
                                   >
-                                    Edit
+                                    {expandedProductId === p.id ? 'Hide' : 'View'}
                                   </button>
-                                )}
-                              </div>
 
-                              <div>
-                                {deletingProductId === p.id ? (
-                                  <div className="flex items-center gap-1 animate-fadeIn bg-rose-950/25 border border-rose-900/30 rounded px-1.5 py-0.5">
-                                    <span className="text-[9px] text-rose-400 font-bold uppercase tracking-wider">Del?</span>
-                                    <button
-                                      onClick={() => {
-                                        deleteProduct(p.id);
-                                        setDeletingProductId(null);
-                                      }}
-                                      className="px-1 py-0.5 bg-rose-900 hover:bg-rose-800 text-white rounded text-[9px] font-bold transition cursor-pointer"
-                                      id={`confirm-delete-product-${p.id}`}
-                                    >
-                                      Yes
-                                    </button>
-                                    <button
-                                      onClick={() => setDeletingProductId(null)}
-                                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[9px] transition cursor-pointer"
-                                      id={`cancel-delete-product-${p.id}`}
-                                    >
-                                      No
-                                    </button>
-                                  </div>
-                                ) : (
-                                  hasAccess('Products & Clients', 'delete') && (
+                                  {hasAccess('Products & Clients', 'edit') && (
                                     <button 
                                       onClick={() => {
-                                        setDeletingProductId(p.id);
+                                        setDeletingProductId(null);
+                                        handleStartProductEdit(p);
+                                        setExpandedProductId(p.id); // auto expand on edit to edit specs as well
                                       }}
-                                      className="inline-flex items-center gap-1 px-2 py-1 border border-rose-950/40 bg-rose-950/10 text-rose-500 hover:text-rose-400 rounded-lg hover:border-rose-900/30 transition cursor-pointer text-[10px] font-bold"
-                                      title="Delete Product portfolio"
-                                      id={`delete-product-${p.id}`}
+                                      className="px-2 py-1 border border-slate-800 bg-[#0d0d10] hover:bg-[#1c1c21] text-slate-400 hover:text-white rounded-lg text-[10px] font-semibold transition cursor-pointer select-none whitespace-nowrap"
+                                      id={`edit-product-${p.id}`}
+                                      title="Edit Product Details"
                                     >
-                                      <Trash2 className="w-2.5 h-2.5" />
-                                      <span>Delete</span>
+                                      Edit
                                     </button>
-                                  )
-                                )}
+                                  )}
+                                </div>
+
+                                <div>
+                                  {deletingProductId === p.id ? (
+                                    <div className="flex items-center gap-1 animate-fadeIn bg-rose-955/25 border border-rose-900/30 rounded px-1.5 py-0.5">
+                                      <span className="text-[9px] text-rose-400 font-bold uppercase tracking-wider">Del?</span>
+                                      <button
+                                        onClick={() => {
+                                          deleteProduct(p.id);
+                                          setDeletingProductId(null);
+                                        }}
+                                        className="px-1 py-0.5 bg-rose-900 hover:bg-rose-800 text-white rounded text-[9px] font-bold transition cursor-pointer"
+                                        id={`confirm-delete-product-${p.id}`}
+                                      >
+                                        Yes
+                                      </button>
+                                      <button
+                                        onClick={() => setDeletingProductId(null)}
+                                        className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[9px] transition cursor-pointer"
+                                        id={`cancel-delete-product-${p.id}`}
+                                      >
+                                        No
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    hasAccess('Products & Clients', 'delete') && (
+                                      <button 
+                                        onClick={() => {
+                                          if (hasSales) return;
+                                          setDeletingProductId(p.id);
+                                        }}
+                                        disabled={hasSales}
+                                        className={`inline-flex items-center gap-1 px-2 py-1 border rounded-lg transition text-[10px] font-bold ${
+                                          hasSales
+                                            ? 'border-slate-800/60 bg-slate-900/40 text-slate-600 cursor-not-allowed opacity-50'
+                                            : 'border-rose-955/40 bg-rose-955/10 text-rose-500 hover:text-rose-400 hover:border-rose-900/30 cursor-pointer'
+                                        }`}
+                                        title={hasSales ? "Cannot delete product with existing sales transactions" : "Delete Product portfolio"}
+                                        id={`delete-product-${p.id}`}
+                                      >
+                                        <Trash2 className="w-2.5 h-2.5" />
+                                        <span>Delete</span>
+                                      </button>
+                                    )
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </td>
+                          </td>
 
                         {/* 2. PROD NAME: */}
                         <td className="p-4">
@@ -5054,9 +5206,23 @@ export default function PerformanceTrackingView() {
                           <div className="flex items-center gap-1 opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               onClick={() => {
-                                  setEditingMasterId(`owner-${owner}`);
-                                  setEditMasterNameVal(owner);
-                                }}
+                                const doc = brandOwners.find(b => b.name.toLowerCase() === owner.toLowerCase()) || {
+                                  id: `owner_${Date.now()}`,
+                                  name: owner,
+                                };
+                                setEditingOwnerDoc(doc);
+                                setEditOwnerName(doc.name || owner);
+                                setEditOwnerContactName(doc.contactName || doc.contactPerson || '');
+                                setEditOwnerContactMobile(doc.contactMobile || doc.contactPhone || '');
+                                setEditOwnerWhatsappNo(doc.whatsappNo || '');
+                                setEditOwnerEmail(doc.contactEmail || doc.email || '');
+                                setEditOwnerAddress(doc.address || '');
+                                setEditOwnerGstNo(doc.gstNo || '');
+                                setEditOwnerFssaiRegNo(doc.fssaiRegNo || '');
+                                setEditOwnerOtherRegDetails(doc.otherRegDetails || '');
+                                setEditOwnerGpsTracking(doc.gpsTracking || '');
+                                setEditOwnerDescription(doc.description || '');
+                              }}
                               className="p-1 hover:bg-slate-800 text-slate-404 hover:text-white rounded transition cursor-pointer"
                               title="Edit Brand Owner"
                             >
@@ -5115,6 +5281,62 @@ export default function PerformanceTrackingView() {
                           <span className="text-xs font-bold text-slate-202 truncate block">{formattedLastSalesDate}</span>
                         </div>
                       </div>
+
+                      {/* Brand Owner Master Details */}
+                      {(() => {
+                        const ownerDoc = brandOwners.find(o => o.name.toLowerCase() === owner.toLowerCase());
+                        const hasOwnerDetails = ownerDoc && (
+                          ownerDoc.contactName || ownerDoc.contactPerson ||
+                          ownerDoc.contactMobile || ownerDoc.contactPhone ||
+                          ownerDoc.whatsappNo || ownerDoc.contactEmail || ownerDoc.email ||
+                          ownerDoc.gstNo || ownerDoc.fssaiRegNo || ownerDoc.otherRegDetails ||
+                          ownerDoc.gpsTracking || ownerDoc.address
+                        );
+                        if (!hasOwnerDetails || !ownerDoc) return null;
+                        return (
+                          <div className="mt-3 p-3 bg-[#0d0d10]/70 rounded-xl border border-slate-800/80 space-y-1.5 text-[11px]">
+                            <div className="text-[9px] font-extrabold text-emerald-400 uppercase tracking-wider border-b border-slate-800/80 pb-1 flex items-center justify-between">
+                              <span>Brand Owner Details</span>
+                              {ownerDoc.gstNo && <span className="text-[9px] font-mono text-indigo-300">GST: {ownerDoc.gstNo}</span>}
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-slate-300">
+                              {(ownerDoc.contactName || ownerDoc.contactPerson) && (
+                                <div className="truncate"><span className="text-slate-500 font-medium">Contact:</span> <span className="font-semibold text-slate-200">{ownerDoc.contactName || ownerDoc.contactPerson}</span></div>
+                              )}
+                              {(ownerDoc.contactMobile || ownerDoc.contactPhone) && (
+                                <div className="truncate"><span className="text-slate-500 font-medium">Mobile:</span> <span className="font-semibold text-slate-200">{ownerDoc.contactMobile || ownerDoc.contactPhone}</span></div>
+                              )}
+                              {ownerDoc.whatsappNo && (
+                                <div className="truncate"><span className="text-slate-500 font-medium">WhatsApp:</span> <span className="font-semibold text-emerald-400">{ownerDoc.whatsappNo}</span></div>
+                              )}
+                              {(ownerDoc.contactEmail || ownerDoc.email) && (
+                                <div className="truncate"><span className="text-slate-500 font-medium">Email:</span> <span className="font-semibold text-slate-200">{ownerDoc.contactEmail || ownerDoc.email}</span></div>
+                              )}
+                              {ownerDoc.fssaiRegNo && (
+                                <div className="truncate"><span className="text-slate-500 font-medium">FSSAI:</span> <span className="font-semibold text-amber-300 font-mono">{ownerDoc.fssaiRegNo}</span></div>
+                              )}
+                              {ownerDoc.gpsTracking && (
+                                <div className="truncate flex items-center gap-1">
+                                  <span className="text-slate-500 font-medium">GPS:</span>
+                                  {ownerDoc.gpsTracking.startsWith('http') ? (
+                                    <a href={ownerDoc.gpsTracking} target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:text-sky-300 underline font-semibold flex items-center gap-0.5">
+                                      <MapPin className="w-3 h-3 shrink-0" /> Track
+                                    </a>
+                                  ) : (
+                                    <span className="font-semibold text-sky-300 flex items-center gap-0.5"><MapPin className="w-3 h-3 shrink-0" /> {ownerDoc.gpsTracking}</span>
+                                  )}
+                                </div>
+                              )}
+                              {ownerDoc.otherRegDetails && (
+                                <div className="col-span-1 sm:col-span-2 truncate"><span className="text-slate-500 font-medium">Other Reg:</span> <span className="font-semibold text-slate-200">{ownerDoc.otherRegDetails}</span></div>
+                              )}
+                              {ownerDoc.address && (
+                                <div className="col-span-1 sm:col-span-2 truncate"><span className="text-slate-500 font-medium">Address:</span> <span className="font-semibold text-slate-200">{ownerDoc.address}</span></div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="mt-4">
@@ -5540,9 +5762,122 @@ export default function PerformanceTrackingView() {
               )}
 
               {showAddMasterModal === 'owner' && (
-                <div className="space-y-3 border-t border-slate-800/60 pt-3">
+                <div className="space-y-3 border-t border-slate-800/60 pt-3 max-h-[60vh] overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner Contact Name</label>
+                      <input
+                        type="text"
+                        placeholder="Contact Person Name"
+                        value={newMasterOwnerContactName}
+                        onChange={e => setNewMasterOwnerContactName(e.target.value)}
+                        className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner Contact Mobile</label>
+                      <div className="flex items-center rounded-lg border border-slate-800 bg-[#0d0d10] overflow-hidden focus-within:ring-1 focus-within:ring-indigo-500">
+                        <span className="px-2.5 py-2 text-xs font-bold text-slate-400 bg-slate-900 border-r border-slate-800 select-none">
+                          +91
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="10-digit mobile number"
+                          maxLength={10}
+                          value={newMasterOwnerContactMobile}
+                          onChange={e => setNewMasterOwnerContactMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                          className="w-full text-xs p-2 bg-transparent text-slate-200 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner Whatsappno</label>
+                      <div className="flex items-center rounded-lg border border-slate-800 bg-[#0d0d10] overflow-hidden focus-within:ring-1 focus-within:ring-indigo-500">
+                        <span className="px-2.5 py-2 text-xs font-bold text-slate-400 bg-slate-900 border-r border-slate-800 select-none">
+                          +91
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="10-digit WhatsApp number"
+                          maxLength={10}
+                          value={newMasterOwnerWhatsappNo}
+                          onChange={e => setNewMasterOwnerWhatsappNo(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                          className="w-full text-xs p-2 bg-transparent text-slate-200 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner email</label>
+                      <input
+                        type="email"
+                        placeholder="Email Address"
+                        value={newMasterOwnerEmail}
+                        onChange={e => setNewMasterOwnerEmail(e.target.value)}
+                        className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner Gstno</label>
+                      <input
+                        type="text"
+                        placeholder="GSTIN Number"
+                        value={newMasterOwnerGstNo}
+                        onChange={e => setNewMasterOwnerGstNo(e.target.value)}
+                        className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner fssairegno</label>
+                      <input
+                        type="text"
+                        placeholder="FSSAI Registration No"
+                        value={newMasterOwnerFssaiRegNo}
+                        onChange={e => setNewMasterOwnerFssaiRegNo(e.target.value)}
+                        className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                      />
+                    </div>
+                  </div>
+
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-404 mb-1.5 uppercase tracking-wider">Owner Notes/Description (Optional)</label>
+                    <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner Address</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Full Address"
+                      value={newMasterOwnerAddress}
+                      onChange={e => setNewMasterOwnerAddress(e.target.value)}
+                      className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner otherRegdetails</label>
+                    <input
+                      type="text"
+                      placeholder="Trade License, MSME, CIN or other details"
+                      value={newMasterOwnerOtherRegDetails}
+                      onChange={e => setNewMasterOwnerOtherRegDetails(e.target.value)}
+                      className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner gpstracking</label>
+                    <input
+                      type="text"
+                      placeholder="GPS Tracking Link or location info"
+                      value={newMasterOwnerGpsTracking}
+                      onChange={e => setNewMasterOwnerGpsTracking(e.target.value)}
+                      className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Owner Notes/Description (Optional)</label>
                     <input
                       type="text"
                       placeholder="e.g. Parent corporate entity"
@@ -5645,10 +5980,37 @@ export default function PerformanceTrackingView() {
                       setNewMasterBrandDescription('');
                       setShowAddMasterModal(null);
                     } else if (showAddMasterModal === 'owner') {
-                      await handleAddBrandOwner(newMasterName, newMasterOwnerDescription, newMasterOwnerFile);
+                      await handleAddBrandOwner(
+                        newMasterName, 
+                        newMasterOwnerDescription, 
+                        newMasterOwnerFile,
+                        {
+                          contactPerson: newMasterOwnerContactName,
+                          contactName: newMasterOwnerContactName,
+                          contactMobile: newMasterOwnerContactMobile,
+                          contactPhone: newMasterOwnerContactMobile,
+                          whatsappNo: newMasterOwnerWhatsappNo,
+                          contactEmail: newMasterOwnerEmail,
+                          email: newMasterOwnerEmail,
+                          address: newMasterOwnerAddress,
+                          gstNo: newMasterOwnerGstNo,
+                          fssaiRegNo: newMasterOwnerFssaiRegNo,
+                          otherRegDetails: newMasterOwnerOtherRegDetails,
+                          gpsTracking: newMasterOwnerGpsTracking,
+                        }
+                      );
                       setNewMasterOwnerFile(null);
                       setNewMasterOwnerPreview('');
                       setNewMasterOwnerDescription('');
+                      setNewMasterOwnerContactName('');
+                      setNewMasterOwnerContactMobile('');
+                      setNewMasterOwnerWhatsappNo('');
+                      setNewMasterOwnerEmail('');
+                      setNewMasterOwnerAddress('');
+                      setNewMasterOwnerGstNo('');
+                      setNewMasterOwnerFssaiRegNo('');
+                      setNewMasterOwnerOtherRegDetails('');
+                      setNewMasterOwnerGpsTracking('');
                       setShowAddMasterModal(null);
                     } else if (showAddMasterModal === 'unit') {
                       setUnitError(null);
@@ -5665,6 +6027,173 @@ export default function PerformanceTrackingView() {
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl text-xs font-bold transition cursor-pointer"
                 >
                   Create Master Record
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Brand Owner Master Modal */}
+      {editingOwnerDoc && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#141418] border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl animate-scaleIn max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+              <h3 className="text-xs font-extrabold text-white flex items-center gap-1.5 uppercase tracking-wider">
+                <Edit className="w-4 h-4 text-emerald-400" />
+                Edit Brand Owner Master: {editingOwnerDoc.name}
+              </h3>
+              <button 
+                onClick={() => setEditingOwnerDoc(null)} 
+                className="text-slate-404 hover:text-white text-xs cursor-pointer bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner Name</label>
+                <input
+                  type="text"
+                  value={editOwnerName}
+                  onChange={e => setEditOwnerName(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-[#0d0d10] border border-slate-800 text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner Contact Name</label>
+                  <input
+                    type="text"
+                    placeholder="Contact person name"
+                    value={editOwnerContactName}
+                    onChange={e => setEditOwnerContactName(e.target.value)}
+                    className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner Contact Mobile</label>
+                  <div className="flex items-center rounded-lg border border-slate-800 bg-[#0d0d10] overflow-hidden focus-within:ring-1 focus-within:ring-indigo-500">
+                    <span className="px-2.5 py-2 text-xs font-bold text-slate-400 bg-slate-900 border-r border-slate-800 select-none">
+                      +91
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="10-digit mobile number"
+                      maxLength={10}
+                      value={editOwnerContactMobile}
+                      onChange={e => setEditOwnerContactMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      className="w-full text-xs p-2 bg-transparent text-slate-200 focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner Whatsappno</label>
+                  <div className="flex items-center rounded-lg border border-slate-800 bg-[#0d0d10] overflow-hidden focus-within:ring-1 focus-within:ring-indigo-500">
+                    <span className="px-2.5 py-2 text-xs font-bold text-slate-400 bg-slate-900 border-r border-slate-800 select-none">
+                      +91
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="10-digit WhatsApp number"
+                      maxLength={10}
+                      value={editOwnerWhatsappNo}
+                      onChange={e => setEditOwnerWhatsappNo(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      className="w-full text-xs p-2 bg-transparent text-slate-200 focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner email</label>
+                  <input
+                    type="email"
+                    placeholder="Email address"
+                    value={editOwnerEmail}
+                    onChange={e => setEditOwnerEmail(e.target.value)}
+                    className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner Gstno</label>
+                  <input
+                    type="text"
+                    placeholder="GSTIN number"
+                    value={editOwnerGstNo}
+                    onChange={e => setEditOwnerGstNo(e.target.value)}
+                    className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner fssairegno</label>
+                  <input
+                    type="text"
+                    placeholder="FSSAI registration number"
+                    value={editOwnerFssaiRegNo}
+                    onChange={e => setEditOwnerFssaiRegNo(e.target.value)}
+                    className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner Address</label>
+                <textarea
+                  rows={2}
+                  placeholder="Full office/registered address"
+                  value={editOwnerAddress}
+                  onChange={e => setEditOwnerAddress(e.target.value)}
+                  className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner otherRegdetails</label>
+                <input
+                  type="text"
+                  placeholder="Trade license, MSME, CIN, or other reg details"
+                  value={editOwnerOtherRegDetails}
+                  onChange={e => setEditOwnerOtherRegDetails(e.target.value)}
+                  className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner gpstracking</label>
+                <input
+                  type="text"
+                  placeholder="GPS live tracking link or location URL"
+                  value={editOwnerGpsTracking}
+                  onChange={e => setEditOwnerGpsTracking(e.target.value)}
+                  className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Owner Notes/Description</label>
+                <input
+                  type="text"
+                  placeholder="Parent corporate notes/description"
+                  value={editOwnerDescription}
+                  onChange={e => setEditOwnerDescription(e.target.value)}
+                  className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800/40">
+                <button
+                  onClick={() => setEditingOwnerDoc(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEditedBrandOwner}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Save Owner Changes
                 </button>
               </div>
             </div>

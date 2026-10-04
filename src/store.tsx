@@ -216,7 +216,7 @@ export interface CRMContextType {
   createBrandOwner: (owner: Omit<BrandOwner, 'id'>) => Promise<BrandOwner>;
   updateBrandOwner: (id: string, updates: Partial<BrandOwner>) => Promise<BrandOwner>;
   deleteBrandOwner: (id: string) => Promise<void>;
-  uploadBrandOwnerPicture: (ownerName: string, file: File) => Promise<void>;
+  uploadBrandOwnerPicture: (ownerName: string, file: File, extraFields?: Partial<BrandOwner>) => Promise<void>;
   customBrands: {name: string, owner: string}[];
   setCustomBrands: React.Dispatch<React.SetStateAction<{name: string, owner: string}[]>>;
   customBrandOwners: string[];
@@ -1006,6 +1006,20 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteProduct = useCallback(async (id: string) => {
     try {
+      const prod = products.find(p => String(p.id || '').trim() === String(id || '').trim());
+      if (prod) {
+        const hasOrder = salesOrders.some(order =>
+          order.products?.some(item =>
+            (item.productId && item.productId === prod.id) ||
+            (item.productName && prod.name && item.productName.trim().toLowerCase() === prod.name.trim().toLowerCase())
+          )
+        );
+        const hasSales = hasOrder || (Number(prod.unitsSold || 0) > 0) || (Number(prod.revenue || 0) > 0);
+        if (hasSales) {
+          alert("Cannot delete product: existing sales transactions are associated with this product.");
+          return;
+        }
+      }
       await productRepository.delete(id);
       setProducts(prev => prev.filter(p => String(p.id || '').trim() !== String(id || '').trim()));
     } catch (err: any) {
@@ -1017,7 +1031,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: new Date().toISOString()
       });
     }
-  }, []);
+  }, [products, salesOrders]);
 
   // Customers CRUD
   const addCustomer = useCallback(async (custData: Omit<CustomerPerformance, 'id'>) => {
@@ -2134,12 +2148,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  const uploadBrandOwnerPicture = useCallback(async (ownerName: string, file: File) => {
+  const uploadBrandOwnerPicture = useCallback(async (ownerName: string, file: File, extraFields?: Partial<BrandOwner>) => {
     const existing = brandOwners.find(o => o.name.toLowerCase() === ownerName.toLowerCase());
     try {
-      const saved = await brandOwnerRepository.uploadBrandOwnerImage(ownerName, file, existing?.id);
+      const saved = await brandOwnerRepository.uploadBrandOwnerImage(ownerName, file, existing?.id, extraFields);
       setBrandOwners(prev => existing
-        ? prev.map(o => o.id === existing.id ? saved : o)
+        ? prev.map(o => o.id === existing.id ? { ...o, ...saved } : o)
         : [...prev, saved]);
     } catch (err: any) {
       setFirestoreError({

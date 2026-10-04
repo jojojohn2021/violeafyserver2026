@@ -7,7 +7,7 @@ import {
   Settings, Shield, RefreshCw, Search, Info, 
   CheckCircle, XCircle, AlertTriangle, FileText, Gift, Calendar, DollarSign,
   ArrowRight, Ticket, RotateCcw, ListCollapse, List, Check, Trash, Palette, CreditCard,
-  Code, Database, Activity, ArrowUpRight, ArrowDownLeft, X, MapPin
+  Code, Database, Activity, ArrowUpRight, ArrowDownLeft, X, MapPin, MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -31,10 +31,53 @@ export default function SettingsView() {
     deleteDeliveryCharge
   } = useCRM();
 
-  const [activeTab, setActiveTab] = useState<'brand' | 'transactions' | 'refunds' | 'coupons' | 'returns' | 'delivery_charges' | 'format_invoice'>('brand');
+  const [activeTab, setActiveTab] = useState<'brand' | 'transactions' | 'refunds' | 'coupons' | 'returns' | 'delivery_charges' | 'format_invoice' | 'notification_config'>('brand');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTx, setSelectedTx] = useState<PaymentTransaction | null>(null);
   const [selectedTxTab, setSelectedTxTab] = useState<'info' | 'timeline' | 'audit'>('info');
+
+  // Global Notification Configuration State (Sections 62-63, 81)
+  const [notifConfig, setNotifConfig] = useState<any>({
+    'Brand Owner Assignment': { emailtobrandowner: 'yes', emailtocustomer: 'yes', emailtemplateid: 'tpl_brand_assignment_email', WhatsApptobrandowner: 'yes', WhatsApptocustomer: 'yes', WhatsApptemplateid: 'tpl_brand_assignment_wa' },
+    'Complete Packing': { emailtocustomer: 'yes', emailtemplateid: 'tpl_complete_packing_email', WhatsApptocustomer: 'yes', WhatsApptemplateid: 'tpl_complete_packing_wa' },
+    'Create Shipment': { emailtobrandowner: 'yes', emailtocustomer: 'yes', emailtemplateid: 'tpl_create_shipment_email', WhatsApptobrandowner: 'yes', WhatsApptocustomer: 'yes', WhatsApptemplateid: 'tpl_create_shipment_wa' },
+    'Confirm Delivery': { emailtobrandowner: 'yes', emailtocustomer: 'yes', emailtemplateid: 'tpl_confirm_delivery_email', WhatsApptobrandowner: 'yes', WhatsApptocustomer: 'yes', WhatsApptemplateid: 'tpl_confirm_delivery_wa' },
+    'Process Return': { emailtobrandowner: 'yes', emailtocustomer: 'yes', emailtemplateid: 'tpl_process_return_email', WhatsApptobrandowner: 'yes', WhatsApptocustomer: 'yes', WhatsApptemplateid: 'tpl_process_return_wa' },
+  });
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifSuccess, setNotifSuccess] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    fetch('/api/config/global')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.config) {
+          setNotifConfig(data.config);
+        }
+      })
+      .catch((err) => console.error('Error fetching global config:', err));
+  }, []);
+
+  const handleSaveNotifConfig = async () => {
+    setNotifSaving(true);
+    setNotifSuccess(null);
+    try {
+      const res = await fetch('/api/config/global', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notifConfig),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNotifSuccess('Global Notification Settings successfully saved!');
+        setTimeout(() => setNotifSuccess(null), 4000);
+      }
+    } catch (err: any) {
+      alert('Error saving notification config: ' + err.message);
+    } finally {
+      setNotifSaving(false);
+    }
+  };
 
   // Process Refund modal states
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
@@ -396,13 +439,26 @@ export default function SettingsView() {
           <FileText className="w-3.5 h-3.5" />
           Invoice Formats
         </button>
+
+        <button
+          onClick={() => setActiveTab('notification_config')}
+          className={`px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 ${
+            activeTab === 'notification_config'
+              ? 'bg-indigo-600 text-white shadow-lg'
+              : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
+          }`}
+          id="tab-settings-notification-config"
+        >
+          <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+          Notification Settings (Global Config)
+        </button>
       </div>
 
       {/* Main Content Grid */}
-      <div className={(activeTab === 'brand' || activeTab === 'delivery_charges' || activeTab === 'format_invoice') ? "w-full" : "grid grid-cols-1 lg:grid-cols-3 gap-6"}>
+      <div className={(activeTab === 'brand' || activeTab === 'delivery_charges' || activeTab === 'format_invoice' || activeTab === 'notification_config') ? "w-full" : "grid grid-cols-1 lg:grid-cols-3 gap-6"}>
         
         {/* LEFT/MAIN COLUMN */}
-        <div className={(activeTab === 'brand' || activeTab === 'delivery_charges' || activeTab === 'format_invoice') ? "w-full" : "lg:col-span-2 space-y-6"}>
+        <div className={(activeTab === 'brand' || activeTab === 'delivery_charges' || activeTab === 'format_invoice' || activeTab === 'notification_config') ? "w-full" : "lg:col-span-2 space-y-6"}>
 
           {/* TAB: BRAND STYLE CUSTOMIZER */}
           {activeTab === 'brand' && (
@@ -411,6 +467,469 @@ export default function SettingsView() {
 
           {activeTab === 'format_invoice' && (
             <FormatInvoiceSettings />
+          )}
+
+          {/* TAB: NOTIFICATION CONFIGURATION (Global -> Config) */}
+          {activeTab === 'notification_config' && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-slate-100 space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-white uppercase tracking-wide flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-emerald-400" />
+                    <span>Global Notification Configuration (global → config)</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Manage email & WhatsApp notification triggers and template IDs for the 5 order fulfilment stages.
+                  </p>
+                </div>
+                <button
+                  onClick={handleSaveNotifConfig}
+                  disabled={notifSaving}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+                >
+                  {notifSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  <span>Save Configuration</span>
+                </button>
+              </div>
+
+              {notifSuccess && (
+                <div className="p-3 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs font-bold flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  <span>{notifSuccess}</span>
+                </div>
+              )}
+
+              <div className="space-y-6">
+                {/* 1. Brand Owner Assignment */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl space-y-3">
+                  <h4 className="text-sm font-extrabold text-emerald-400 uppercase tracking-wide border-b border-slate-800 pb-2">
+                    1. Brand Owner Assignment
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Brand Owner</label>
+                      <select
+                        value={notifConfig['Brand Owner Assignment']?.emailtobrandowner || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Brand Owner Assignment': { ...notifConfig['Brand Owner Assignment'], emailtobrandowner: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Customer</label>
+                      <select
+                        value={notifConfig['Brand Owner Assignment']?.emailtocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Brand Owner Assignment': { ...notifConfig['Brand Owner Assignment'], emailtocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Brand Owner Assignment']?.emailtemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Brand Owner Assignment': { ...notifConfig['Brand Owner Assignment'], emailtemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Brand Owner</label>
+                      <select
+                        value={notifConfig['Brand Owner Assignment']?.WhatsApptobrandowner || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Brand Owner Assignment': { ...notifConfig['Brand Owner Assignment'], WhatsApptobrandowner: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Customer</label>
+                      <select
+                        value={notifConfig['Brand Owner Assignment']?.WhatsApptocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Brand Owner Assignment': { ...notifConfig['Brand Owner Assignment'], WhatsApptocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Brand Owner Assignment']?.WhatsApptemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Brand Owner Assignment': { ...notifConfig['Brand Owner Assignment'], WhatsApptemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Complete Packing */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl space-y-3">
+                  <h4 className="text-sm font-extrabold text-emerald-400 uppercase tracking-wide border-b border-slate-800 pb-2">
+                    2. Complete Packing
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Customer</label>
+                      <select
+                        value={notifConfig['Complete Packing']?.emailtocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Complete Packing': { ...notifConfig['Complete Packing'], emailtocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Complete Packing']?.emailtemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Complete Packing': { ...notifConfig['Complete Packing'], emailtemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Customer</label>
+                      <select
+                        value={notifConfig['Complete Packing']?.WhatsApptocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Complete Packing': { ...notifConfig['Complete Packing'], WhatsApptocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Complete Packing']?.WhatsApptemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Complete Packing': { ...notifConfig['Complete Packing'], WhatsApptemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Create Shipment */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl space-y-3">
+                  <h4 className="text-sm font-extrabold text-emerald-400 uppercase tracking-wide border-b border-slate-800 pb-2">
+                    3. Create Shipment
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Brand Owner</label>
+                      <select
+                        value={notifConfig['Create Shipment']?.emailtobrandowner || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Create Shipment': { ...notifConfig['Create Shipment'], emailtobrandowner: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Customer</label>
+                      <select
+                        value={notifConfig['Create Shipment']?.emailtocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Create Shipment': { ...notifConfig['Create Shipment'], emailtocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Create Shipment']?.emailtemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Create Shipment': { ...notifConfig['Create Shipment'], emailtemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Brand Owner</label>
+                      <select
+                        value={notifConfig['Create Shipment']?.WhatsApptobrandowner || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Create Shipment': { ...notifConfig['Create Shipment'], WhatsApptobrandowner: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Customer</label>
+                      <select
+                        value={notifConfig['Create Shipment']?.WhatsApptocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Create Shipment': { ...notifConfig['Create Shipment'], WhatsApptocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Create Shipment']?.WhatsApptemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Create Shipment': { ...notifConfig['Create Shipment'], WhatsApptemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Confirm Delivery */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl space-y-3">
+                  <h4 className="text-sm font-extrabold text-emerald-400 uppercase tracking-wide border-b border-slate-800 pb-2">
+                    4. Confirm Delivery
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Brand Owner</label>
+                      <select
+                        value={notifConfig['Confirm Delivery']?.emailtobrandowner || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Confirm Delivery': { ...notifConfig['Confirm Delivery'], emailtobrandowner: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Customer</label>
+                      <select
+                        value={notifConfig['Confirm Delivery']?.emailtocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Confirm Delivery': { ...notifConfig['Confirm Delivery'], emailtocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Confirm Delivery']?.emailtemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Confirm Delivery': { ...notifConfig['Confirm Delivery'], emailtemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Brand Owner</label>
+                      <select
+                        value={notifConfig['Confirm Delivery']?.WhatsApptobrandowner || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Confirm Delivery': { ...notifConfig['Confirm Delivery'], WhatsApptobrandowner: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Customer</label>
+                      <select
+                        value={notifConfig['Confirm Delivery']?.WhatsApptocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Confirm Delivery': { ...notifConfig['Confirm Delivery'], WhatsApptocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Confirm Delivery']?.WhatsApptemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Confirm Delivery': { ...notifConfig['Confirm Delivery'], WhatsApptemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. Process Return */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl space-y-3">
+                  <h4 className="text-sm font-extrabold text-emerald-400 uppercase tracking-wide border-b border-slate-800 pb-2">
+                    5. Process Return
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Brand Owner</label>
+                      <select
+                        value={notifConfig['Process Return']?.emailtobrandowner || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Process Return': { ...notifConfig['Process Return'], emailtobrandowner: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email to Customer</label>
+                      <select
+                        value={notifConfig['Process Return']?.emailtocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Process Return': { ...notifConfig['Process Return'], emailtocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Email Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Process Return']?.emailtemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Process Return': { ...notifConfig['Process Return'], emailtemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Brand Owner</label>
+                      <select
+                        value={notifConfig['Process Return']?.WhatsApptobrandowner || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Process Return': { ...notifConfig['Process Return'], WhatsApptobrandowner: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp to Customer</label>
+                      <select
+                        value={notifConfig['Process Return']?.WhatsApptocustomer || 'yes'}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Process Return': { ...notifConfig['Process Return'], WhatsApptocustomer: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        <option value="yes">Yes (Enabled)</option>
+                        <option value="no">No (Disabled)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">WhatsApp Template ID</label>
+                      <input
+                        type="text"
+                        value={notifConfig['Process Return']?.WhatsApptemplateid || ''}
+                        onChange={(e) => setNotifConfig({
+                          ...notifConfig,
+                          'Process Return': { ...notifConfig['Process Return'], WhatsApptemplateid: e.target.value }
+                        })}
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-1.5 rounded-lg font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-slate-800">
+                <button
+                  onClick={handleSaveNotifConfig}
+                  disabled={notifSaving}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+                >
+                  {notifSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  <span>Save Configuration</span>
+                </button>
+              </div>
+            </div>
           )}
 
           {/* TAB: AUDIT LEDGER */}

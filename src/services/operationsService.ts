@@ -15,6 +15,8 @@ import {
   PaymentReminderRecord,
   OperationsOrderDetailsResponse,
   PaymentRecord,
+  GlobalNotificationConfig,
+  StageNotificationSetting,
 } from '../types/operations';
 
 export interface DataAccessor {
@@ -209,6 +211,381 @@ export class OperationsService {
     });
   }
 
+  // 1b. LIST STAGE RECORDS WITH SERVER-SIDE FILTERING & PAGINATION (Sections 10-25, 33-39, 50-56)
+  async listStageRecords(
+    stage: 'assignment' | 'packing' | 'shipment' | 'delivery' | 'returns' | 'brand-owner-assignment',
+    filters: {
+      itemName?: string;
+      customerName?: string;
+      mobile?: string;
+      date?: string;
+      page?: number;
+      limit?: number;
+      search?: string;
+    } = {}
+  ): Promise<{
+    records: any[];
+    pagination: {
+      page: number;
+      limit: number;
+      totalRecords: number;
+      totalPages: number;
+      hasPrevious: boolean;
+      hasNext: boolean;
+    };
+  }> {
+    const [salesOrders, fulfilments, packings, brandAssignments, shipments, deliveries, returns, customers] = await Promise.all([
+      this.db.getCollectionDocs('sales_orders'),
+      this.db.getCollectionDocs('order_fulfilment'),
+      this.db.getCollectionDocs('order_packing'),
+      this.db.getCollectionDocs('order_brand_assignments'),
+      this.db.getCollectionDocs('order_shipments'),
+      this.db.getCollectionDocs('order_delivery'),
+      this.db.getCollectionDocs('order_returns'),
+      this.db.getCollectionDocs('customers'),
+    ]);
+
+    const fulMap = new Map<string, FulfilmentRecord>();
+    fulfilments.forEach((f) => fulMap.set(String(f.orderId), f));
+
+    const pckMap = new Map<string, PackingRecord>();
+    packings.forEach((p) => pckMap.set(String(p.orderId), p));
+
+    const brandMap = new Map<string, BrandOwnerAssignmentRecord>();
+    brandAssignments.forEach((b) => brandMap.set(String(b.orderId), b));
+
+    const custMap = new Map<string, any>();
+    customers.forEach((c) => {
+      custMap.set(String(c.id), c);
+      if (c.customerId) custMap.set(String(c.customerId), c);
+    });
+
+    const shpMap = new Map<string, ShipmentRecord[]>();
+    shipments.forEach((s) => {
+      const list = shpMap.get(String(s.orderId)) || [];
+      list.push(s);
+      shpMap.set(String(s.orderId), list);
+    });
+
+    const delMap = new Map<string, DeliveryRecord>();
+    deliveries.forEach((d) => delMap.set(String(d.orderId), d));
+
+    const retMap = new Map<string, ReturnRecord[]>();
+    returns.forEach((r) => {
+      const list = retMap.get(String(r.orderId)) || [];
+      list.push(r);
+      retMap.set(String(r.orderId), list);
+    });
+
+    const targetStage = stage === 'brand-owner-assignment' ? 'assignment' : stage;
+
+    const combined = salesOrders.map((order) => {
+      const orderIdStr = String(order.id);
+      const ful = fulMap.get(orderIdStr) || {
+        id: `ful_synthetic_${order.id}`,
+        orderId: order.id,
+        status: (order.deliveryStatus === 'Delivered'
+          ? 'DELIVERED'
+          : order.deliveryStatus === 'Shipped'
+          ? 'DISPATCHED'
+          : 'NOT_STARTED') as FulfilmentStatus,
+        createdAt: order.createdAt || new Date().toISOString(),
+        updatedAt: order.createdAt || new Date().toISOString(),
+      };
+
+      const packing = pckMap.get(orderIdStr);
+      const brandDoc = brandMap.get(orderIdStr);
+      const orderShipments = shpMap.get(orderIdStr) || [];
+      const latestShipment = orderShipments.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())[0];
+      const delivery = delMap.get(orderIdStr);
+      const orderReturns = retMap.get(orderIdStr) || [];
+      const latestReturn = orderReturns.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())[0];
+
+      const customer = custMap.get(String(order.customerId));
+      const customerMobile = order.contactNo || order.customerMobile || customer?.mobileNumber || customer?.phone || '';
+      const customerEmail = customer?.email || '';
+
+      let stageDate = order.createdAt || new Date().toISOString();
+      if (targetStage === 'assignment') {
+        stageDate = brandDoc?.updatedAt || order.createdAt || stageDate;
+      } else if (targetStage === 'packing') {
+        stageDate = packing?.completedAt || packing?.updatedAt || order.createdAt || stageDate;
+      } else if (targetStage === 'shipment') {
+        stageDate = latestShipment?.shipmentDate || latestShipment?.updatedAt || order.createdAt || stageDate;
+      } else if (targetStage === 'delivery') {
+        stageDate = delivery?.deliveryDate || latestShipment?.dispatchedAt || order.createdAt || stageDate;
+      } else if (targetStage === 'returns') {
+        stageDate = latestReturn?.updatedAt || latestReturn?.createdAt || delivery?.createdAt || order.createdAt || stageDate;
+      }
+
+      const lastUpdated = stageDate || ful.updatedAt || order.createdAt;
+
+      return {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        customerId: order.customerId,
+        customerName: order.customerName,
+        customerMobile,
+        customerEmail,
+        products: order.products || [],
+        totalValue: Number(order.totalValue || 0),
+        paymentStatus: order.paymentStatus || 'Pending',
+        deliveryStatus: order.deliveryStatus || 'Pending',
+        fulfilmentStatus: ful.status,
+        brandAssignments: brandDoc?.assignments || [],
+        packingStatus: packing?.status || (ful.status === 'PACKED' || ful.status === 'READY_FOR_DISPATCH' ? 'PACKED' : 'NOT_STARTED'),
+        shipmentStatus: latestShipment ? latestShipment.status : 'NONE',
+        shipment: latestShipment,
+        delivery: delivery,
+        returnRecord: latestReturn,
+        createdAt: order.createdAt,
+        lastUpdated,
+        stageDate,
+      };
+    });
+
+    const stageEligible = combined.filter((rec) => {
+      if (targetStage === 'assignment') {
+        const hasFullAssignment = rec.brandAssignments && rec.brandAssignments.length > 0 && rec.brandAssignments.length >= rec.products.length;
+        return !hasFullAssignment && rec.fulfilmentStatus !== 'COMPLETED' && rec.deliveryStatus !== 'Cancelled';
+      }
+      if (targetStage === 'packing') {
+        return (rec.fulfilmentStatus === 'NOT_STARTED' || rec.fulfilmentStatus === 'PACKING') && rec.packingStatus !== 'PACKED' && rec.deliveryStatus !== 'Cancelled';
+      }
+      if (targetStage === 'shipment') {
+        return (rec.fulfilmentStatus === 'PACKED' || rec.packingStatus === 'PACKED') && rec.shipmentStatus !== 'DISPATCHED' && rec.shipmentStatus !== 'DELIVERED';
+      }
+      if (targetStage === 'delivery') {
+        return (rec.fulfilmentStatus === 'READY_FOR_DISPATCH' || rec.fulfilmentStatus === 'DISPATCHED' || rec.fulfilmentStatus === 'IN_TRANSIT' || rec.fulfilmentStatus === 'OUT_FOR_DELIVERY' || (rec.shipment && rec.shipmentStatus !== 'DELIVERED')) && !rec.delivery;
+      }
+      if (targetStage === 'returns') {
+        return rec.fulfilmentStatus === 'DELIVERED' || rec.fulfilmentStatus === 'RETURN_IN_PROGRESS' || Boolean(rec.delivery) || Boolean(rec.returnRecord);
+      }
+      return true;
+    });
+
+    const searchFiltered = stageEligible.filter((rec) => {
+      if (filters.itemName && String(filters.itemName).trim()) {
+        const itemQuery = filters.itemName.toLowerCase().trim();
+        const hasMatch = rec.products.some((p: any) => String(p.productName || p.name || '').toLowerCase().includes(itemQuery));
+        if (!hasMatch) return false;
+      }
+      if (filters.customerName && String(filters.customerName).trim()) {
+        const custQuery = filters.customerName.toLowerCase().trim();
+        if (!String(rec.customerName || '').toLowerCase().includes(custQuery)) return false;
+      }
+      if (filters.mobile && String(filters.mobile).trim()) {
+        const mobQuery = filters.mobile.toLowerCase().trim();
+        if (!String(rec.customerMobile || '').toLowerCase().includes(mobQuery)) return false;
+      }
+      if (filters.date && String(filters.date).trim()) {
+        const dateQuery = filters.date.trim();
+        const matchCreated = String(rec.createdAt || '').includes(dateQuery);
+        const matchLastUpdated = String(rec.lastUpdated || '').includes(dateQuery);
+        const matchStageDate = String(rec.stageDate || '').includes(dateQuery);
+        if (!matchCreated && !matchLastUpdated && !matchStageDate) return false;
+      }
+      if (filters.search && String(filters.search).trim()) {
+        const query = filters.search.toLowerCase().trim();
+        const matchOrderNo = String(rec.orderNumber || '').toLowerCase().includes(query);
+        const matchCust = String(rec.customerName || '').toLowerCase().includes(query);
+        const matchMob = String(rec.customerMobile || '').toLowerCase().includes(query);
+        const matchItem = rec.products.some((p: any) => String(p.productName || p.name || '').toLowerCase().includes(query));
+        if (!matchOrderNo && !matchCust && !matchMob && !matchItem) return false;
+      }
+      return true;
+    });
+
+    searchFiltered.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+
+    const limit = Math.min(50, Math.max(1, filters.limit ? Number(filters.limit) : 10));
+    const page = Math.max(1, filters.page ? Number(filters.page) : 1);
+    const totalRecords = searchFiltered.length;
+    const totalPages = Math.ceil(totalRecords / limit) || 1;
+
+    const startIndex = (page - 1) * limit;
+    const records = searchFiltered.slice(startIndex, startIndex + limit);
+
+    return {
+      records,
+      pagination: {
+        page,
+        limit,
+        totalRecords,
+        totalPages,
+        hasPrevious: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
+  }
+
+  // GET GLOBAL NOTIFICATION CONFIG (Sections 62-63)
+  async getGlobalNotificationConfig(): Promise<GlobalNotificationConfig> {
+    const configs = await this.db.getCollectionDocs('global');
+    const existing = configs.find((c) => String(c.id) === 'config' || String(c.configId) === 'config');
+    const base: GlobalNotificationConfig = existing
+      ? (existing as GlobalNotificationConfig)
+      : {
+          id: 'config',
+          'Brand Owner Assignment': {
+            emailtobrandowner: 'yes',
+            emailtocustomer: 'yes',
+            emailtemplateid: 'tpl_brand_assignment_email',
+            WhatsApptobrandowner: 'yes',
+            WhatsApptocustomer: 'yes',
+            WhatsApptemplateid: 'tpl_brand_assignment_wa',
+          },
+          'Complete Packing': {
+            emailtocustomer: 'yes',
+            emailtemplateid: 'tpl_complete_packing_email',
+            WhatsApptocustomer: 'yes',
+            WhatsApptemplateid: 'tpl_complete_packing_wa',
+          },
+          'Create Shipment': {
+            emailtobrandowner: 'yes',
+            emailtocustomer: 'yes',
+            emailtemplateid: 'tpl_create_shipment_email',
+            WhatsApptobrandowner: 'yes',
+            WhatsApptocustomer: 'yes',
+            WhatsApptemplateid: 'tpl_create_shipment_wa',
+          },
+          'Confirm Delivery': {
+            emailtobrandowner: 'yes',
+            emailtocustomer: 'yes',
+            emailtemplateid: 'tpl_confirm_delivery_email',
+            WhatsApptobrandowner: 'yes',
+            WhatsApptocustomer: 'yes',
+            WhatsApptemplateid: 'tpl_confirm_delivery_wa',
+          },
+          'Process Return': {
+            emailtobrandowner: 'yes',
+            emailtocustomer: 'yes',
+            emailtemplateid: 'tpl_process_return_email',
+            WhatsApptobrandowner: 'yes',
+            WhatsApptocustomer: 'yes',
+            WhatsApptemplateid: 'tpl_process_return_wa',
+          },
+        };
+
+    return {
+      ...base,
+      brandOwnerAssignment: base['Brand Owner Assignment'],
+      completePacking: base['Complete Packing'],
+      createShipment: base['Create Shipment'],
+      confirmDelivery: base['Confirm Delivery'],
+      processReturn: base['Process Return'],
+    };
+  }
+
+  // SAVE GLOBAL NOTIFICATION CONFIG (Section 62-63, 81)
+  async saveGlobalNotificationConfig(config: Partial<GlobalNotificationConfig>): Promise<GlobalNotificationConfig> {
+    const current = await this.getGlobalNotificationConfig();
+    const payload = {
+      ...current,
+      ...config,
+      'Brand Owner Assignment': config['Brand Owner Assignment'] || config.brandOwnerAssignment || current['Brand Owner Assignment'],
+      'Complete Packing': config['Complete Packing'] || config.completePacking || current['Complete Packing'],
+      'Create Shipment': config['Create Shipment'] || config.createShipment || current['Create Shipment'],
+      'Confirm Delivery': config['Confirm Delivery'] || config.confirmDelivery || current['Confirm Delivery'],
+      'Process Return': config['Process Return'] || config.processReturn || current['Process Return'],
+      id: 'config',
+      updatedAt: new Date().toISOString(),
+    };
+    await this.db.saveCollectionDoc('global', sanitizeFirestorePayload(payload));
+    return this.getGlobalNotificationConfig();
+  }
+
+  // TRIGGER STAGE NOTIFICATIONS (Sections 64-80)
+  async triggerStageNotifications(
+    stage: 'Brand Owner Assignment' | 'Complete Packing' | 'Create Shipment' | 'Confirm Delivery' | 'Process Return',
+    orderId: string,
+    metadata?: Record<string, any>
+  ): Promise<void> {
+    try {
+      const config = await this.getGlobalNotificationConfig();
+      const stageConfig = config[stage];
+      if (!stageConfig) return;
+
+      const details = await this.getOrderDetails(orderId);
+      const customers = await this.db.getCollectionDocs('customers');
+      const customer = customers.find((c) => String(c.id) === String(details.order?.customerId));
+
+      const customerEmail = customer?.email || details.order?.customerEmail;
+      const customerMobile = details.order?.contactNo || details.order?.customerMobile || customer?.mobileNumber || customer?.phone;
+
+      const brandOwners = await this.db.getCollectionDocs('product_brand_owners');
+      const assignedOwners: any[] = [];
+      if (details.brandAssignments && details.brandAssignments.length > 0) {
+        for (const ba of details.brandAssignments) {
+          const owner = brandOwners.find((bo) => String(bo.id) === String(ba.brandOwnerId));
+          if (owner) assignedOwners.push(owner);
+        }
+      }
+
+      const now = new Date().toISOString();
+
+      if (stageConfig.emailtocustomer === 'yes' && stageConfig.emailtemplateid && customerEmail) {
+        await this.db.saveCollectionDoc('audit_logs', {
+          id: this.generateId('notif_email_cust'),
+          timestamp: now,
+          user: 'System Notification Engine',
+          role: 'Admin',
+          action: `NOTIFICATION_EMAIL_CUSTOMER_${stage.replace(/\s+/g, '_').toUpperCase()}`,
+          details: `Sent email notification to customer ${customerEmail} using template ${stageConfig.emailtemplateid} for Order #${details.order.orderNumber}`,
+          status: 'success',
+        });
+      }
+
+      if (stageConfig.WhatsApptocustomer === 'yes' && stageConfig.WhatsApptemplateid && customerMobile) {
+        await this.db.saveCollectionDoc('whatsapp_messages', {
+          id: this.generateId('msg'),
+          phone: customerMobile,
+          direction: 'Outgoing',
+          content: `Notification for Order #${details.order.orderNumber} (${stage})`,
+          timestamp: now,
+          status: 'sent',
+          templateName: stageConfig.WhatsApptemplateid,
+        });
+      }
+
+      if ('emailtobrandowner' in stageConfig && stageConfig.emailtobrandowner === 'yes' && stageConfig.emailtemplateid) {
+        for (const bo of assignedOwners) {
+          const boEmail = bo.contactEmail || bo.email;
+          if (boEmail) {
+            await this.db.saveCollectionDoc('audit_logs', {
+              id: this.generateId('notif_email_bo'),
+              timestamp: now,
+              user: 'System Notification Engine',
+              role: 'Admin',
+              action: `NOTIFICATION_EMAIL_BRAND_OWNER_${stage.replace(/\s+/g, '_').toUpperCase()}`,
+              details: `Sent email notification to brand owner ${bo.name} (${boEmail}) using template ${stageConfig.emailtemplateid} for Order #${details.order.orderNumber}`,
+              status: 'success',
+            });
+          }
+        }
+      }
+
+      if ('WhatsApptobrandowner' in stageConfig && stageConfig.WhatsApptobrandowner === 'yes' && stageConfig.WhatsApptemplateid) {
+        for (const bo of assignedOwners) {
+          const boMobile = bo.contactMobile || bo.whatsappNo || bo.contactPhone;
+          if (boMobile) {
+            await this.db.saveCollectionDoc('whatsapp_messages', {
+              id: this.generateId('msg_bo'),
+              phone: boMobile,
+              direction: 'Outgoing',
+              content: `Operational Notification for Brand Owner ${bo.name} - Order #${details.order.orderNumber} (${stage})`,
+              timestamp: now,
+              status: 'sent',
+              templateName: stageConfig.WhatsApptemplateid,
+            });
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[NOTIFICATION] Non-fatal notification trigger warning for stage '${stage}' on order '${orderId}':`, err);
+    }
+  }
+
   // 2. GET SINGLE ORDER DETAILS (Unified response)
   async getOrderDetails(orderId: string): Promise<OperationsOrderDetailsResponse> {
     const orders = await this.db.getCollectionDocs('sales_orders');
@@ -398,6 +775,7 @@ export class OperationsService {
     await this.updateFulfilmentStatus(orderId, 'PACKED', { packingId: packing.id });
     await this.recordTimelineEvent(orderId, 'PACKING_COMPLETED', `Packing completed by ${packerId || 'Warehouse Staff'}`, packerId, { notes });
     await this.syncPaymentRecord(orderId);
+    await this.triggerStageNotifications('Complete Packing', orderId, { packerId, notes });
 
     this.setIdempotency(idempotencyKey, packing);
     return packing;
@@ -445,6 +823,7 @@ export class OperationsService {
       { assignments: formattedAssignments }
     );
     await this.syncPaymentRecord(orderId);
+    await this.triggerStageNotifications('Brand Owner Assignment', orderId, { assignments: formattedAssignments });
 
     this.setIdempotency(idempotencyKey, record);
     return record;
@@ -523,6 +902,7 @@ export class OperationsService {
       { shipmentId: shipment.id, trackingNumber: shipment.trackingNumber, totalCharge }
     );
     await this.syncPaymentRecord(orderId);
+    await this.triggerStageNotifications('Create Shipment', orderId, { shipmentId: shipment.id });
 
     this.setIdempotency(idempotencyKey, shipment);
     return shipment;
@@ -620,6 +1000,7 @@ export class OperationsService {
       { deliveryId: delivery.id, recipientName: delivery.recipientName }
     );
     await this.syncPaymentRecord(shipment.orderId);
+    await this.triggerStageNotifications('Confirm Delivery', shipment.orderId, { deliveryId: delivery.id });
 
     this.setIdempotency(idempotencyKey, delivery);
     return delivery;
@@ -783,10 +1164,11 @@ export class OperationsService {
       { returnId: returnRecord.id, resolution, notes }
     );
     await this.syncPaymentRecord(returnRecord.orderId);
+    await this.triggerStageNotifications('Process Return', returnRecord.orderId, { returnId: returnRecord.id, resolution });
 
     this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;
   }
-
-
 }
+
+

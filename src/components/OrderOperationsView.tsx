@@ -46,18 +46,57 @@ interface OperationsOrder {
   salesChannel?: string;
 }
 
-export const OrderOperationsView: React.FC = () => {
+export interface OrderOperationsViewProps {
+  initialStage?: 'all' | 'assignment' | 'packing' | 'shipment' | 'delivery' | 'returns';
+}
+
+export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initialStage = 'all' }) => {
   const { salesOrders } = useCRM();
-  const [activeSubTab, setActiveSubTab] = useState<'all' | 'packing' | 'dispatch' | 'delivery' | 'returns' | 'unpaid'>('all');
+  const [activeSubTab, setActiveSubTab] = useState<'all' | 'assignment' | 'packing' | 'shipment' | 'delivery' | 'returns' | 'unpaid'>(initialStage);
   const [orders, setOrders] = useState<OperationsOrder[]>([]);
   const [returnsList, setReturnsList] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+
+  // Search Fields (Sections 10-18)
+  const [itemNameInput, setItemNameInput] = useState<string>('');
+  const [customerNameInput, setCustomerNameInput] = useState<string>('');
+  const [mobileInput, setMobileInput] = useState<string>('');
+  const [dateInput, setDateInput] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const [appliedFilters, setAppliedFilters] = useState({
+    itemName: '',
+    customerName: '',
+    mobile: '',
+    date: '',
+  });
+
+  // Server-Side Pagination States (Sections 19-24, 55)
+  const [page, setPage] = useState<number>(1);
+  const [limit, setLimit] = useState<number>(10);
+  const [paginationInfo, setPaginationInfo] = useState({
+    page: 1,
+    limit: 10,
+    totalRecords: 0,
+    totalPages: 1,
+    hasPrevious: false,
+    hasNext: false,
+  });
+
   const [selectedOrder, setSelectedOrder] = useState<OperationsOrder | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string>('NOT_STARTED');
   const [orderDetails, setOrderDetails] = useState<any>(null);
   const [detailsLoading, setDetailsLoading] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Sync initialStage prop
+  useEffect(() => {
+    setActiveSubTab(initialStage);
+    setPage(1);
+  }, [initialStage]);
+
+  // Form Modals State
+  const [activeModal, setActiveModal] = useState<'packing' | 'brand' | 'shipment' | 'delivery' | 'return' | 'reverseShipment' | null>(null);
 
   // Print & Share Modals State
   const [printOrder, setPrintOrder] = useState<OperationsOrder | null>(null);
@@ -67,9 +106,6 @@ export const OrderOperationsView: React.FC = () => {
   const [shareOrder, setShareOrder] = useState<OperationsOrder | null>(null);
   const [shareText, setShareText] = useState<string>('');
   const [copiedSummary, setCopiedSummary] = useState<boolean>(false);
-
-  // Form Modals State
-  const [activeModal, setActiveModal] = useState<'packing' | 'brand' | 'shipment' | 'delivery' | 'return' | 'reverseShipment' | null>(null);
 
   // Form Inputs
   const [packerIdInput, setPackerIdInput] = useState<string>('Ops Staff');
@@ -111,15 +147,38 @@ export const OrderOperationsView: React.FC = () => {
     setLoading(true);
     try {
       let endpoint = '/api/operations/orders';
-      if (activeSubTab === 'packing') endpoint = '/api/operations/packing/orders';
-      if (activeSubTab === 'dispatch') endpoint = '/api/operations/dispatch/orders';
-      if (activeSubTab === 'delivery') endpoint = '/api/operations/delivery/orders';
+      if (activeSubTab === 'assignment') endpoint = '/api/operations/brand-owner-assignment';
+      else if (activeSubTab === 'packing') endpoint = '/api/operations/packing';
+      else if (activeSubTab === 'shipment') endpoint = '/api/operations/shipment';
+      else if (activeSubTab === 'delivery') endpoint = '/api/operations/delivery';
+      else if (activeSubTab === 'returns') endpoint = '/api/operations/returns';
 
-      const res = await fetch(endpoint);
+      const params = new URLSearchParams();
+      if (appliedFilters.itemName) params.append('itemName', appliedFilters.itemName);
+      if (appliedFilters.customerName) params.append('customerName', appliedFilters.customerName);
+      if (appliedFilters.mobile) params.append('mobile', appliedFilters.mobile);
+      if (appliedFilters.date) params.append('date', appliedFilters.date);
+      if (searchQuery) params.append('search', searchQuery);
+      params.append('page', String(page));
+      params.append('limit', String(limit));
+
+      const res = await fetch(`${endpoint}?${params.toString()}`);
       const contentType = res.headers.get('content-type') || '';
       const data = contentType.includes('application/json') ? await res.json() : null;
       if (data?.success) {
-        setOrders(data.orders || []);
+        setOrders(data.records || data.orders || []);
+        if (data.pagination) {
+          setPaginationInfo(data.pagination);
+        } else {
+          setPaginationInfo({
+            page: 1,
+            limit,
+            totalRecords: (data.records || data.orders || []).length,
+            totalPages: 1,
+            hasPrevious: false,
+            hasNext: false,
+          });
+        }
       } else {
         setOrders(salesOrders.map((order) => ({
           ...order,
@@ -132,11 +191,7 @@ export const OrderOperationsView: React.FC = () => {
       }
 
       if (activeSubTab === 'returns' && data?.success) {
-        const retRes = await fetch('/api/operations/returns');
-        const retData = await retRes.json();
-        if (retData.success) {
-          setReturnsList(retData.returns || []);
-        }
+        setReturnsList(data.returns || []);
       }
     } catch (err: any) {
       console.error('Failed to fetch operations data:', err);
@@ -147,7 +202,38 @@ export const OrderOperationsView: React.FC = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [activeSubTab, salesOrders]);
+  }, [activeSubTab, page, limit, appliedFilters, searchQuery, salesOrders]);
+
+  const handleSearchSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setPage(1);
+    setAppliedFilters({
+      itemName: itemNameInput,
+      customerName: customerNameInput,
+      mobile: mobileInput,
+      date: dateInput,
+    });
+  };
+
+  const handleClearSearch = () => {
+    setItemNameInput('');
+    setCustomerNameInput('');
+    setMobileInput('');
+    setDateInput('');
+    setSearchQuery('');
+    setPage(1);
+    setAppliedFilters({
+      itemName: '',
+      customerName: '',
+      mobile: '',
+      date: '',
+    });
+  };
+
+  const handleLimitChange = (newLimit: number) => {
+    setLimit(Math.min(50, Math.max(1, newLimit)));
+    setPage(1);
+  };
 
   const fetchOrderDetails = async (orderId: string) => {
     setDetailsLoading(true);
@@ -520,77 +606,144 @@ VioLeafy E-Commerce Platform`;
         </div>
       )}
 
-      {/* Pipeline Navigation Tabs */}
+      {/* Pipeline Navigation Tabs (Section 4) */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-slate-200 text-xs font-bold">
         <button
-          onClick={() => setActiveSubTab('all')}
+          onClick={() => { setActiveSubTab('assignment'); setPage(1); }}
           className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === 'all' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            activeSubTab === 'assignment' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
           }`}
         >
-          <Package className="w-4 h-4" />
-          All Orders
+          <UserCheck className="w-4 h-4" />
+          Brand Owner Assignment
         </button>
 
         <button
-          onClick={() => setActiveSubTab('packing')}
+          onClick={() => { setActiveSubTab('packing'); setPage(1); }}
           className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'packing' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
           }`}
         >
           <Package className="w-4 h-4" />
-          Packing Queue
+          Complete Packing
         </button>
 
         <button
-          onClick={() => setActiveSubTab('dispatch')}
+          onClick={() => { setActiveSubTab('shipment'); setPage(1); }}
           className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === 'dispatch' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            activeSubTab === 'shipment' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
           }`}
         >
           <Truck className="w-4 h-4" />
-          Ready for Dispatch
+          Create Shipment
         </button>
 
         <button
-          onClick={() => setActiveSubTab('delivery')}
+          onClick={() => { setActiveSubTab('delivery'); setPage(1); }}
           className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'delivery' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
           }`}
         >
-          <MapPin className="w-4 h-4" />
-          Delivery Audit
+          <CheckCircle2 className="w-4 h-4" />
+          Confirm Delivery
         </button>
 
         <button
-          onClick={() => setActiveSubTab('returns')}
+          onClick={() => { setActiveSubTab('returns'); setPage(1); }}
           className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'returns' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
           }`}
         >
           <RotateCcw className="w-4 h-4" />
-          Returns & Reverse Logistics
+          Process Return
         </button>
 
-
+        <button
+          onClick={() => { setActiveSubTab('all'); setPage(1); }}
+          className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
+            activeSubTab === 'all' ? 'bg-slate-800 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          <Package className="w-4 h-4" />
+          All Operational View
+        </button>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex items-center justify-between gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search by Order #, Customer name or ID..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
-          />
+      {/* Common Search Controls (Sections 10-18) */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-2">
+            <Search className="w-4 h-4 text-emerald-600" />
+            <span>Search Operational Records</span>
+          </h3>
+          {(appliedFilters.itemName || appliedFilters.customerName || appliedFilters.mobile || appliedFilters.date || searchQuery) && (
+            <button
+              onClick={handleClearSearch}
+              className="text-[11px] text-rose-600 hover:text-rose-700 font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Clear Search</span>
+            </button>
+          )}
         </div>
-
-        <div className="text-xs text-slate-500 font-bold">
-          Showing <span className="text-emerald-700 font-extrabold">{filteredOrders.length}</span> sales orders
-        </div>
+        <form onSubmit={handleSearchSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+          <div>
+            <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Item Name</label>
+            <input
+              type="text"
+              placeholder="e.g. Coconut Oil"
+              value={itemNameInput}
+              onChange={(e) => setItemNameInput(e.target.value)}
+              className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Customer Name</label>
+            <input
+              type="text"
+              placeholder="e.g. John"
+              value={customerNameInput}
+              onChange={(e) => setCustomerNameInput(e.target.value)}
+              className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Mobile Number</label>
+            <input
+              type="text"
+              placeholder="e.g. 9876543210"
+              value={mobileInput}
+              onChange={(e) => setMobileInput(e.target.value)}
+              className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Date</label>
+            <input
+              type="date"
+              value={dateInput}
+              onChange={(e) => setDateInput(e.target.value)}
+              className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            />
+          </div>
+          <div className="flex items-end gap-1.5">
+            <button
+              type="submit"
+              className="flex-1 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Search</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleClearSearch}
+              className="py-1.5 px-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-xs uppercase tracking-wider transition cursor-pointer"
+              title="Reset Filters"
+            >
+              Reset
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* Orders Table */}
@@ -745,6 +898,55 @@ VioLeafy E-Commerce Platform`;
           </table>
         </div>
       )}
+
+      {/* Server-Side Pagination Controls (Sections 19-24, 55) */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-200 mt-4 bg-slate-50 p-3 rounded-xl">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-600 font-bold uppercase tracking-tight">Records per page:</span>
+          <select
+            value={limit}
+            onChange={(e) => handleLimitChange(Number(e.target.value))}
+            className="px-2.5 py-1 text-xs bg-white border border-slate-300 rounded-lg font-extrabold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+          >
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={30}>30</option>
+            <option value={40}>40</option>
+            <option value={50}>50</option>
+          </select>
+        </div>
+
+        <div className="text-xs text-slate-700 font-extrabold font-mono">
+          Showing {paginationInfo.totalRecords === 0 ? 0 : (paginationInfo.page - 1) * paginationInfo.limit + 1}–
+          {Math.min(paginationInfo.page * paginationInfo.limit, paginationInfo.totalRecords)} of {paginationInfo.totalRecords} records
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            disabled={!paginationInfo.hasPrevious}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className={`px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition border ${
+              paginationInfo.hasPrevious
+                ? 'bg-white text-slate-700 hover:bg-slate-100 border-slate-300 cursor-pointer shadow-2xs'
+                : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+            }`}
+          >
+            Previous
+          </button>
+
+          <button
+            disabled={!paginationInfo.hasNext}
+            onClick={() => setPage((p) => p + 1)}
+            className={`px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition border ${
+              paginationInfo.hasNext
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600 cursor-pointer shadow-xs'
+                : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+            }`}
+          >
+            Next
+          </button>
+        </div>
+      </div>
 
       {/* ORDER OPERATIONS DETAILS MODAL */}
       {selectedOrder && (

@@ -23,10 +23,11 @@ import { OrderOperationsView } from './components/OrderOperationsView';
 import { 
   BarChart3, Users, Briefcase, Calendar, TrendingUp, MessageSquare, 
   ShieldCheck, LayoutDashboard, Menu, X, HelpCircle, ShieldAlert, UserCheck, Gift,
-  LogOut, Receipt, Coins, Layout, Sparkles, ShoppingBag, Settings, Loader2, PackageCheck
+  LogOut, Receipt, Coins, Layout, Sparkles, ShoppingBag, Settings, Loader2, PackageCheck,
+  Truck, CheckCircle2, RotateCcw, Package
 } from 'lucide-react';
 
-type ModuleTab = 'dashboard' | 'customers' | 'sales_orders' | 'order_operations' | 'schedules' | 'performance' | 'whatsapp' | 'security' | 'referrals' | 'users' | 'influencer_marketing' | 'shopping' | 'settings';
+type ModuleTab = 'dashboard' | 'customers' | 'sales_orders' | 'brand_owner_assignment' | 'complete_packing' | 'create_shipment' | 'confirm_delivery' | 'process_return' | 'order_operations' | 'schedules' | 'performance' | 'whatsapp' | 'security' | 'referrals' | 'users' | 'influencer_marketing' | 'shopping' | 'settings';
 
 function CRMAppShell() {
   const { 
@@ -75,7 +76,6 @@ function CRMAppShell() {
         />
       );
     }
-    // Fallback or Initial text based
     return (
       <div className={`${classes} bg-transparent flex items-center justify-center font-extrabold text-[#747ff1] text-base shrink-0`}>
         {brandConfig.brandName?.[0] || 'V'}
@@ -87,14 +87,19 @@ function CRMAppShell() {
     return <LoginScreen />;
   }
 
-  // Navigations links mapped to module access checks
+  // Navigations links mapped to module access checks (Section 4)
   const navigationItems: { id: ModuleTab; name: string; icon: any; moduleCheck: string }[] = [
     { id: 'dashboard', name: 'KPI Intelligence', icon: BarChart3, moduleCheck: 'Dashboard' },
     { id: 'shopping', name: 'Shopping Platform', icon: ShoppingBag, moduleCheck: 'Dashboard' },
     { id: 'settings', name: 'Settings', icon: Settings, moduleCheck: 'Dashboard' },
     { id: 'referrals', name: 'Dashboard', icon: Gift, moduleCheck: 'Referral Hub' },
     { id: 'sales_orders', name: 'Invoices', icon: Receipt, moduleCheck: 'Sales Orders' },
-    { id: 'order_operations', name: 'Order Operations', icon: PackageCheck, moduleCheck: 'Sales Orders' },
+    { id: 'brand_owner_assignment', name: 'Brand Owner Assignment', icon: UserCheck, moduleCheck: 'Sales Orders' },
+    { id: 'complete_packing', name: 'Complete Packing', icon: PackageCheck, moduleCheck: 'Sales Orders' },
+    { id: 'create_shipment', name: 'Create Shipment', icon: Truck, moduleCheck: 'Sales Orders' },
+    { id: 'confirm_delivery', name: 'Confirm Delivery', icon: CheckCircle2, moduleCheck: 'Sales Orders' },
+    { id: 'process_return', name: 'Process Return', icon: RotateCcw, moduleCheck: 'Sales Orders' },
+    { id: 'order_operations', name: 'All Operations Summary', icon: Package, moduleCheck: 'Sales Orders' },
     { id: 'customers', name: 'Customer Directory', icon: UserCheck, moduleCheck: 'Customer Directory' },
     { id: 'schedules', name: 'Task & Calendar Sync', icon: Calendar, moduleCheck: 'Tasks & Calendar' },
     { id: 'performance', name: 'Products Settings', icon: TrendingUp, moduleCheck: 'Products & Clients' },
@@ -221,7 +226,12 @@ function CRMAppShell() {
               {activeTab === 'customers' && <CustomerManagementView />}
               {activeTab === 'referrals' && <ReferralPartnerHubView />}
               {activeTab === 'sales_orders' && <SalesOrdersView />}
-              {activeTab === 'order_operations' && <OrderOperationsView />}
+              {activeTab === 'brand_owner_assignment' && <OrderOperationsView initialStage="assignment" />}
+              {activeTab === 'complete_packing' && <OrderOperationsView initialStage="packing" />}
+              {activeTab === 'create_shipment' && <OrderOperationsView initialStage="shipment" />}
+              {activeTab === 'confirm_delivery' && <OrderOperationsView initialStage="delivery" />}
+              {activeTab === 'process_return' && <OrderOperationsView initialStage="returns" />}
+              {activeTab === 'order_operations' && <OrderOperationsView initialStage="all" />}
               {activeTab === 'schedules' && <TasksCalendarView />}
               {activeTab === 'performance' && <PerformanceTrackingView />}
               {activeTab === 'whatsapp' && <WhatsAppIntegrationView />}

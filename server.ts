@@ -1568,56 +1568,118 @@ const handleGetOperationsOrders = async (req: express.Request, res: express.Resp
 app.get("/api/operations/orders", handleGetOperationsOrders);
 app.get("/api/v1/operations/orders", handleGetOperationsOrders);
 
-// 2. GET /api/operations/packing/orders & /api/v1/operations/packing/orders
-const handleGetPackingOrders = async (req: express.Request, res: express.Response) => {
-  try {
-    const orders = await operationsService.listOrders();
-    const packingOrders = orders.filter(o => o.fulfilmentStatus === 'NOT_STARTED' || o.fulfilmentStatus === 'PACKING');
-    return res.json({ success: true, count: packingOrders.length, orders: packingOrders });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || "Failed to retrieve packing orders" });
-  }
-};
-app.get("/api/operations/packing/orders", handleGetPackingOrders);
-app.get("/api/v1/operations/packing/orders", handleGetPackingOrders);
+// 2. Dedicated Stage Operational Listing Endpoints (Sections 24, 32-36, 50)
+const extractStageQueryParams = (req: express.Request) => ({
+  itemName: req.query.itemName ? String(req.query.itemName) : undefined,
+  customerName: req.query.customerName ? String(req.query.customerName) : undefined,
+  mobile: req.query.mobile ? String(req.query.mobile) : undefined,
+  date: req.query.date ? String(req.query.date) : undefined,
+  search: req.query.search ? String(req.query.search) : undefined,
+  page: req.query.page ? parseInt(String(req.query.page), 10) : 1,
+  limit: req.query.limit ? parseInt(String(req.query.limit), 10) : 10,
+});
 
-// 3. GET /api/operations/dispatch/orders & /api/v1/operations/dispatch/orders
-const handleGetDispatchOrders = async (req: express.Request, res: express.Response) => {
+// Brand Owner Assignment
+const handleGetBrandOwnerAssignmentStage = async (req: express.Request, res: express.Response) => {
   try {
-    const orders = await operationsService.listOrders();
-    const dispatchOrders = orders.filter(o => o.fulfilmentStatus === 'PACKED' || o.fulfilmentStatus === 'READY_FOR_DISPATCH');
-    return res.json({ success: true, count: dispatchOrders.length, orders: dispatchOrders });
+    const result = await operationsService.listStageRecords('assignment', extractStageQueryParams(req));
+    return res.json({ success: true, ...result });
   } catch (error: any) {
-    return res.status(500).json({ error: error?.message || "Failed to retrieve dispatch orders" });
+    return res.status(500).json({ error: error?.message || "Failed to retrieve brand owner assignment records" });
   }
 };
-app.get("/api/operations/dispatch/orders", handleGetDispatchOrders);
-app.get("/api/v1/operations/dispatch/orders", handleGetDispatchOrders);
+app.get("/api/operations/brand-owner-assignment", handleGetBrandOwnerAssignmentStage);
+app.get("/api/v1/operations/brand-owner-assignment", handleGetBrandOwnerAssignmentStage);
 
-// 4. GET /api/operations/delivery/orders & /api/v1/operations/delivery/orders
-const handleGetDeliveryOrders = async (req: express.Request, res: express.Response) => {
+// Complete Packing
+const handleGetPackingStage = async (req: express.Request, res: express.Response) => {
   try {
-    const orders = await operationsService.listOrders();
-    const deliveryOrders = orders.filter(o => o.fulfilmentStatus === 'DISPATCHED' || o.fulfilmentStatus === 'IN_TRANSIT' || o.fulfilmentStatus === 'OUT_FOR_DELIVERY');
-    return res.json({ success: true, count: deliveryOrders.length, orders: deliveryOrders });
+    const result = await operationsService.listStageRecords('packing', extractStageQueryParams(req));
+    return res.json({ success: true, ...result, orders: result.records, count: result.pagination.totalRecords });
   } catch (error: any) {
-    return res.status(500).json({ error: error?.message || "Failed to retrieve delivery orders" });
+    return res.status(500).json({ error: error?.message || "Failed to retrieve packing records" });
   }
 };
-app.get("/api/operations/delivery/orders", handleGetDeliveryOrders);
-app.get("/api/v1/operations/delivery/orders", handleGetDeliveryOrders);
+app.get("/api/operations/packing", handleGetPackingStage);
+app.get("/api/v1/operations/packing", handleGetPackingStage);
+app.get("/api/operations/packing/orders", handleGetPackingStage);
+app.get("/api/v1/operations/packing/orders", handleGetPackingStage);
 
-// 5. GET /api/operations/returns & /api/v1/operations/returns
-const handleGetReturns = async (req: express.Request, res: express.Response) => {
+// Create Shipment
+const handleGetShipmentStage = async (req: express.Request, res: express.Response) => {
   try {
-    const returns = await getCollectionDocs("order_returns");
-    return res.json({ success: true, count: returns.length, returns });
+    const result = await operationsService.listStageRecords('shipment', extractStageQueryParams(req));
+    return res.json({ success: true, ...result, orders: result.records, count: result.pagination.totalRecords });
   } catch (error: any) {
-    return res.status(500).json({ error: error?.message || "Failed to retrieve returns" });
+    return res.status(500).json({ error: error?.message || "Failed to retrieve shipment records" });
   }
 };
-app.get("/api/operations/returns", handleGetReturns);
-app.get("/api/v1/operations/returns", handleGetReturns);
+app.get("/api/operations/shipment", handleGetShipmentStage);
+app.get("/api/v1/operations/shipment", handleGetShipmentStage);
+app.get("/api/operations/dispatch/orders", handleGetShipmentStage);
+app.get("/api/v1/operations/dispatch/orders", handleGetShipmentStage);
+
+// Confirm Delivery
+const handleGetDeliveryStage = async (req: express.Request, res: express.Response) => {
+  try {
+    const result = await operationsService.listStageRecords('delivery', extractStageQueryParams(req));
+    return res.json({ success: true, ...result, orders: result.records, count: result.pagination.totalRecords });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to retrieve delivery records" });
+  }
+};
+app.get("/api/operations/delivery", handleGetDeliveryStage);
+app.get("/api/v1/operations/delivery", handleGetDeliveryStage);
+app.get("/api/operations/delivery/orders", handleGetDeliveryStage);
+app.get("/api/v1/operations/delivery/orders", handleGetDeliveryStage);
+
+// Process Return
+const handleGetReturnsStage = async (req: express.Request, res: express.Response) => {
+  try {
+    const result = await operationsService.listStageRecords('returns', extractStageQueryParams(req));
+    const rawReturns = await getCollectionDocs("order_returns");
+    return res.json({ success: true, ...result, returns: rawReturns, count: result.pagination.totalRecords });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to retrieve return records" });
+  }
+};
+app.get("/api/operations/returns", handleGetReturnsStage);
+app.get("/api/v1/operations/returns", handleGetReturnsStage);
+
+// Global Notification Config APIs (Sections 62-63, 81)
+app.get("/api/config/global", async (req: express.Request, res: express.Response) => {
+  try {
+    const config = await operationsService.getGlobalNotificationConfig();
+    return res.json({ success: true, config });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to fetch global notification config" });
+  }
+});
+app.get("/api/v1/config/global", async (req: express.Request, res: express.Response) => {
+  try {
+    const config = await operationsService.getGlobalNotificationConfig();
+    return res.json({ success: true, config });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to fetch global notification config" });
+  }
+});
+
+app.post("/api/config/global", async (req: express.Request, res: express.Response) => {
+  try {
+    const config = await operationsService.saveGlobalNotificationConfig(req.body);
+    return res.json({ success: true, config });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to save global notification config" });
+  }
+});
+app.post("/api/v1/config/global", async (req: express.Request, res: express.Response) => {
+  try {
+    const config = await operationsService.saveGlobalNotificationConfig(req.body);
+    return res.json({ success: true, config });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to save global notification config" });
+  }
+});
 
 // 6. GET /api/operations/orders/:orderId & /api/v1/operations/orders/:orderId
 const handleGetOrderDetails = async (req: express.Request, res: express.Response) => {

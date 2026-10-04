@@ -233,4 +233,67 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     assert.equal(packing1.id, packing2.id);
     assert.equal(packing2.packedBy, 'Packer-A');
   });
+
+  it('9. Should list stage-specific records with multi-field search and pagination', async () => {
+    const { dbAccessor } = createMockDatabase();
+    const service = new OperationsService(dbAccessor);
+
+    // Initial state: brand-owner-assignment stage should include ord_1001 & ord_1002
+    const res1 = await service.listStageRecords('brand-owner-assignment', {
+      customerName: 'Aarav',
+      page: 1,
+      limit: 10,
+    });
+    assert.equal(res1.records.length, 1);
+    assert.equal(res1.records[0].customerName, 'Aarav Sharma');
+    assert.equal(res1.pagination.totalRecords, 1);
+    assert.equal(res1.pagination.page, 1);
+
+    // Search by item name
+    const res2 = await service.listStageRecords('brand-owner-assignment', {
+      itemName: 'Honey',
+    });
+    assert.equal(res2.records.length, 1);
+    assert.equal(res2.records[0].orderNumber, 'SO-1001');
+
+    // Search by mobile
+    const res3 = await service.listStageRecords('brand-owner-assignment', {
+      mobile: '9876543210',
+    });
+    assert.equal(res3.records.length, 1);
+    assert.equal(res3.records[0].orderNumber, 'SO-1002');
+  });
+
+  it('10. Should enforce max limit of 50 in stage listing pagination', async () => {
+    const { dbAccessor } = createMockDatabase();
+    const service = new OperationsService(dbAccessor);
+
+    const res = await service.listStageRecords('brand-owner-assignment', {
+      limit: 100, // Client requests 100
+    });
+    assert.equal(res.pagination.limit, 50); // Capped at 50
+  });
+
+  it('11. Should retrieve and save global notification configuration', async () => {
+    const { dbAccessor } = createMockDatabase();
+    const service = new OperationsService(dbAccessor);
+
+    const initialConfig = await service.getGlobalNotificationConfig();
+    assert.equal(initialConfig.brandOwnerAssignment.emailtobrandowner, 'yes');
+    assert.equal(initialConfig.completePacking.emailtocustomer, 'yes');
+
+    // Update config
+    const updated = await service.saveGlobalNotificationConfig({
+      brandOwnerAssignment: {
+        ...initialConfig.brandOwnerAssignment,
+        emailtobrandowner: 'no',
+      },
+    });
+
+    assert.equal(updated.brandOwnerAssignment.emailtobrandowner, 'no');
+
+    const refetched = await service.getGlobalNotificationConfig();
+    assert.equal(refetched.brandOwnerAssignment.emailtobrandowner, 'no');
+  });
 });
+

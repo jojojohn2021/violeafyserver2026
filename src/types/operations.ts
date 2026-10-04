@@ -204,3 +204,40 @@ export interface PaymentRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface StageNotificationSetting {
+  emailtobrandowner?: 'yes' | 'no';
+  emailtocustomer: 'yes' | 'no';
+  emailtemplateid: string;
+  WhatsApptobrandowner?: 'yes' | 'no';
+  WhatsApptocustomer: 'yes' | 'no';
+  WhatsApptemplateid: string;
+}
+
+export interface GlobalNotificationConfig {
+  id?: string;
+  'Brand Owner Assignment': StageNotificationSetting;
+  'Complete Packing': Omit<StageNotificationSetting, 'emailtobrandowner' | 'WhatsApptobrandowner'>;
+  'Create Shipment': StageNotificationSetting;
+  'Confirm Delivery': StageNotificationSetting;
+  'Process Return': StageNotificationSetting;
+  brandOwnerAssignment?: StageNotificationSetting;
+  completePacking?: Omit<StageNotificationSetting, 'emailtobrandowner' | 'WhatsApptobrandowner'>;
+  createShipment?: StageNotificationSetting;
+  confirmDelivery?: StageNotificationSetting;
+  processReturn?: StageNotificationSetting;
+}
+
+export interface OperationsPaginationResponse<T = any> {
+  success: boolean;
+  records: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalRecords: number;
+    totalPages: number;
+    hasPrevious: boolean;
+    hasNext: boolean;
+  };
+}
+

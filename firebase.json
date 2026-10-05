@@ -1,4 +1,10 @@
 {
+  "firestore": [
+    {
+      "database": "violeafydb",
+      "rules": "firestore.rules"
+    }
+  ],
   "hosting": {
     "target": "server-site",
     "public": "dist",

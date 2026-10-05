@@ -99,6 +99,68 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Performance / commission collections
+    match /performance_levels/{levelId} {
+      allow read, write: if true;
+    }
+    match /commission_rules/{ruleId} {
+      allow read, write: if true;
+    }
+    match /commission_transactions/{transactionId} {
+      allow read, write: if true;
+    }
+
+    // Product and brand metadata collections
+    match /product_brands/{brandId} {
+      allow read, write: if true;
+    }
+    match /product_brand_owners/{ownerId} {
+      allow read, write: if true;
+    }
+    match /product_units/{unitId} {
+      allow read, write: if true;
+    }
+    match /formatinvoice/{recordId} {
+      allow read, write: if true;
+    }
+    match /invoices/{invoiceId} {
+      allow read, write: if true;
+    }
+
+    // Index and referral records
+    match /customer_indexes/{recordId} {
+      allow read, write: if true;
+    }
+    match /referral_links/{recordId} {
+      allow read, write: if true;
+    }
+
+    // Order fulfilment and shipment operations
+    match /order_fulfilment/{recordId} {
+      allow read, write: if isSignedIn();
+    }
+    match /order_brand_assignments/{recordId} {
+      allow read, write: if isSignedIn();
+    }
+    match /order_operation_history/{recordId} {
+      allow read, write: if isSignedIn();
+    }
+    match /shipment_brand_owner_assignments/{recordId} {
+      allow read, write: if isSignedIn();
+    }
+    match /shipment_packing/{recordId} {
+      allow read, write: if isSignedIn();
+    }
+    match /shipment_shipments/{recordId} {
+      allow read, write: if isSignedIn();
+    }
+    match /shipment_deliveries/{recordId} {
+      allow read, write: if isSignedIn();
+    }
+    match /shipment_returns/{recordId} {
+      allow read, write: if isSignedIn();
+    }
+
     // Influencers
     match /influencers/{influencerId} {
       allow read, write: if true;

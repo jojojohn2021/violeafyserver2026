@@ -10,7 +10,7 @@ import {
   QueryConstraint, 
   query 
 } from 'firebase/firestore';
-import { signInAnonymously } from 'firebase/auth';
+
 import { db, auth } from '../firebase';
 import { createFirestoreException, OperationType } from '../utils/firestoreLogger';
 
@@ -40,14 +40,8 @@ export class BaseRepository<T extends { id?: string }> {
     if (!auth) {
       return;
     }
-    if (!auth.currentUser) {
-      try {
-        await signInAnonymously(auth);
-      } catch (authErr: any) {
-        const code = authErr?.code || 'auth/unauthenticated';
-        const msg = authErr?.message || String(authErr);
-        throw new Error(`Authentication missing for Firestore collection '${this.collectionName}': ${msg} (${code}). Please log in via Firebase Authentication.`);
-      }
+    if (!auth.currentUser || auth.currentUser.isAnonymous) {
+      throw new Error(`Authentication missing for Firestore collection '${this.collectionName}'. Please log in via Firebase Authentication.`);
     }
   }
 

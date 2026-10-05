@@ -47,6 +47,32 @@ function CRMAppShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSelfieModalOpen, setIsSelfieModalOpen] = useState(false);
 
+  // 3-minute idle auto logout
+  React.useEffect(() => {
+    if (!isLoggedIn) return;
+
+    let idleTimeout: NodeJS.Timeout;
+    const THREE_MINUTES_MS = 3 * 60 * 1000; // 3 minutes
+
+    const resetIdleTimer = () => {
+      if (idleTimeout) clearTimeout(idleTimeout);
+      idleTimeout = setTimeout(() => {
+        console.warn('[AUTH] User idle for 3 minutes. Logging out to enforce session security.');
+        logout();
+      }, THREE_MINUTES_MS);
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    events.forEach((evt) => window.addEventListener(evt, resetIdleTimer, { passive: true }));
+
+    resetIdleTimer();
+
+    return () => {
+      if (idleTimeout) clearTimeout(idleTimeout);
+      events.forEach((evt) => window.removeEventListener(evt, resetIdleTimer));
+    };
+  }, [isLoggedIn, logout]);
+
   const renderLogoSymbol = (classes = "w-9 h-9") => {
     const logoType = brandConfig.logoType || 'fruits_flowers';
     if (logoType === 'fruits_flowers') {

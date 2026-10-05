@@ -28,6 +28,14 @@ import {
   Eye,
 } from 'lucide-react';
 import { useCRM } from '../store';
+import { BaseRepository } from '../repositories/baseRepository';
+import {
+  brandOwnerRepository,
+} from '../repositories/repositories';
+import { persistProductionBrandAssignments } from '../services/productionShipmentAssignmentService';
+import { BrandOwner } from '../types';
+
+const operationHistoryRepository = new BaseRepository<any>('order_operation_history');
 
 interface OperationsOrder {
   id: string;
@@ -51,7 +59,7 @@ export interface OrderOperationsViewProps {
 }
 
 export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initialStage = 'all' }) => {
-  const { salesOrders } = useCRM();
+  const { salesOrders, products } = useCRM();
   const [activeSubTab, setActiveSubTab] = useState<'all' | 'assignment' | 'packing' | 'shipment' | 'delivery' | 'returns' | 'unpaid'>(initialStage);
   const [orders, setOrders] = useState<OperationsOrder[]>([]);
   const [returnsList, setReturnsList] = useState<any[]>([]);
@@ -97,6 +105,8 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   // Form Modals State
   const [activeModal, setActiveModal] = useState<'packing' | 'brand' | 'shipment' | 'delivery' | 'return' | 'reverseShipment' | null>(null);
+  const [showSaveConfirmModal, setShowSaveConfirmModal] = useState<boolean>(false);
+  const [isSavingStatus, setIsSavingStatus] = useState<boolean>(false);
 
   // Print & Share Modals State
   const [printOrder, setPrintOrder] = useState<OperationsOrder | null>(null);
@@ -112,6 +122,106 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
   const [packingNotesInput, setPackingNotesInput] = useState<string>('');
 
   const [brandAssignments, setBrandAssignments] = useState<{ orderItemId: string; productId: string; brandOwnerId: string; brandOwnerName: string }[]>([]);
+  const [brandOwnersList, setBrandOwnersList] = useState<BrandOwner[]>([]);
+
+  const fetchBrandOwners = async () => {
+    try {
+      const docs = await brandOwnerRepository.getAll();
+      if (Array.isArray(docs)) {
+        setBrandOwnersList(docs);
+        return;
+      }
+    } catch (err) {
+      console.error('Error fetching brand owners from Firestore product_brand_owners collection:', err);
+    }
+
+    try {
+      const res = await fetch('/api/db/product_brand_owners');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.docs)) {
+          setBrandOwnersList(data.docs);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching brand owners from /api/db/product_brand_owners proxy:', err);
+    }
+
+    setBrandOwnersList([]);
+  };
+
+  useEffect(() => {
+    fetchBrandOwners();
+  }, []);
+
+  const getOwnerEmail = (bo?: BrandOwner | null) => bo?.contactEmail || (bo as any)?.email || '';
+  const getOwnerMobile = (bo?: BrandOwner | null) => bo?.contactMobile || (bo as any)?.contactPhone || (bo as any)?.phone || (bo as any)?.mobileNumber || '';
+  const getOwnerWhatsapp = (bo?: BrandOwner | null) => bo?.whatsappNo || (bo as any)?.whatsappMobile || (bo as any)?.whatsapp || (bo as any)?.whatsappNumber || '';
+
+  const getProdKey = (prod: any, idx: number) => String(prod?.productId || prod?.id || `p_${idx}`);
+  const getItemIdKey = (prod: any, idx: number) => `item_${prod?.productId || prod?.id || idx}`;
+
+  const isBrandOwnerAssigned = (ownerName?: string) => {
+    return Boolean(ownerName && ownerName.trim() !== '' && ownerName.trim() !== '-- Select Brand Owner --');
+  };
+
+  const checkAllBrandOwnersAssigned = (prods: any[], assignments: any[]) => {
+    if (!prods || prods.length === 0) return false;
+    return prods.every((prod: any, idx: number) => {
+      const prodKey = getProdKey(prod, idx);
+      const itemKey = getItemIdKey(prod, idx);
+      const brandMatch = (assignments || []).find(
+        (b: any) => String(b.productId) === prodKey || b.orderItemId === itemKey
+      );
+      const ownerName = brandMatch?.brandOwnerName || prod.brandOwner || prod.brand || '';
+      return isBrandOwnerAssigned(ownerName);
+    });
+  };
+
+  const handleBrandOwnerChange = (prod: any, idx: number, newOwnerName: string) => {
+    if (!selectedOrder) return;
+
+    const targetOwner = brandOwnersList.find(
+      (b) => b.name?.trim().toLowerCase() === newOwnerName.trim().toLowerCase()
+    );
+
+    const itemId = getItemIdKey(prod, idx);
+    const prodId = getProdKey(prod, idx);
+
+    const activeAssignments = orderDetails?.brandAssignments?.length
+      ? orderDetails.brandAssignments
+      : brandAssignments;
+
+    const currentAssignments = (activeAssignments || []).map((ba: any) => ({ ...ba }));
+    const existingIdx = currentAssignments.findIndex(
+      (ba: any) => String(ba.productId) === prodId || ba.orderItemId === itemId
+    );
+
+    const newAssignment = {
+      orderItemId: itemId,
+      productId: prodId,
+      brandOwnerId: targetOwner?.id || 'brand_owner_default',
+      brandOwnerName: newOwnerName,
+      contactEmail: getOwnerEmail(targetOwner),
+      contactMobile: getOwnerMobile(targetOwner),
+      whatsappNo: getOwnerWhatsapp(targetOwner),
+    };
+
+    if (existingIdx >= 0) {
+      currentAssignments[existingIdx] = newAssignment;
+    } else {
+      currentAssignments.push(newAssignment);
+    }
+
+    setBrandAssignments(currentAssignments);
+    setOrderDetails((prev: any) => (prev ? { ...prev, brandAssignments: currentAssignments } : { brandAssignments: currentAssignments }));
+
+    const prods = selectedOrder.products || orderDetails?.order?.products || [];
+    const allAssigned = checkAllBrandOwnersAssigned(prods, currentAssignments);
+    const newStatus = allAssigned ? 'PACKING' : 'NOT_STARTED';
+    setSelectedStatus(newStatus);
+  };
 
   const [shipmentForm, setShipmentForm] = useState({
     courierAgency: 'FedEx Express',
@@ -239,15 +349,40 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
     setDetailsLoading(true);
     try {
       const res = await fetch(`/api/operations/orders/${orderId}`);
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        throw new Error(`Operations details API unavailable (HTTP ${res.status}).`);
+      }
       const data = await res.json();
       if (data.success) {
         setOrderDetails(data);
-        if (data.fulfilment?.status) {
-          setSelectedStatus(data.fulfilment.status);
-        }
+        const activeAssignments = data.brandAssignments?.length
+          ? data.brandAssignments
+          : brandAssignments;
+        const prods = data.order?.products || selectedOrder?.products || [];
+        const allAssigned = checkAllBrandOwnersAssigned(prods, activeAssignments);
+        setSelectedStatus(allAssigned ? 'PACKING' : 'NOT_STARTED');
+        return;
       }
+      throw new Error(data.error || 'Failed to load order details.');
     } catch (err) {
-      console.error('Error fetching details:', err);
+      console.error('Operations API unavailable; loading operational history directly from Firestore:', err);
+      try {
+        const history = await operationHistoryRepository.getAll();
+        const timeline = history
+          .filter((event: any) => String(event.orderId) === String(orderId))
+          .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setOrderDetails((previous: any) => {
+          const sameOrderDetails = String(previous?.order?.id || '') === String(orderId) ? previous : {};
+          return {
+            ...sameOrderDetails,
+            order: sameOrderDetails.order || (String(selectedOrder?.id || '') === String(orderId) ? selectedOrder : { id: orderId }),
+            timeline,
+          };
+        });
+      } catch (historyError) {
+        console.error('Failed to load operational history directly from Firestore:', historyError);
+      }
     } finally {
       setDetailsLoading(false);
     }
@@ -255,17 +390,20 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   const openOrderModal = (order: OperationsOrder) => {
     setSelectedOrder(order);
-    setSelectedStatus(order.fulfilmentStatus || 'NOT_STARTED');
     fetchOrderDetails(order.id);
+    fetchBrandOwners();
 
     // Pre-fill brand assignments structure
     const initialBrandAssignments = (order.products || []).map((p: any, index: number) => ({
-      orderItemId: `item_${p.productId || p.id || index}`,
-      productId: String(p.productId || p.id || `p_${index}`),
+      orderItemId: getItemIdKey(p, index),
+      productId: getProdKey(p, index),
       brandOwnerId: p.brandOwnerId || 'brand_owner_default',
-      brandOwnerName: p.brandOwner || p.brand || 'VioLeafy Partner',
+      brandOwnerName: p.brandOwner || p.brand || '',
     }));
     setBrandAssignments(initialBrandAssignments);
+
+    const allAssigned = checkAllBrandOwnersAssigned(order.products || [], initialBrandAssignments);
+    setSelectedStatus(allAssigned ? 'PACKING' : 'NOT_STARTED');
 
     setDeliveryForm({
       recipientName: order.customerName || 'Customer',
@@ -317,14 +455,24 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
       });
       const data = await res.json();
       if (data.success) {
-        showStatus('Brand owners assigned to order items successfully!');
+        const prods = selectedOrder?.products || orderDetails?.order?.products || [];
+        const allAssigned = checkAllBrandOwnersAssigned(prods, brandAssignments);
+        const newStatus = allAssigned ? 'PACKING' : 'NOT_STARTED';
+        setSelectedStatus(newStatus);
+        await fetch(`/api/operations/orders/${orderId}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus, updatedBy: 'Ops Manager' }),
+        });
+        showStatus(data.message || 'Record inserted successfully in table: shipment_brand_owner_assignments');
         setActiveModal(null);
         fetchOrderDetails(orderId);
+        fetchOrders();
       } else {
-        showStatus(data.error || 'Failed to assign brand owners', 'error');
+        showStatus(data.error || 'Failed to insert record into table shipment_brand_owner_assignments', 'error');
       }
     } catch (err: any) {
-      showStatus(err.message, 'error');
+      showStatus(err.message || 'Failed to insert record into table shipment_brand_owner_assignments', 'error');
     }
   };
 
@@ -444,25 +592,85 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
 
 
-  const handleSaveStatus = async () => {
+  const getEffectiveBrandAssignments = () => {
+    if (!selectedOrder) return [];
+    const prods = selectedOrder.products || orderDetails?.order?.products || [];
+    const currentActive = orderDetails?.brandAssignments?.length
+      ? orderDetails.brandAssignments
+      : brandAssignments;
+
+    return prods.map((prod: any, idx: number) => {
+      const prodKey = getProdKey(prod, idx);
+      const itemKey = getItemIdKey(prod, idx);
+
+      const match = (currentActive || []).find(
+        (b: any) => String(b.productId) === prodKey || b.orderItemId === itemKey
+      );
+
+      const currentOwnerName = match?.brandOwnerName || prod.brandOwner || prod.brand || '';
+      const matchedOwnerObj = brandOwnersList.find(
+        (bo) =>
+          bo.name?.trim().toLowerCase() === currentOwnerName?.trim().toLowerCase() ||
+          (match?.brandOwnerId && String(bo.id) === String(match.brandOwnerId))
+      );
+
+      return {
+        orderItemId: itemKey,
+        productId: prodKey,
+        brandOwnerId: match?.brandOwnerId || matchedOwnerObj?.id || 'brand_owner_default',
+        brandOwnerName: currentOwnerName || matchedOwnerObj?.name || 'Unassigned',
+        contactEmail: match?.contactEmail || getOwnerEmail(matchedOwnerObj),
+        contactMobile: match?.contactMobile || getOwnerMobile(matchedOwnerObj),
+        whatsappNo: match?.whatsappNo || getOwnerWhatsapp(matchedOwnerObj),
+      };
+    });
+  };
+
+  const handleSaveStatus = () => {
     if (!selectedOrder) return;
+    setShowSaveConfirmModal(true);
+  };
+
+  const confirmSaveStatus = async () => {
+    if (!selectedOrder) return;
+    setIsSavingStatus(true);
     try {
-      const res = await fetch(`/api/operations/orders/${selectedOrder.id}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: selectedStatus, updatedBy: 'Ops Manager' }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showStatus(`Fulfilment status updated to '${selectedStatus}' successfully!`);
-        setSelectedOrder((prev) => (prev ? { ...prev, fulfilmentStatus: selectedStatus } : null));
-        fetchOrders();
-        fetchOrderDetails(selectedOrder.id);
-      } else {
-        showStatus(data.error || 'Failed to update status', 'error');
+      const activeAssignments = getEffectiveBrandAssignments();
+      if (activeAssignments.length === 0) {
+        throw new Error('No order items were found to save brand owner assignments.');
       }
+
+      let successMessage: string;
+      try {
+        const saveRes = await fetch(`/api/operations/orders/${selectedOrder.id}/brand-owner`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            assignments: activeAssignments,
+            assignedBy: 'Ops Manager',
+            status: selectedStatus,
+          }),
+        });
+        const saveData = await saveRes.json().catch(() => ({}));
+        if (!saveRes.ok || !saveData.success) {
+          throw new Error(saveData.error || `Operations API unavailable (HTTP ${saveRes.status}).`);
+        }
+        successMessage = saveData.message || `Brand owner assignments and status ${selectedStatus} saved successfully.`;
+      } catch (apiError) {
+        console.warn('[Order Operations] API save failed; trying authenticated Firestore repositories.', apiError);
+        await persistProductionBrandAssignments(selectedOrder, activeAssignments, selectedStatus);
+        successMessage = `Brand owner assignments and status ${selectedStatus} saved to Firestore.`;
+      }
+
+      showStatus(successMessage);
+      setSelectedOrder((prev) => (prev ? { ...prev, fulfilmentStatus: selectedStatus } : null));
+      await fetchOrders();
+      await fetchOrderDetails(selectedOrder.id);
     } catch (err: any) {
-      showStatus(err.message, 'error');
+      showStatus(err.message || 'Failed to save brand owner assignments.', 'error');
+    } finally {
+      setIsSavingStatus(false);
+      setShowSaveConfirmModal(false);
     }
   };
 
@@ -553,7 +761,6 @@ VioLeafy E-Commerce Platform`;
       case 'DISPATCHED':
       case 'IN_TRANSIT':
         return 'bg-blue-100 text-blue-800 border-blue-300';
-      case 'PACKED':
       case 'READY_FOR_DISPATCH':
         return 'bg-amber-100 text-amber-800 border-amber-300';
       case 'PACKING':
@@ -618,55 +825,59 @@ VioLeafy E-Commerce Platform`;
           Brand Owner Assignment
         </button>
 
-        <button
-          onClick={() => { setActiveSubTab('packing'); setPage(1); }}
-          className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === 'packing' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          Complete Packing
-        </button>
+        {activeSubTab !== 'assignment' && (
+          <>
+            <button
+              onClick={() => { setActiveSubTab('packing'); setPage(1); }}
+              className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
+                activeSubTab === 'packing' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              Complete Packing
+            </button>
 
-        <button
-          onClick={() => { setActiveSubTab('shipment'); setPage(1); }}
-          className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === 'shipment' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          <Truck className="w-4 h-4" />
-          Create Shipment
-        </button>
+            <button
+              onClick={() => { setActiveSubTab('shipment'); setPage(1); }}
+              className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
+                activeSubTab === 'shipment' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              Create Shipment
+            </button>
 
-        <button
-          onClick={() => { setActiveSubTab('delivery'); setPage(1); }}
-          className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === 'delivery' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          <CheckCircle2 className="w-4 h-4" />
-          Confirm Delivery
-        </button>
+            <button
+              onClick={() => { setActiveSubTab('delivery'); setPage(1); }}
+              className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
+                activeSubTab === 'delivery' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Confirm Delivery
+            </button>
 
-        <button
-          onClick={() => { setActiveSubTab('returns'); setPage(1); }}
-          className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === 'returns' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          <RotateCcw className="w-4 h-4" />
-          Process Return
-        </button>
+            <button
+              onClick={() => { setActiveSubTab('returns'); setPage(1); }}
+              className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
+                activeSubTab === 'returns' ? 'bg-emerald-600 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <RotateCcw className="w-4 h-4" />
+              Process Return
+            </button>
 
-        <button
-          onClick={() => { setActiveSubTab('all'); setPage(1); }}
-          className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === 'all' ? 'bg-slate-800 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          All Operational View
-        </button>
+            <button
+              onClick={() => { setActiveSubTab('all'); setPage(1); }}
+              className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer ${
+                activeSubTab === 'all' ? 'bg-slate-800 text-white font-black shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              All Operational View
+            </button>
+          </>
+        )}
       </div>
 
       {/* Common Search Controls (Sections 10-18) */}
@@ -963,22 +1174,13 @@ VioLeafy E-Commerce Platform`;
                     <h3 className="font-extrabold text-base uppercase">Sales Order #{selectedOrder.orderNumber || selectedOrder.id}</h3>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10px] uppercase font-bold text-slate-300">Status:</span>
-                      <select
-                        value={selectedStatus}
-                        onChange={(e) => setSelectedStatus(e.target.value)}
-                        className="bg-slate-800 text-white text-xs font-extrabold font-mono px-2.5 py-1 rounded-lg border border-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-                      >
-                        <option value="NOT_STARTED">NOT_STARTED</option>
-                        <option value="PACKING">PACKING</option>
-                        <option value="PACKED">PACKED</option>
-                        <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
-                        <option value="DISPATCHED">DISPATCHED</option>
-                        <option value="IN_TRANSIT">IN_TRANSIT</option>
-                        <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY</option>
-                        <option value="DELIVERED">DELIVERED</option>
-                        <option value="RETURN_IN_PROGRESS">RETURN_IN_PROGRESS</option>
-                        <option value="COMPLETED">COMPLETED</option>
-                      </select>
+                      <span className={`text-xs font-extrabold font-mono px-3 py-1 rounded-lg border select-none transition-colors ${
+                        selectedStatus === 'PACKING'
+                          ? 'bg-purple-900/80 text-purple-200 border-purple-500/50 shadow-xs'
+                          : 'bg-slate-800 text-slate-200 border-slate-700'
+                      }`}>
+                        {selectedStatus}
+                      </span>
                     </div>
                   </div>
                   <p className="text-[11px] text-slate-400">Customer: {selectedOrder.customerName} | Value: ₹{selectedOrder.totalValue}</p>
@@ -1000,89 +1202,128 @@ VioLeafy E-Commerce Platform`;
               ) : (
                 <>
                   {/* Quick Action Control Bar */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                    <h4 className="font-black text-slate-700 uppercase text-[10px] tracking-wider">Fulfilment Action Pipeline</h4>
-                    <div className="flex flex-wrap gap-2">
+                  {activeSubTab !== 'assignment' && (
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                      <h4 className="font-black text-slate-700 uppercase text-[10px] tracking-wider">Fulfilment Action Pipeline</h4>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setActiveModal('packing')}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Complete Packing
+                        </button>
 
+                        <button
+                          onClick={() => setActiveModal('brand')}
+                          className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" /> Item Brand Owner Assignment
+                        </button>
 
-                      <button
-                        onClick={() => setActiveModal('packing')}
-                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Complete Packing
-                      </button>
+                        <button
+                          onClick={() => setActiveModal('shipment')}
+                          className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Truck className="w-3.5 h-3.5" /> Create Shipment
+                        </button>
 
-                      <button
-                        onClick={() => setActiveModal('brand')}
-                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <UserCheck className="w-3.5 h-3.5" /> Item Brand Owner Assignment
-                      </button>
+                        <button
+                          onClick={() => setActiveModal('delivery')}
+                          className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <MapPin className="w-3.5 h-3.5" /> Confirm Delivery
+                        </button>
 
-                      <button
-                        onClick={() => setActiveModal('shipment')}
-                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Truck className="w-3.5 h-3.5" /> Create Shipment
-                      </button>
+                        <button
+                          onClick={() => setActiveModal('return')}
+                          className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" /> Process Return
+                        </button>
 
-                      <button
-                        onClick={() => setActiveModal('delivery')}
-                        className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <MapPin className="w-3.5 h-3.5" /> Confirm Delivery
-                      </button>
+                        <button
+                          onClick={() => openPrintOrderModal(selectedOrder)}
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Printer className="w-3.5 h-3.5" /> Print Order Details
+                        </button>
 
-                      <button
-                        onClick={() => setActiveModal('return')}
-                        className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" /> Process Return
-                      </button>
-
-
-
-                      <button
-                        onClick={() => openPrintOrderModal(selectedOrder)}
-                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Printer className="w-3.5 h-3.5" /> Print Order Details
-                      </button>
-
-                      <button
-                        onClick={() => openShareOrderModal(selectedOrder)}
-                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Share2 className="w-3.5 h-3.5" /> Share Order
-                      </button>
+                        <button
+                          onClick={() => openShareOrderModal(selectedOrder)}
+                          className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Share2 className="w-3.5 h-3.5" /> Share Order
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Order Items & Brand Owner Grid */}
                   <div className="space-y-2">
                     <h4 className="font-extrabold text-slate-800 uppercase text-[11px]">Sales Order Items</h4>
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                      <table className="w-full text-left text-xs">
+                    <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                      <table className="w-full text-left text-xs min-w-[700px]">
                         <thead className="bg-slate-100 uppercase text-[10px] font-extrabold text-slate-600">
                           <tr>
                             <th className="p-2.5">Product</th>
                             <th className="p-2.5">Qty</th>
                             <th className="p-2.5">Price</th>
                             <th className="p-2.5">Assigned Brand Owner</th>
+                            <th className="p-2.5">Contact Email</th>
+                            <th className="p-2.5">Contact Mobile</th>
+                            <th className="p-2.5">WhatsApp No</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {(selectedOrder.products || []).map((prod: any, idx: number) => {
-                            const brandMatch = (orderDetails?.brandAssignments || []).find(
-                              (b: any) => String(b.productId) === String(prod.productId || prod.id)
+                            const prodKey = getProdKey(prod, idx);
+                            const itemKey = getItemIdKey(prod, idx);
+
+                            const activeAssignments = orderDetails?.brandAssignments?.length
+                              ? orderDetails.brandAssignments
+                              : brandAssignments;
+
+                            const brandMatch = (activeAssignments || []).find(
+                              (b: any) => String(b.productId) === prodKey || b.orderItemId === itemKey
                             );
+                            const currentOwnerName = brandMatch?.brandOwnerName || prod.brandOwner || prod.brand || '';
+                            const matchedOwnerObj = brandOwnersList.find(
+                              (bo) =>
+                                bo.name?.trim().toLowerCase() === currentOwnerName?.trim().toLowerCase() ||
+                                (brandMatch?.brandOwnerId && String(bo.id) === String(brandMatch.brandOwnerId))
+                            );
+
+                            const contactEmail = brandMatch?.contactEmail || getOwnerEmail(matchedOwnerObj);
+                            const contactMobile = brandMatch?.contactMobile || getOwnerMobile(matchedOwnerObj);
+                            const whatsappNo = brandMatch?.whatsappNo || getOwnerWhatsapp(matchedOwnerObj);
+
                             return (
-                              <tr key={idx}>
+                              <tr key={idx} className="hover:bg-slate-50/60 transition">
                                 <td className="p-2.5 font-bold text-slate-800">{prod.productName || prod.name || `Product ${idx + 1}`}</td>
                                 <td className="p-2.5 font-bold">{prod.quantity || 1}</td>
                                 <td className="p-2.5 font-mono">₹{prod.price || 0}</td>
-                                <td className="p-2.5 font-extrabold text-indigo-700">
-                                  {brandMatch?.brandOwnerName || prod.brandOwner || prod.brand || 'Unassigned'}
+                                <td className="p-2.5">
+                                  <select
+                                    value={currentOwnerName}
+                                    onChange={(e) => handleBrandOwnerChange(prod, idx, e.target.value)}
+                                    className="p-1.5 text-xs border border-slate-300 rounded-lg bg-white font-extrabold text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[170px]"
+                                  >
+                                    <option value="">-- Select Brand Owner --</option>
+                                    {brandOwnersList.map((bo) => (
+                                      <option key={bo.id || bo.name} value={bo.name}>
+                                        {bo.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="p-2.5 font-medium text-slate-600 font-mono text-[11px]">
+                                  {contactEmail || '-'}
+                                </td>
+                                <td className="p-2.5 font-medium text-slate-600 font-mono text-[11px]">
+                                  {contactMobile || '-'}
+                                </td>
+                                <td className="p-2.5 font-medium text-emerald-700 font-mono text-[11px]">
+                                  {whatsappNo || '-'}
                                 </td>
                               </tr>
                             );
@@ -1588,6 +1829,46 @@ VioLeafy E-Commerce Platform`;
               >
                 <ExternalLink className="w-4 h-4" />
                 Native Share App
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION POPUP MODAL FOR SAVE STATUS */}
+      {showSaveConfirmModal && selectedOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-slate-100 text-center">
+            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-base text-slate-900">Save Status & Assignments?</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Do you want to save status <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">{selectedStatus}</span> and update records in the Firestore database?
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                disabled={isSavingStatus}
+                onClick={confirmSaveStatus}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isSavingStatus ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
+                  </>
+                ) : (
+                  'Yes'
+                )}
+              </button>
+              <button
+                disabled={isSavingStatus}
+                onClick={() => setShowSaveConfirmModal(false)}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition active:scale-95 cursor-pointer"
+              >
+                No
               </button>
             </div>
           </div>

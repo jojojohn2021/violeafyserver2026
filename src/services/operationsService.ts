@@ -139,6 +139,17 @@ export class OperationsService {
     if (cached) return cached;
 
     const ful = await this.updateFulfilmentStatus(orderId, newStatus);
+
+    if (newStatus === 'PACKING') {
+      const orders = await this.db.getCollectionDocs('sales_orders');
+      const order = orders.find((o) => String(o.id) === String(orderId));
+      if (order) {
+        order.deliveryStatus = 'PACKING';
+        order.updatedAt = new Date().toISOString();
+        await this.db.saveCollectionDoc('sales_orders', sanitizeFirestorePayload(order));
+      }
+    }
+
     await this.recordTimelineEvent(
       orderId,
       'STATUS_UPDATED',
@@ -333,7 +344,7 @@ export class OperationsService {
         deliveryStatus: order.deliveryStatus || 'Pending',
         fulfilmentStatus: ful.status,
         brandAssignments: brandDoc?.assignments || [],
-        packingStatus: packing?.status || (ful.status === 'PACKED' || ful.status === 'READY_FOR_DISPATCH' ? 'PACKED' : 'NOT_STARTED'),
+        packingStatus: packing?.status || (ful.status === 'PACKING' || ful.status === 'READY_FOR_DISPATCH' ? 'PACKING' : 'NOT_STARTED'),
         shipmentStatus: latestShipment ? latestShipment.status : 'NONE',
         shipment: latestShipment,
         delivery: delivery,
@@ -350,10 +361,10 @@ export class OperationsService {
         return !hasFullAssignment && rec.fulfilmentStatus !== 'COMPLETED' && rec.deliveryStatus !== 'Cancelled';
       }
       if (targetStage === 'packing') {
-        return (rec.fulfilmentStatus === 'NOT_STARTED' || rec.fulfilmentStatus === 'PACKING') && rec.packingStatus !== 'PACKED' && rec.deliveryStatus !== 'Cancelled';
+        return (rec.fulfilmentStatus === 'NOT_STARTED' || rec.fulfilmentStatus === 'PACKING') && rec.packingStatus !== 'PACKING' && rec.deliveryStatus !== 'Cancelled';
       }
       if (targetStage === 'shipment') {
-        return (rec.fulfilmentStatus === 'PACKED' || rec.packingStatus === 'PACKED') && rec.shipmentStatus !== 'DISPATCHED' && rec.shipmentStatus !== 'DELIVERED';
+        return (rec.fulfilmentStatus === 'PACKING' || rec.packingStatus === 'PACKING') && rec.shipmentStatus !== 'DISPATCHED' && rec.shipmentStatus !== 'DELIVERED';
       }
       if (targetStage === 'delivery') {
         return (rec.fulfilmentStatus === 'READY_FOR_DISPATCH' || rec.fulfilmentStatus === 'DISPATCHED' || rec.fulfilmentStatus === 'IN_TRANSIT' || rec.fulfilmentStatus === 'OUT_FOR_DELIVERY' || (rec.shipment && rec.shipmentStatus !== 'DELIVERED')) && !rec.delivery;
@@ -730,7 +741,7 @@ export class OperationsService {
     if (cached) return cached;
 
     const details = await this.getOrderDetails(orderId);
-    if (details.fulfilment.status === 'PACKED' || details.fulfilment.status === 'READY_FOR_DISPATCH') {
+    if (details.fulfilment.status === 'PACKING' || details.fulfilment.status === 'READY_FOR_DISPATCH') {
       const existingPackings = await this.db.getCollectionDocs('order_packing');
       const p = existingPackings.find((entry) => String(entry.orderId) === String(orderId));
       if (p) return p;
@@ -754,7 +765,7 @@ export class OperationsService {
       packing = {
         id: this.generateId('pck'),
         orderId,
-        status: 'PACKED',
+        status: 'PACKING',
         startedAt: now,
         completedAt: now,
         packedBy: packerId || 'Warehouse Staff',
@@ -764,7 +775,7 @@ export class OperationsService {
         updatedAt: now,
       };
     } else {
-      packing.status = 'PACKED';
+      packing.status = 'PACKING';
       packing.completedAt = now;
       if (notes) packing.notes = notes;
       if (packerId) packing.packedBy = packerId;
@@ -772,7 +783,7 @@ export class OperationsService {
     }
 
     await this.db.saveCollectionDoc('order_packing', packing);
-    await this.updateFulfilmentStatus(orderId, 'PACKED', { packingId: packing.id });
+    await this.updateFulfilmentStatus(orderId, 'PACKING', { packingId: packing.id });
     await this.recordTimelineEvent(orderId, 'PACKING_COMPLETED', `Packing completed by ${packerId || 'Warehouse Staff'}`, packerId, { notes });
     await this.syncPaymentRecord(orderId);
     await this.triggerStageNotifications('Complete Packing', orderId, { packerId, notes });
@@ -791,7 +802,7 @@ export class OperationsService {
     const cached = this.checkIdempotency(idempotencyKey);
     if (cached) return cached;
 
-    await this.getOrderDetails(orderId);
+    const details = await this.getOrderDetails(orderId);
     const existing = await this.db.getCollectionDocs('order_brand_assignments');
     let record = existing.find((b) => String(b.orderId) === String(orderId));
 
@@ -814,13 +825,36 @@ export class OperationsService {
       record.updatedAt = now;
     }
 
+    const orderProds = details.order?.products || [];
+    const allAssigned = orderProds.length > 0 && orderProds.every((p: any, idx: number) => {
+      const pId = String(p.productId || p.id || `p_${idx}`);
+      const itemKey = `item_${p.productId || p.id || idx}`;
+      const match = formattedAssignments.find((a: any) => String(a.productId) === pId || a.orderItemId === itemKey);
+      const name = match?.brandOwnerName || p.brandOwner || p.brand || '';
+      return Boolean(name && name.trim() !== '' && name.trim() !== '-- Select Brand Owner --');
+    });
+
+    const computedStatus = allAssigned ? 'PACKING' : 'NOT_STARTED';
+    if (details.fulfilment.status === 'NOT_STARTED' || details.fulfilment.status === 'PACKING') {
+      await this.updateFulfilmentStatus(orderId, computedStatus);
+      if (computedStatus === 'PACKING') {
+        const orders = await this.db.getCollectionDocs('sales_orders');
+        const order = orders.find((o) => String(o.id) === String(orderId));
+        if (order) {
+          order.deliveryStatus = 'PACKING';
+          order.updatedAt = new Date().toISOString();
+          await this.db.saveCollectionDoc('sales_orders', sanitizeFirestorePayload(order));
+        }
+      }
+    }
+
     await this.db.saveCollectionDoc('order_brand_assignments', record);
     await this.recordTimelineEvent(
       orderId,
       'BRAND_OWNER_ASSIGNED',
-      `Assigned brand owners for ${assignments.length} order items`,
+      `Assigned brand owners for ${assignments.length} order items (Status: ${computedStatus})`,
       assignedBy,
-      { assignments: formattedAssignments }
+      { assignments: formattedAssignments, status: computedStatus }
     );
     await this.syncPaymentRecord(orderId);
     await this.triggerStageNotifications('Brand Owner Assignment', orderId, { assignments: formattedAssignments });

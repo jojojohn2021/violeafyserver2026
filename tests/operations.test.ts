@@ -89,10 +89,10 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
 
     // Complete packing
     const packing2 = await service.completePacking('ord_1001', 'Packer-Alpha', 'Verified seals and item counts');
-    assert.equal(packing2.status, 'PACKED');
+    assert.equal(packing2.status, 'PACKING');
 
     const details = await service.getOrderDetails('ord_1001');
-    assert.equal(details.fulfilment.status, 'PACKED');
+    assert.equal(details.fulfilment.status, 'PACKING');
 
     // Verify original sales_orders records remained completely untouched
     assert.equal(JSON.stringify(collections.sales_orders), initialSalesOrderCopy);

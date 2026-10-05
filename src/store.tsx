@@ -12,12 +12,13 @@ import {
 } from './types';
 import { db, auth, initError } from './firebase';
 import { 
-  signInAnonymously, 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
-  signOut 
+  signOut,
+  setPersistence,
+  inMemoryPersistence
 } from 'firebase/auth';
 import { logFirestoreError, createFirestoreException } from './utils/firestoreLogger';
 import { FirestoreErrorState } from './components/FirestoreErrorBanner';
@@ -708,7 +709,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
+      if (firebaseUser && !firebaseUser.isAnonymous) {
         setIsLoggedIn(true);
         setCurrentUser(prev => ({
           ...prev,
@@ -718,6 +719,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }));
         reloadFirestoreData();
       } else {
+        if (firebaseUser?.isAnonymous) {
+          signOut(auth).catch(console.error);
+        }
         setIsLoggedIn(false);
         setIsLoadingFirestore(false);
         setSyncingIndicator(false);
@@ -763,6 +767,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Auth Operations via Firebase Authentication
   const loginWithEmailPassword = useCallback(async (email: string, pass: string) => {
     try {
+      if (auth) {
+        await setPersistence(auth, inMemoryPersistence);
+      }
       const res = await signInWithEmailAndPassword(auth, email, pass);
       setIsLoggedIn(true);
       const userDoc: User = {

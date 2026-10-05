@@ -1,7 +1,6 @@
 export type FulfilmentStatus =
   | 'NOT_STARTED'
   | 'PACKING'
-  | 'PACKED'
   | 'READY_FOR_DISPATCH'
   | 'DISPATCHED'
   | 'IN_TRANSIT'
@@ -36,7 +35,7 @@ export interface PackingItemVerification {
 export interface PackingRecord {
   id: string;
   orderId: string;
-  status: 'NOT_STARTED' | 'PACKING' | 'PACKED';
+  status: 'NOT_STARTED' | 'PACKING';
   startedAt?: string;
   completedAt?: string;
   packedBy?: string;
@@ -194,7 +193,7 @@ export interface PaymentRecord {
   paymentStatus: 'PENDING' | 'COMPLETED' | 'OVERDUE' | 'REFUNDED';
   orderStatus: FulfilmentStatus;
   fulfilmentStatus: FulfilmentStatus;
-  packingStatus: 'NOT_STARTED' | 'PACKING' | 'PACKED';
+  packingStatus: 'NOT_STARTED' | 'PACKING';
   shipmentStatus: 'NONE' | 'CREATED' | 'DISPATCHED' | 'IN_TRANSIT' | 'DELIVERED' | 'FAILED';
   deliveryStatus: 'PENDING' | 'DELIVERED';
   returnStatus: 'NONE' | ReturnStatus;

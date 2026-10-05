@@ -80,8 +80,20 @@ export const adminApp = initFirebaseAdminApp();
 // Authenticated Authentication client
 export const adminAuth = getAuth(adminApp);
 
-// Authenticated Firestore client (using target database ID "violeafydb")
-export const adminDb = getFirestore(adminApp, databaseId);
+function getAdminFirestore() {
+  const dbId = (process.env.FIRESTORE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || 'violeafydb').trim();
+  if (dbId && dbId !== '(default)') {
+    try {
+      return getFirestore(adminApp, dbId);
+    } catch (err) {
+      console.warn(`[FIREBASE-ADMIN] Could not initialize Firestore with custom database '${dbId}', using default database.`, err);
+    }
+  }
+  return getFirestore(adminApp);
+}
+
+// Authenticated Firestore client
+export const adminDb = getAdminFirestore();
 
 // Authenticated Cloud Storage client
 export const adminStorage = getStorage(adminApp);

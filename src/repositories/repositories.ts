@@ -323,6 +323,36 @@ export class InvoiceRepository extends BaseRepository<any> {
   }
 }
 
+export class ShipmentBrandOwnerAssignmentRepository extends BaseRepository<any> {
+  constructor() {
+    super('shipment_brand_owner_assignments');
+  }
+}
+
+export class ShipmentPackingRepository extends BaseRepository<any> {
+  constructor() {
+    super('shipment_packing');
+  }
+}
+
+export class ShipmentShipmentRepository extends BaseRepository<any> {
+  constructor() {
+    super('shipment_shipments');
+  }
+}
+
+export class ShipmentDeliveryRepository extends BaseRepository<any> {
+  constructor() {
+    super('shipment_deliveries');
+  }
+}
+
+export class ShipmentReturnRepository extends BaseRepository<any> {
+  constructor() {
+    super('shipment_returns');
+  }
+}
+
 export const userRepository = new UserRepository();
 export const productRepository = new ProductRepository();
 export const shoppingRepository = new ShoppingRepository();
@@ -358,6 +388,11 @@ export const brandRepository = new BrandRepository();
 export const brandOwnerRepository = new BrandOwnerRepository();
 export const unitMasterRepository = new UnitMasterRepository();
 export const invoiceRepository = new InvoiceRepository();
+export const shipmentBrandOwnerAssignmentRepository = new ShipmentBrandOwnerAssignmentRepository();
+export const shipmentPackingRepository = new ShipmentPackingRepository();
+export const shipmentShipmentRepository = new ShipmentShipmentRepository();
+export const shipmentDeliveryRepository = new ShipmentDeliveryRepository();
+export const shipmentReturnRepository = new ShipmentReturnRepository();
 
 
 

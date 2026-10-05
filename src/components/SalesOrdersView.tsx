@@ -1696,7 +1696,6 @@ export default function SalesOrdersView() {
                   >
                     <option value="NOT_STARTED">NOT_STARTED</option>
                     <option value="PACKING">PACKING</option>
-                    <option value="PACKED">PACKED</option>
                     <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
                     <option value="DISPATCHED">DISPATCHED</option>
                     <option value="IN_TRANSIT">IN_TRANSIT</option>

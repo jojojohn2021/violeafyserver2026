@@ -13,6 +13,7 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('server.js', { force: true });\"",
+    "test": "node --import tsx --test tests/*.test.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

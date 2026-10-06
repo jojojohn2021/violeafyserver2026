@@ -52,14 +52,14 @@ export class BaseRepository<T extends { id?: string }> {
   }
 
   private async fallbackFetchAll(): Promise<T[]> {
-    const res = await fetch(`/api/db/${this.collectionName}`);
+    const res = await fetch(`/api/db/${this.collectionName}`, { headers: await this.authHeaders() });
     if (!res.ok) throw new Error(`Proxy status ${res.status}`);
     const data = await res.json();
     return data.docs || [];
   }
 
   private async fallbackGetById(id: string): Promise<T> {
-    const res = await fetch(`/api/db/${this.collectionName}/${id}`);
+    const res = await fetch(`/api/db/${this.collectionName}/${id}`, { headers: await this.authHeaders() });
     if (!res.ok) throw new Error(`Proxy status ${res.status}`);
     const data = await res.json();
     return data.doc;
@@ -68,7 +68,7 @@ export class BaseRepository<T extends { id?: string }> {
   private async fallbackSave(data: any): Promise<void> {
     const res = await fetch(`/api/db/${this.collectionName}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...(await this.authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(`Proxy status ${res.status}`);
@@ -77,8 +77,15 @@ export class BaseRepository<T extends { id?: string }> {
   private async fallbackDelete(id: string): Promise<void> {
     const res = await fetch(`/api/db/${this.collectionName}/${id}`, {
       method: 'DELETE',
+      headers: await this.authHeaders(),
     });
     if (!res.ok) throw new Error(`Proxy status ${res.status}`);
+  }
+
+  private async authHeaders(): Promise<Record<string, string>> {
+    const user = auth?.currentUser;
+    if (!user || user.isAnonymous) throw new Error('Authentication required for backend database access.');
+    return { Authorization: `Bearer ${await user.getIdToken()}` };
   }
 
   async getAll(constraints: QueryConstraint[] = []): Promise<T[]> {

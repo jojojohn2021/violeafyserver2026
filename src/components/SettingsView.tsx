@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useCRM } from '../store';
+import { apiFetch } from '../utils/apiFetch';
 import { PaymentTransaction, Coupon, DeliveryCharge } from '../types';
 import BrandCustomizer from './BrandCustomizer';
 import FormatInvoiceSettings from './FormatInvoiceSettings';
@@ -48,7 +49,7 @@ export default function SettingsView() {
   const [notifSuccess, setNotifSuccess] = useState<string | null>(null);
 
   React.useEffect(() => {
-    fetch('/api/config/global')
+    apiFetch('/api/config/global')
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.config) {
@@ -62,7 +63,7 @@ export default function SettingsView() {
     setNotifSaving(true);
     setNotifSuccess(null);
     try {
-      const res = await fetch('/api/config/global', {
+      const res = await apiFetch('/api/config/global', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(notifConfig),

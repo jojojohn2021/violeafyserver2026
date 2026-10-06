@@ -35,7 +35,7 @@ export interface PackingItemVerification {
 export interface PackingRecord {
   id: string;
   orderId: string;
-  status: 'NOT_STARTED' | 'PACKING';
+  status: 'NOT_STARTED' | 'PACKING' | 'COMPLETED';
   startedAt?: string;
   completedAt?: string;
   packedBy?: string;
@@ -50,6 +50,9 @@ export interface BrandOwnerItemAssignment {
   productId: string;
   brandOwnerId: string;
   brandOwnerName?: string;
+  contactEmail?: string;
+  contactMobile?: string;
+  whatsappNo?: string;
   assignedAt: string;
   assignedBy?: string;
 }
@@ -193,7 +196,7 @@ export interface PaymentRecord {
   paymentStatus: 'PENDING' | 'COMPLETED' | 'OVERDUE' | 'REFUNDED';
   orderStatus: FulfilmentStatus;
   fulfilmentStatus: FulfilmentStatus;
-  packingStatus: 'NOT_STARTED' | 'PACKING';
+  packingStatus: 'NOT_STARTED' | 'PACKING' | 'COMPLETED';
   shipmentStatus: 'NONE' | 'CREATED' | 'DISPATCHED' | 'IN_TRANSIT' | 'DELIVERED' | 'FAILED';
   deliveryStatus: 'PENDING' | 'DELIVERED';
   returnStatus: 'NONE' | ReturnStatus;

@@ -207,6 +207,10 @@ export class ShipmentOperationsService {
     createdBy: string = 'System'
   ): Promise<ShipmentBrandOwnerAssignment> {
     const { salesOrder, invoiceId, invoiceNumber } = await this.getSalesOrderInfo(payload.salesOrderId);
+    const delStatus = String(salesOrder?.deliveryStatus || '').toUpperCase().trim();
+    if (delStatus === 'COMPLETED' || delStatus === 'RETURNED') {
+      throw new Error(`Data validation failed: Brand owner assignment is restricted. Sales order deliveryStatus cannot be COMPLETED or RETURNED (current status: '${salesOrder?.deliveryStatus || delStatus}').`);
+    }
     const now = new Date().toISOString();
 
     const existingDocs: ShipmentBrandOwnerAssignment[] = await this.db.getCollectionDocs(

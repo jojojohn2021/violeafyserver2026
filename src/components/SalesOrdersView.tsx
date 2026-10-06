@@ -617,7 +617,6 @@ export default function SalesOrdersView() {
       deliveryFee: chargesVal,
       courierCharges: chargesVal,
       paymentStatus: paymentStatus as any,
-      deliveryStatus: deliveryStatus as any,
     };
 
     try {
@@ -1689,22 +1688,7 @@ export default function SalesOrdersView() {
 
                 <div>
                   <label className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-1.5 font-sans">Fulfillment Status</label>
-                  <select
-                    value={deliveryStatus}
-                    onChange={(e) => setDeliveryStatus(e.target.value as any)}
-                    className="w-full bg-[#0d0d10] border border-slate-800 focus:border-violet-500 focus:outline-none rounded-xl text-xs py-2.5 px-3 text-slate-200"
-                  >
-                    <option value="NOT_STARTED">NOT_STARTED</option>
-                    <option value="PACKING">PACKING</option>
-                    <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
-                    <option value="DISPATCHED">DISPATCHED</option>
-                    <option value="IN_TRANSIT">IN_TRANSIT</option>
-                    <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY</option>
-                    <option value="DELIVERED">DELIVERED</option>
-                    <option value="RETURN_IN_PROGRESS">RETURN_IN_PROGRESS</option>
-                    <option value="COMPLETED">COMPLETED</option>
-
-                  </select>
+                  <div className="w-full bg-[#0d0d10]/60 border border-slate-800 rounded-xl text-xs py-2.5 px-3 text-slate-400 font-bold cursor-not-allowed">Managed in Order Operations</div>
                 </div>
               </div>
 

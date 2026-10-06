@@ -25,9 +25,6 @@ export interface DataAccessor {
   deleteCollectionDoc?: (collection: string, id: string) => Promise<void>;
 }
 
-// In-memory idempotency cache for duplicate request suppression
-const processedIdempotencyKeys = new Map<string, { timestamp: number; response: any }>();
-
 // Helper to strip undefined properties for Firestore compatibility
 function sanitizeFirestorePayload(obj: any): any {
   if (obj === null || obj === undefined) return null;
@@ -50,21 +47,6 @@ export class OperationsService {
   // Helper for generating IDs
   private generateId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  // Idempotency check helper
-  private checkIdempotency(key?: string): any | null {
-    if (!key) return null;
-    const existing = processedIdempotencyKeys.get(key);
-    if (existing && Date.now() - existing.timestamp < 24 * 60 * 60 * 1000) {
-      return existing.response;
-    }
-    return null;
-  }
-
-  private setIdempotency(key: string | undefined, response: any): void {
-    if (!key) return;
-    processedIdempotencyKeys.set(key, { timestamp: Date.now(), response });
   }
 
   // Record an audit / timeline event
@@ -100,7 +82,7 @@ export class OperationsService {
     }
 
     const newRecord: FulfilmentRecord = {
-      id: this.generateId('ful'),
+      id: `ful_${orderId}`,
       orderId,
       status: 'NOT_STARTED',
       createdAt: new Date().toISOString(),
@@ -135,32 +117,12 @@ export class OperationsService {
     notes?: string,
     idempotencyKey?: string
   ): Promise<FulfilmentRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
-    const ful = await this.updateFulfilmentStatus(orderId, newStatus);
-
-    if (newStatus === 'PACKING') {
-      const orders = await this.db.getCollectionDocs('sales_orders');
-      const order = orders.find((o) => String(o.id) === String(orderId));
-      if (order) {
-        order.deliveryStatus = 'PACKING';
-        order.updatedAt = new Date().toISOString();
-        await this.db.saveCollectionDoc('sales_orders', sanitizeFirestorePayload(order));
-      }
-    }
-
-    await this.recordTimelineEvent(
-      orderId,
-      'STATUS_UPDATED',
-      `Fulfilment status manually updated to ${newStatus}${notes ? `: ${notes}` : ''}`,
-      updatedBy || 'Operations Staff',
-      notes ? { notes, newStatus } : { newStatus }
-    );
-    await this.syncPaymentRecord(orderId);
-
-    this.setIdempotency(idempotencyKey, ful);
-    return ful;
+    void orderId;
+    void newStatus;
+    void updatedBy;
+    void notes;
+    void idempotencyKey;
+    throw new Error('Direct status changes are disabled; use the operation-specific action.');
   }
 
   // 1. LIST ORDERS (Combining existing sales_orders with isolated fulfilment state)
@@ -329,7 +291,9 @@ export class OperationsService {
         stageDate = latestReturn?.updatedAt || latestReturn?.createdAt || delivery?.createdAt || order.createdAt || stageDate;
       }
 
-      const lastUpdated = stageDate || ful.updatedAt || order.createdAt;
+      const lastUpdated = [ful.updatedAt, packing?.updatedAt, brandDoc?.updatedAt, latestShipment?.updatedAt, delivery?.createdAt, latestReturn?.updatedAt, order.updatedAt, order.createdAt]
+        .filter(Boolean)
+        .sort((left: string, right: string) => new Date(right).getTime() - new Date(left).getTime())[0] || stageDate;
 
       return {
         id: order.id,
@@ -344,11 +308,13 @@ export class OperationsService {
         deliveryStatus: order.deliveryStatus || 'Pending',
         fulfilmentStatus: ful.status,
         brandAssignments: brandDoc?.assignments || [],
-        packingStatus: packing?.status || (ful.status === 'PACKING' || ful.status === 'READY_FOR_DISPATCH' ? 'PACKING' : 'NOT_STARTED'),
+        packing,
+        packingStatus: packing?.status || 'NOT_STARTED',
         shipmentStatus: latestShipment ? latestShipment.status : 'NONE',
         shipment: latestShipment,
         delivery: delivery,
         returnRecord: latestReturn,
+        returnRecords: orderReturns,
         createdAt: order.createdAt,
         lastUpdated,
         stageDate,
@@ -357,20 +323,29 @@ export class OperationsService {
 
     const stageEligible = combined.filter((rec) => {
       if (targetStage === 'assignment') {
-        const hasFullAssignment = rec.brandAssignments && rec.brandAssignments.length > 0 && rec.brandAssignments.length >= rec.products.length;
-        return !hasFullAssignment && rec.fulfilmentStatus !== 'COMPLETED' && rec.deliveryStatus !== 'Cancelled';
+        const delStatus = String(rec.deliveryStatus || '').toUpperCase().trim();
+        return delStatus !== 'COMPLETED' && delStatus !== 'RETURNED';
       }
       if (targetStage === 'packing') {
-        return (rec.fulfilmentStatus === 'NOT_STARTED' || rec.fulfilmentStatus === 'PACKING') && rec.packingStatus !== 'PACKING' && rec.deliveryStatus !== 'Cancelled';
+        const allAssigned = rec.products.length > 0 && rec.products.every((product: any, index: number) => {
+          const productId = String(product.productId || product.id || `p_${index}`);
+          const itemId = `item_${product.productId || product.id || index}`;
+          return (rec.brandAssignments || []).some((assignment: any) =>
+            (String(assignment.productId) === productId || assignment.orderItemId === itemId) && Boolean(assignment.brandOwnerId)
+          );
+        });
+        return allAssigned && !rec.packing?.completedAt && rec.fulfilmentStatus === 'PACKING' && rec.deliveryStatus !== 'Cancelled';
       }
       if (targetStage === 'shipment') {
-        return (rec.fulfilmentStatus === 'PACKING' || rec.packingStatus === 'PACKING') && rec.shipmentStatus !== 'DISPATCHED' && rec.shipmentStatus !== 'DELIVERED';
+        return Boolean(rec.packing?.completedAt) && !rec.shipment && rec.fulfilmentStatus === 'READY_FOR_DISPATCH';
       }
       if (targetStage === 'delivery') {
-        return (rec.fulfilmentStatus === 'READY_FOR_DISPATCH' || rec.fulfilmentStatus === 'DISPATCHED' || rec.fulfilmentStatus === 'IN_TRANSIT' || rec.fulfilmentStatus === 'OUT_FOR_DELIVERY' || (rec.shipment && rec.shipmentStatus !== 'DELIVERED')) && !rec.delivery;
+        return Boolean(rec.shipment) && ['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(rec.shipmentStatus) && !rec.delivery;
       }
       if (targetStage === 'returns') {
-        return rec.fulfilmentStatus === 'DELIVERED' || rec.fulfilmentStatus === 'RETURN_IN_PROGRESS' || Boolean(rec.delivery) || Boolean(rec.returnRecord);
+        const hasActiveReturn = (retMap.get(String(rec.id)) || []).some((entry) => !['REFUNDED', 'REPLACED', 'REJECTED'].includes(entry.status));
+        const hasDeliveredShipment = (shpMap.get(String(rec.id)) || []).some((entry) => entry.status === 'DELIVERED');
+        return Boolean(rec.delivery) && hasDeliveredShipment && (hasActiveReturn || ['DELIVERED', 'RETURN_IN_PROGRESS'].includes(rec.fulfilmentStatus));
       }
       return true;
     });
@@ -409,8 +384,10 @@ export class OperationsService {
 
     searchFiltered.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
 
-    const limit = Math.min(50, Math.max(1, filters.limit ? Number(filters.limit) : 10));
-    const page = Math.max(1, filters.page ? Number(filters.page) : 1);
+    const requestedLimit = Number(filters.limit ?? 10);
+    const requestedPage = Number(filters.page ?? 1);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(50, Math.max(1, Math.floor(requestedLimit))) : 10;
+    const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
     const totalRecords = searchFiltered.length;
     const totalPages = Math.ceil(totalRecords / limit) || 1;
 
@@ -491,14 +468,17 @@ export class OperationsService {
   // SAVE GLOBAL NOTIFICATION CONFIG (Section 62-63, 81)
   async saveGlobalNotificationConfig(config: Partial<GlobalNotificationConfig>): Promise<GlobalNotificationConfig> {
     const current = await this.getGlobalNotificationConfig();
+    const mergeSetting = (stage: 'Brand Owner Assignment' | 'Complete Packing' | 'Create Shipment' | 'Confirm Delivery' | 'Process Return', alias: 'brandOwnerAssignment' | 'completePacking' | 'createShipment' | 'confirmDelivery' | 'processReturn'): StageNotificationSetting => ({
+      ...current[stage],
+      ...((config[stage] || config[alias]) as Partial<StageNotificationSetting> || {}),
+    });
     const payload = {
       ...current,
-      ...config,
-      'Brand Owner Assignment': config['Brand Owner Assignment'] || config.brandOwnerAssignment || current['Brand Owner Assignment'],
-      'Complete Packing': config['Complete Packing'] || config.completePacking || current['Complete Packing'],
-      'Create Shipment': config['Create Shipment'] || config.createShipment || current['Create Shipment'],
-      'Confirm Delivery': config['Confirm Delivery'] || config.confirmDelivery || current['Confirm Delivery'],
-      'Process Return': config['Process Return'] || config.processReturn || current['Process Return'],
+      'Brand Owner Assignment': mergeSetting('Brand Owner Assignment', 'brandOwnerAssignment'),
+      'Complete Packing': mergeSetting('Complete Packing', 'completePacking'),
+      'Create Shipment': mergeSetting('Create Shipment', 'createShipment'),
+      'Confirm Delivery': mergeSetting('Confirm Delivery', 'confirmDelivery'),
+      'Process Return': mergeSetting('Process Return', 'processReturn'),
       id: 'config',
       updatedAt: new Date().toISOString(),
     };
@@ -605,7 +585,13 @@ export class OperationsService {
       throw new Error(`Sales Order '${orderId}' not found.`);
     }
 
-    const fulfilment = await this.getOrCreateFulfilment(orderId);
+    const fulfilment = (await this.db.getCollectionDocs('order_fulfilment')).find((record) => String(record.orderId) === String(orderId)) || {
+      id: `ful_${orderId}`,
+      orderId,
+      status: 'NOT_STARTED' as FulfilmentStatus,
+      createdAt: order.createdAt || new Date().toISOString(),
+      updatedAt: order.updatedAt || order.createdAt || new Date().toISOString(),
+    };
 
     const packings = await this.db.getCollectionDocs('order_packing');
     const packing = packings.find((p) => String(p.orderId) === String(orderId));
@@ -737,45 +723,44 @@ export class OperationsService {
 
   // 5. PACKING - COMPLETE PACKING
   async completePacking(orderId: string, packerId?: string, notes?: string, idempotencyKey?: string): Promise<PackingRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const details = await this.getOrderDetails(orderId);
-    if (details.fulfilment.status === 'PACKING' || details.fulfilment.status === 'READY_FOR_DISPATCH') {
-      const existingPackings = await this.db.getCollectionDocs('order_packing');
-      const p = existingPackings.find((entry) => String(entry.orderId) === String(orderId));
-      if (p) return p;
-    }
+    const existingPackings = await this.db.getCollectionDocs('order_packing');
+    const existingPacking = existingPackings.find((entry) => String(entry.orderId) === String(orderId));
+    if (existingPacking?.completedAt && existingPacking.status === 'COMPLETED') return existingPacking;
+    if (existingPacking?.completedAt) throw new Error('Packing state is already completed and cannot be altered.');
 
-    if (details.fulfilment.status !== 'PACKING' && details.fulfilment.status !== 'NOT_STARTED') {
+    const orderProducts = details.order.products || [];
+    const assignments = details.brandAssignments || [];
+    const allAssigned = orderProducts.length > 0 && orderProducts.every((product: any, index: number) => {
+      const productId = String(product.productId || product.id || `p_${index}`);
+      const itemId = `item_${product.productId || product.id || index}`;
+      return assignments.some((assignment: any) =>
+        (String(assignment.productId) === productId || assignment.orderItemId === itemId) && Boolean(assignment.brandOwnerId)
+      );
+    });
+    if (!allAssigned) throw new Error('Brand owner assignment must be complete before packing.');
+    if (details.fulfilment.status !== 'PACKING') {
       throw new Error(`Cannot complete packing for order in state '${details.fulfilment.status}'`);
     }
 
-    const existingPackings = await this.db.getCollectionDocs('order_packing');
-    let packing = existingPackings.find((p) => String(p.orderId) === String(orderId));
+    let packing: PackingRecord | undefined = existingPacking;
     const now = new Date().toISOString();
 
     if (!packing) {
-      const items: PackingItemVerification[] = (details.order.products || []).map((p: any) => ({
-        productId: p.productId || p.id || 'item',
-        quantity: p.quantity || 1,
-        packedQuantity: p.quantity || 1,
-        verified: true,
-      }));
       packing = {
-        id: this.generateId('pck'),
+        id: `pck_${orderId}`,
         orderId,
-        status: 'PACKING',
+        status: 'COMPLETED',
         startedAt: now,
         completedAt: now,
         packedBy: packerId || 'Warehouse Staff',
-        items,
+        items: [],
         notes,
         createdAt: now,
         updatedAt: now,
       };
     } else {
-      packing.status = 'PACKING';
+      packing.status = 'COMPLETED';
       packing.completedAt = now;
       if (notes) packing.notes = notes;
       if (packerId) packing.packedBy = packerId;
@@ -783,12 +768,11 @@ export class OperationsService {
     }
 
     await this.db.saveCollectionDoc('order_packing', packing);
-    await this.updateFulfilmentStatus(orderId, 'PACKING', { packingId: packing.id });
+    await this.updateFulfilmentStatus(orderId, 'READY_FOR_DISPATCH', { packingId: packing.id });
     await this.recordTimelineEvent(orderId, 'PACKING_COMPLETED', `Packing completed by ${packerId || 'Warehouse Staff'}`, packerId, { notes });
     await this.syncPaymentRecord(orderId);
     await this.triggerStageNotifications('Complete Packing', orderId, { packerId, notes });
 
-    this.setIdempotency(idempotencyKey, packing);
     return packing;
   }
 
@@ -799,10 +783,11 @@ export class OperationsService {
     assignedBy?: string,
     idempotencyKey?: string
   ): Promise<BrandOwnerAssignmentRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const details = await this.getOrderDetails(orderId);
+    const delStatus = String(details.order?.deliveryStatus || '').toUpperCase().trim();
+    if (delStatus === 'COMPLETED' || delStatus === 'RETURNED') {
+      throw new Error(`Data validation failed: Brand owner assignment is restricted. Sales order deliveryStatus cannot be COMPLETED or RETURNED (current status: '${details.order?.deliveryStatus || delStatus}').`);
+    }
     const existing = await this.db.getCollectionDocs('order_brand_assignments');
     let record = existing.find((b) => String(b.orderId) === String(orderId));
 
@@ -812,6 +797,18 @@ export class OperationsService {
       assignedAt: now,
       assignedBy: assignedBy || 'Operations Admin',
     }));
+
+    if (record && record.assignments.length === formattedAssignments.length && formattedAssignments.every((assignment) =>
+      record!.assignments.some((existing: BrandOwnerItemAssignment) =>
+        String(existing.orderItemId) === String(assignment.orderItemId) &&
+        String(existing.productId) === String(assignment.productId) &&
+        String(existing.brandOwnerId) === String(assignment.brandOwnerId)
+      )
+    )) return record;
+
+    if (!['NOT_STARTED', 'PACKING'].includes(details.fulfilment.status)) {
+      throw new Error(`Cannot assign brand owners for order in state '${details.fulfilment.status}'`);
+    }
 
     if (!record) {
       record = {
@@ -825,30 +822,47 @@ export class OperationsService {
       record.updatedAt = now;
     }
 
-    const orderProds = details.order?.products || [];
-    const allAssigned = orderProds.length > 0 && orderProds.every((p: any, idx: number) => {
-      const pId = String(p.productId || p.id || `p_${idx}`);
-      const itemKey = `item_${p.productId || p.id || idx}`;
-      const match = formattedAssignments.find((a: any) => String(a.productId) === pId || a.orderItemId === itemKey);
-      const name = match?.brandOwnerName || p.brandOwner || p.brand || '';
-      return Boolean(name && name.trim() !== '' && name.trim() !== '-- Select Brand Owner --');
+    const orderProducts = details.order.products || [];
+    const allAssigned = orderProducts.length > 0 && orderProducts.every((product: any, index: number) => {
+      const productId = String(product.productId || product.id || `p_${index}`);
+      const itemId = `item_${product.productId || product.id || index}`;
+      return formattedAssignments.some((assignment: any) =>
+        (String(assignment.productId) === productId || assignment.orderItemId === itemId) && Boolean(assignment.brandOwnerId)
+      );
     });
-
     const computedStatus = allAssigned ? 'PACKING' : 'NOT_STARTED';
-    if (details.fulfilment.status === 'NOT_STARTED' || details.fulfilment.status === 'PACKING') {
-      await this.updateFulfilmentStatus(orderId, computedStatus);
-      if (computedStatus === 'PACKING') {
-        const orders = await this.db.getCollectionDocs('sales_orders');
-        const order = orders.find((o) => String(o.id) === String(orderId));
-        if (order) {
-          order.deliveryStatus = 'PACKING';
-          order.updatedAt = new Date().toISOString();
-          await this.db.saveCollectionDoc('sales_orders', sanitizeFirestorePayload(order));
-        }
-      }
+
+    if (allAssigned && details.order) {
+      details.order.deliveryStatus = 'PACKING';
+      await this.db.saveCollectionDoc('sales_orders', details.order);
     }
 
     await this.db.saveCollectionDoc('order_brand_assignments', record);
+    await this.db.saveCollectionDoc('shipment_brand_owner_assignments', sanitizeFirestorePayload(record));
+    console.log(`[VIO-FIRESTORE] Record inserted successfully in table: shipment_brand_owner_assignments (ID: ${record.id})`);
+
+    for (const assignment of formattedAssignments) {
+      const shipmentAssignmentItem = {
+        id: this.generateId('boa'),
+        salesOrderId: orderId,
+        orderId,
+        productId: assignment.productId,
+        orderItemId: assignment.orderItemId,
+        brandOwnerId: assignment.brandOwnerId,
+        brandOwnerName: assignment.brandOwnerName,
+        contactEmail: assignment.contactEmail,
+        contactMobile: assignment.contactMobile,
+        whatsappNo: assignment.whatsappNo,
+        assignedBy: assignedBy || 'Operations Admin',
+        assignedAt: now,
+        status: 'ASSIGNED',
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.db.saveCollectionDoc('shipment_brand_owner_assignments', sanitizeFirestorePayload(shipmentAssignmentItem));
+    }
+
+    await this.updateFulfilmentStatus(orderId, computedStatus, { brandAssignmentId: record.id });
     await this.recordTimelineEvent(
       orderId,
       'BRAND_OWNER_ASSIGNED',
@@ -859,7 +873,6 @@ export class OperationsService {
     await this.syncPaymentRecord(orderId);
     await this.triggerStageNotifications('Brand Owner Assignment', orderId, { assignments: formattedAssignments });
 
-    this.setIdempotency(idempotencyKey, record);
     return record;
   }
 
@@ -880,13 +893,19 @@ export class OperationsService {
     createdBy?: string,
     idempotencyKey?: string
   ): Promise<ShipmentRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const details = await this.getOrderDetails(orderId);
 
-    // Concurrency / duplicate checking
     const existingShipments = await this.db.getCollectionDocs('order_shipments');
+    const previousShipment = existingShipments.find((entry) => String(entry.orderId) === String(orderId));
+    const packingRecords = await this.db.getCollectionDocs('order_packing');
+    if (!packingRecords.some((entry) => String(entry.orderId) === String(orderId) && Boolean(entry.completedAt))) {
+      throw new Error('Packing must be completed before creating a shipment.');
+    }
+    if (previousShipment) return previousShipment;
+    if (details.fulfilment.status !== 'READY_FOR_DISPATCH') {
+      throw new Error('Packing must be completed before creating a shipment.');
+    }
+    // Concurrency / duplicate checking
     const duplicateTracking = existingShipments.find(
       (s) => s.trackingNumber?.toLowerCase() === shipmentData.trackingNumber.toLowerCase()
     );
@@ -911,7 +930,7 @@ export class OperationsService {
 
     const now = new Date().toISOString();
     const shipment: ShipmentRecord = {
-      id: this.generateId('shp'),
+      id: `shp_${orderId}`,
       shipmentId: `SHP_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
       orderId,
       courierAgency: shipmentData.courierAgency,
@@ -938,24 +957,18 @@ export class OperationsService {
     await this.syncPaymentRecord(orderId);
     await this.triggerStageNotifications('Create Shipment', orderId, { shipmentId: shipment.id });
 
-    this.setIdempotency(idempotencyKey, shipment);
     return shipment;
   }
 
   // 8. DISPATCH SHIPMENT
   async dispatchShipment(shipmentId: string, dispatchedBy?: string, idempotencyKey?: string): Promise<ShipmentRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const shipments = await this.db.getCollectionDocs('order_shipments');
     const shipment = shipments.find((s) => String(s.id) === String(shipmentId) || String(s.shipmentId) === String(shipmentId));
     if (!shipment) {
       throw new Error(`Shipment '${shipmentId}' not found.`);
     }
 
-    if (shipment.status === 'DISPATCHED' || shipment.status === 'IN_TRANSIT') {
-      throw new Error('SHIPMENT_ALREADY_DISPATCHED');
-    }
+    if (['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(shipment.status)) return shipment;
 
     const now = new Date().toISOString();
     shipment.status = 'DISPATCHED';
@@ -974,7 +987,6 @@ export class OperationsService {
     );
     await this.syncPaymentRecord(shipment.orderId);
 
-    this.setIdempotency(idempotencyKey, shipment);
     return shipment;
   }
 
@@ -991,25 +1003,25 @@ export class OperationsService {
     recordedBy?: string,
     idempotencyKey?: string
   ): Promise<DeliveryRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const shipments = await this.db.getCollectionDocs('order_shipments');
-    let shipment = shipments.find((s) => String(s.id) === String(shipmentId) || String(s.shipmentId) === String(shipmentId) || String(s.orderId) === String(shipmentId));
+    const shipment = shipments.find((s) => String(s.id) === String(shipmentId) || String(s.shipmentId) === String(shipmentId));
     if (!shipment) {
-      shipment = await this.createShipment(
-        shipmentId,
-        {
-          courierAgency: 'Direct / Standard Local Delivery',
-          trackingNumber: `DEL_${Date.now().toString().slice(-8)}`,
-        },
-        recordedBy
-      );
+      throw new Error(`Shipment '${shipmentId}' not found.`);
+    }
+    const priorDelivery = (await this.db.getCollectionDocs('order_delivery')).find(
+      (entry) => String(entry.orderId) === String(shipment.orderId)
+    );
+    if (priorDelivery) {
+      if (String(priorDelivery.shipmentId) === String(shipment.id)) return priorDelivery;
+      throw new Error('Delivery has already been recorded for this order.');
+    }
+    if (!['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(shipment.status)) {
+      throw new Error('A dispatched, undelivered shipment is required before confirming delivery.');
     }
 
     const now = new Date().toISOString();
     const delivery: DeliveryRecord = {
-      id: this.generateId('del'),
+      id: `del_${shipment.orderId}`,
       shipmentId: shipment.id,
       orderId: shipment.orderId,
       deliveryDate: deliveryData.deliveryDate || now.split('T')[0],
@@ -1036,7 +1048,6 @@ export class OperationsService {
     await this.syncPaymentRecord(shipment.orderId);
     await this.triggerStageNotifications('Confirm Delivery', shipment.orderId, { deliveryId: delivery.id });
 
-    this.setIdempotency(idempotencyKey, delivery);
     return delivery;
   }
 
@@ -1051,10 +1062,15 @@ export class OperationsService {
     requestedBy?: string,
     idempotencyKey?: string
   ): Promise<ReturnRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const details = await this.getOrderDetails(orderId);
+    const priorReturn = (details.returns || []).find(
+      (entry: any) => !['REFUNDED', 'REPLACED', 'REJECTED'].includes(entry.status)
+    );
+    if (priorReturn) return priorReturn;
+    const deliveredShipment = details.shipments.some((entry) => entry.status === 'DELIVERED');
+    if (!details.delivery || !deliveredShipment || !['DELIVERED', 'COMPLETED'].includes(details.fulfilment.status)) {
+      throw new Error('Return processing is only available after delivery is confirmed.');
+    }
     if (!returnData.items || returnData.items.length === 0) {
       throw new Error('At least one order item must be specified for a return request.');
     }
@@ -1085,7 +1101,9 @@ export class OperationsService {
     };
 
     await this.db.saveCollectionDoc('order_returns', returnRecord);
-    await this.updateFulfilmentStatus(orderId, 'RETURN_IN_PROGRESS');
+    if (!['RETURN_IN_PROGRESS', 'COMPLETED'].includes(details.fulfilment.status)) {
+      await this.updateFulfilmentStatus(orderId, 'RETURN_IN_PROGRESS');
+    }
     await this.recordTimelineEvent(
       orderId,
       'RETURN_CREATED',
@@ -1094,8 +1112,8 @@ export class OperationsService {
       { returnId: returnRecord.id, reason: returnRecord.reason }
     );
     await this.syncPaymentRecord(orderId);
+    await this.triggerStageNotifications('Process Return', orderId, { returnId: returnRecord.id });
 
-    this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;
   }
 
@@ -1106,9 +1124,6 @@ export class OperationsService {
     createdBy?: string,
     idempotencyKey?: string
   ): Promise<ReturnRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const allReturns = await this.db.getCollectionDocs('order_returns');
     const returnRecord = allReturns.find((r) => String(r.id) === String(returnId) || String(r.returnId) === String(returnId));
     if (!returnRecord) {
@@ -1130,15 +1145,11 @@ export class OperationsService {
     );
     await this.syncPaymentRecord(returnRecord.orderId);
 
-    this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;
   }
 
   // 12. CONFIRM RETURN RECEIVED
   async confirmReturnReceived(returnId: string, receivedBy?: string, idempotencyKey?: string): Promise<ReturnRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const allReturns = await this.db.getCollectionDocs('order_returns');
     const returnRecord = allReturns.find((r) => String(r.id) === String(returnId) || String(r.returnId) === String(returnId));
     if (!returnRecord) {
@@ -1161,7 +1172,6 @@ export class OperationsService {
     );
     await this.syncPaymentRecord(returnRecord.orderId);
 
-    this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;
   }
 
@@ -1173,9 +1183,6 @@ export class OperationsService {
     resolvedBy?: string,
     idempotencyKey?: string
   ): Promise<ReturnRecord> {
-    const cached = this.checkIdempotency(idempotencyKey);
-    if (cached) return cached;
-
     const allReturns = await this.db.getCollectionDocs('order_returns');
     const returnRecord = allReturns.find((r) => String(r.id) === String(returnId) || String(r.returnId) === String(returnId));
     if (!returnRecord) {
@@ -1200,7 +1207,6 @@ export class OperationsService {
     await this.syncPaymentRecord(returnRecord.orderId);
     await this.triggerStageNotifications('Process Return', returnRecord.orderId, { returnId: returnRecord.id, resolution });
 
-    this.setIdempotency(idempotencyKey, returnRecord);
     return returnRecord;
   }
 }

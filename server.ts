@@ -19,7 +19,6 @@ import {
   findCustomerInCollections,
 } from "./src/services/referralChainService";
 import { OperationsService } from "./src/services/operationsService";
-import { ShipmentOperationsService } from "./src/services/shipmentOperationsService";
 
 dotenv.config();
 
@@ -33,16 +32,42 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 const allowedUploadRoots = ['products/', 'banners/', 'attachments/', 'users/', 'reviews/', 'categories/'];
 const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
+interface AuthenticatedRequest extends express.Request {
+  user?: { uid: string; email?: string; admin: boolean };
+}
+
 async function requireAuthenticatedRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authorization = req.headers.authorization || '';
   if (!authorization.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required' });
   try {
-    await adminAuth.verifyIdToken(authorization.slice(7));
+    const decoded = await adminAuth.verifyIdToken(authorization.slice(7));
+    (req as AuthenticatedRequest).user = {
+      uid: decoded.uid,
+      email: decoded.email,
+      admin: decoded.admin === true,
+    };
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid authentication token' });
   }
 }
+
+const protectedOperationCollections = new Set([
+  'order_fulfilment', 'order_packing', 'order_brand_assignments', 'order_shipments', 'order_delivery', 'order_returns',
+  'order_operation_history', 'shipment_brand_owner_assignments', 'shipment_packing', 'shipment_shipments',
+  'shipment_deliveries', 'shipment_returns', 'payments',
+]);
+
+function requireOperationsAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as AuthenticatedRequest).user;
+  if (!user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  next();
+}
+
+app.use(['/api/operations', '/api/v1/operations', '/api/shipment-operations', '/api/v1/shipment-operations', '/api/config/global', '/api/v1/config/global'], requireAuthenticatedRequest, requireOperationsAdmin);
+app.use(['/api/db', '/api/v1/db'], requireAuthenticatedRequest, requireOperationsAdmin);
 
 function assertNoLegacyMedia(value: unknown, path = 'payload'): void {
   if (!value || typeof value !== 'object') {
@@ -123,7 +148,7 @@ async function getCollectionDocs(collection: string): Promise<any[]> {
         const defaultDb = getFirestore(adminApp);
         const snapshot = await defaultDb.collection(collection).get();
         return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      } catch (retryErr) {
+      } catch (retryErr: any) {
         console.error(`[VIO-FIRESTORE] Default database read failed for ${collection}:`, retryErr);
         throw new Error(`Failed to read collection ${collection}: ${retryErr?.message || dbError || "Firestore connection unavailable"}`);
       }
@@ -168,9 +193,8 @@ async function saveCollectionDoc(collection: string, item: any): Promise<void> {
         delete payload.id;
         delete payload._id;
         await defaultDb.collection(collection).doc(id).set(payload, { merge: true });
-        console.log(`[VIO-FIRESTORE] Successfully saved collection document to default Firestore database: ${collection}/${id}`);
         return;
-      } catch (retryErr) {
+      } catch (retryErr: any) {
         console.error(`[VIO-FIRESTORE] Default database write failed for ${collection}/${id}:`, retryErr);
         throw new Error(`Failed to save document to ${collection}/${id}: ${retryErr?.message || dbError || "Firestore connection unavailable"}`);
       }
@@ -192,7 +216,7 @@ async function deleteCollectionDoc(collection: string, id: string): Promise<void
         const defaultDb = getFirestore(adminApp);
         await defaultDb.collection(collection).doc(String(id)).delete();
         return;
-      } catch (retryErr) {
+      } catch (retryErr: any) {
         console.error(`[VIO-FIRESTORE] Default database delete failed for ${collection}/${id}:`, retryErr);
         throw new Error(`Failed to delete document from ${collection}/${id}: ${retryErr?.message || dbError || "Firestore connection unavailable"}`);
       }
@@ -396,6 +420,7 @@ app.put("/api/formatinvoice/:id/default", async (req, res) => {
 
 app.get("/api/db/:col", async (req, res) => {
   try {
+      if (protectedOperationCollections.has(String(req.params.col).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     const docs = await getCollectionDocs(req.params.col);
     return res.json({ success: true, docs });
   } catch (error: any) {
@@ -405,6 +430,7 @@ app.get("/api/db/:col", async (req, res) => {
 
 app.get("/api/db/:col/:id", async (req, res) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.col).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     const docs = await getCollectionDocs(req.params.col);
     const doc = docs.find((entry) => String(entry.id) === String(req.params.id));
     if (!doc) return res.status(404).json({ error: `Document ${req.params.id} not found in ${req.params.col}` });
@@ -417,6 +443,7 @@ app.get("/api/db/:col/:id", async (req, res) => {
 app.post("/api/db/:col", async (req, res) => {
   try {
     const col = req.params.col;
+    if (protectedOperationCollections.has(String(col).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
 
     // Enforce referral restrictions: NO new referral creation / loop creation via generic DB proxy
     if (col === "referrals" || col === "referral_chains") {
@@ -840,7 +867,6 @@ app.get("/api/admin/referral-partners", async (req, res) => {
             candDigits.endsWith(ownMobileDigits) ||
             ownMobileDigits.endsWith(candDigits))
         ) {
-          continue;
         }
 
         uplineSponsorId = candStr;
@@ -1503,360 +1529,16 @@ const operationsService = new OperationsService({
   deleteCollectionDoc,
 });
 
-const shipmentOperationsService = new ShipmentOperationsService({
-  getCollectionDocs,
-  saveCollectionDoc,
-  deleteCollectionDoc,
-});
-
 // Helper for extracting Idempotency-Key
 function getIdempotencyKey(req: express.Request): string | undefined {
   const key = req.headers["idempotency-key"] || req.headers["x-idempotency-key"];
   return typeof key === "string" ? key : Array.isArray(key) ? key[0] : undefined;
 }
 
-// --- SHIPMENT OPERATIONS MODULE (Technical Specification) ---
-
-const extractShipmentOperationsQueryParams = (req: express.Request) => ({
-  salesOrderId: req.query.salesOrderId ? String(req.query.salesOrderId) : undefined,
-  invoiceId: req.query.invoiceId ? String(req.query.invoiceId) : undefined,
-  itemId: req.query.itemId ? String(req.query.itemId) : undefined,
-  SKU: req.query.SKU ? String(req.query.SKU) : undefined,
-  productName: req.query.productName ? String(req.query.productName) : undefined,
-  customerName: req.query.customerName ? String(req.query.customerName) : undefined,
-  customerMobile: req.query.customerMobile ? String(req.query.customerMobile) : undefined,
-  brandOwnerId: req.query.brandOwnerId ? String(req.query.brandOwnerId) : undefined,
-  status: req.query.status ? String(req.query.status) : undefined,
-  dateFrom: req.query.dateFrom ? String(req.query.dateFrom) : undefined,
-  dateTo: req.query.dateTo ? String(req.query.dateTo) : undefined,
-  page: req.query.page ? parseInt(String(req.query.page), 10) : 1,
-  limit: req.query.limit ? parseInt(String(req.query.limit), 10) : 10,
-  sortBy: req.query.sortBy ? String(req.query.sortBy) : "updatedAt",
-  sortOrder: req.query.sortOrder === "asc" ? ("asc" as const) : ("desc" as const),
-});
-
-// 1. BRAND OWNER ASSIGNMENT APIs
-app.get("/api/shipment-operations/brand-owner", async (req: express.Request, res: express.Response) => {
-  try {
-    const result = await shipmentOperationsService.listBrandOwnerAssignments(extractShipmentOperationsQueryParams(req));
-    return res.json(result);
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || "Failed to list brand owner assignments" });
-  }
-});
-
-app.post("/api/shipment-operations/brand-owner", async (req: express.Request, res: express.Response) => {
-  try {
-    const createdBy = req.body?.createdBy || "Ops Staff";
-    const result = await shipmentOperationsService.createBrandOwnerAssignment(req.body, createdBy);
-    return res.status(201).json({
-      success: true,
-      message: "Record inserted successfully in table: shipment_brand_owner_assignments",
-      table: "shipment_brand_owner_assignments",
-      record: result,
-    });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: `Failed to insert record into table shipment_brand_owner_assignments: ${err?.message || err}`,
-      table: "shipment_brand_owner_assignments",
-    });
-  }
-});
-
-app.get("/api/shipment-operations/brand-owner/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const record = await shipmentOperationsService.getBrandOwnerAssignmentById(req.params.id);
-    return res.json({ success: true, record });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "Brand owner assignment not found" });
-  }
-});
-
-app.put("/api/shipment-operations/brand-owner/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const operator = req.body?.updatedBy || req.body?.createdBy || "Ops Staff";
-    const { status, brandOwnerId } = req.body || {};
-
-    if (status === "CANCELLED") {
-      const result = await shipmentOperationsService.cancelOperationalRecord("brand-owner", req.params.id, operator, req.body?.reason);
-      return res.json({ success: true, record: result });
-    }
-
-    if (brandOwnerId) {
-      const result = await shipmentOperationsService.reassignBrandOwner(req.params.id, req.body, operator);
-      return res.json({ success: true, record: result });
-    }
-
-    return res.status(400).json({ error: "Specify brandOwnerId for reassignment or status=CANCELLED for cancellation" });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to update brand owner assignment" });
-  }
-});
-
-app.get("/api/shipment-operations/brand-owner/:id/history", async (req: express.Request, res: express.Response) => {
-  try {
-    const history = await shipmentOperationsService.getBrandOwnerAssignmentHistory(req.params.id);
-    return res.json({ success: true, history });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "History not found" });
-  }
-});
-
-// 2. PACKING APIs
-app.get("/api/shipment-operations/packing", async (req: express.Request, res: express.Response) => {
-  try {
-    const result = await shipmentOperationsService.listPacking(extractShipmentOperationsQueryParams(req));
-    return res.json(result);
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || "Failed to list packing records" });
-  }
-});
-
-app.post("/api/shipment-operations/packing", async (req: express.Request, res: express.Response) => {
-  try {
-    const createdBy = req.body?.createdBy || "Ops Staff";
-    const result = await shipmentOperationsService.createPacking(req.body, createdBy);
-    return res.status(201).json({ success: true, record: result });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to create packing record" });
-  }
-});
-
-app.get("/api/shipment-operations/packing/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const record = await shipmentOperationsService.getPackingById(req.params.id);
-    return res.json({ success: true, record });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "Packing record not found" });
-  }
-});
-
-app.put("/api/shipment-operations/packing/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const operator = req.body?.updatedBy || "Ops Staff";
-    if (req.body?.status === "CANCELLED") {
-      const result = await shipmentOperationsService.cancelOperationalRecord("packing", req.params.id, operator, req.body?.reason);
-      return res.json({ success: true, record: result });
-    }
-    const result = await shipmentOperationsService.updatePacking(req.params.id, req.body, operator);
-    return res.json({ success: true, record: result });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to update packing record" });
-  }
-});
-
-app.get("/api/shipment-operations/packing/:id/history", async (req: express.Request, res: express.Response) => {
-  try {
-    const history = await shipmentOperationsService.getPackingHistory(req.params.id);
-    return res.json({ success: true, history });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "History not found" });
-  }
-});
-
-// 3. SHIPMENT APIs
-app.get("/api/shipment-operations/shipment", async (req: express.Request, res: express.Response) => {
-  try {
-    const result = await shipmentOperationsService.listShipments(extractShipmentOperationsQueryParams(req));
-    return res.json(result);
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || "Failed to list shipment records" });
-  }
-});
-
-app.post("/api/shipment-operations/shipment", async (req: express.Request, res: express.Response) => {
-  try {
-    const createdBy = req.body?.createdBy || "Ops Staff";
-    const result = await shipmentOperationsService.createShipment(req.body, createdBy);
-    return res.status(201).json({ success: true, record: result });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to create shipment record" });
-  }
-});
-
-app.get("/api/shipment-operations/shipment/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const record = await shipmentOperationsService.getShipmentById(req.params.id);
-    return res.json({ success: true, record });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "Shipment record not found" });
-  }
-});
-
-app.put("/api/shipment-operations/shipment/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const operator = req.body?.updatedBy || "Ops Staff";
-    if (req.body?.status === "CANCELLED") {
-      const result = await shipmentOperationsService.cancelOperationalRecord("shipment", req.params.id, operator, req.body?.reason);
-      return res.json({ success: true, record: result });
-    }
-    const result = await shipmentOperationsService.updateShipment(req.params.id, req.body, operator);
-    return res.json({ success: true, record: result });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to update shipment record" });
-  }
-});
-
-app.get("/api/shipment-operations/shipment/:id/history", async (req: express.Request, res: express.Response) => {
-  try {
-    const history = await shipmentOperationsService.getShipmentHistory(req.params.id);
-    return res.json({ success: true, history });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "History not found" });
-  }
-});
-
-// 4. DELIVERY APIs
-app.get("/api/shipment-operations/delivery", async (req: express.Request, res: express.Response) => {
-  try {
-    const result = await shipmentOperationsService.listDeliveries(extractShipmentOperationsQueryParams(req));
-    return res.json(result);
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || "Failed to list delivery records" });
-  }
-});
-
-app.post("/api/shipment-operations/delivery", async (req: express.Request, res: express.Response) => {
-  try {
-    const createdBy = req.body?.createdBy || "Ops Staff";
-    const result = await shipmentOperationsService.createDelivery(req.body, createdBy);
-    return res.status(201).json({ success: true, record: result });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to create delivery record" });
-  }
-});
-
-app.get("/api/shipment-operations/delivery/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const record = await shipmentOperationsService.getDeliveryById(req.params.id);
-    return res.json({ success: true, record });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "Delivery record not found" });
-  }
-});
-
-app.put("/api/shipment-operations/delivery/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const operator = req.body?.updatedBy || "Ops Staff";
-    if (req.body?.status === "CANCELLED") {
-      const result = await shipmentOperationsService.cancelOperationalRecord("delivery", req.params.id, operator, req.body?.reason);
-      return res.json({ success: true, record: result });
-    }
-    const result = await shipmentOperationsService.updateDelivery(req.params.id, req.body, operator);
-    return res.json({ success: true, record: result });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to update delivery record" });
-  }
-});
-
-app.get("/api/shipment-operations/delivery/:id/history", async (req: express.Request, res: express.Response) => {
-  try {
-    const history = await shipmentOperationsService.getDeliveryHistory(req.params.id);
-    return res.json({ success: true, history });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "History not found" });
-  }
-});
-
-// 5. RETURN APIs
-app.get("/api/shipment-operations/return", async (req: express.Request, res: express.Response) => {
-  try {
-    const result = await shipmentOperationsService.listReturns(extractShipmentOperationsQueryParams(req));
-    return res.json(result);
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || "Failed to list return records" });
-  }
-});
-
-app.post("/api/shipment-operations/return", async (req: express.Request, res: express.Response) => {
-  try {
-    const createdBy = req.body?.createdBy || "Ops Staff";
-    const result = await shipmentOperationsService.createReturn(req.body, createdBy);
-    return res.status(201).json({ success: true, record: result });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to create return record" });
-  }
-});
-
-app.get("/api/shipment-operations/return/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const record = await shipmentOperationsService.getReturnById(req.params.id);
-    return res.json({ success: true, record });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "Return record not found" });
-  }
-});
-
-app.put("/api/shipment-operations/return/:id", async (req: express.Request, res: express.Response) => {
-  try {
-    const operator = req.body?.updatedBy || "Ops Staff";
-    if (req.body?.status === "CANCELLED") {
-      const result = await shipmentOperationsService.cancelOperationalRecord("return", req.params.id, operator, req.body?.reason);
-      return res.json({ success: true, record: result });
-    }
-    const result = await shipmentOperationsService.updateReturn(req.params.id, req.body, operator);
-    return res.json({ success: true, record: result });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || "Failed to update return record" });
-  }
-});
-
-app.get("/api/shipment-operations/return/:id/history", async (req: express.Request, res: express.Response) => {
-  try {
-    const history = await shipmentOperationsService.getReturnHistory(req.params.id);
-    return res.json({ success: true, history });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "History not found" });
-  }
-});
-
-// 6. AGGREGATED LIFECYCLE APIs (Sections 27-29)
-app.get("/api/shipment-operations/orders/:salesOrderId", async (req: express.Request, res: express.Response) => {
-  try {
-    const lifecycle = await shipmentOperationsService.getOrderLifecycle(req.params.salesOrderId);
-    return res.json({ success: true, ...lifecycle });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "Sales order lifecycle not found" });
-  }
-});
-
-app.get("/api/shipment-operations/invoices/:invoiceId", async (req: express.Request, res: express.Response) => {
-  try {
-    const lifecycle = await shipmentOperationsService.getInvoiceLifecycle(req.params.invoiceId);
-    return res.json({ success: true, ...lifecycle });
-  } catch (err: any) {
-    return res.status(404).json({ error: err?.message || "Invoice lifecycle not found" });
-  }
-});
-
-app.get("/api/shipment-operations/brand-owners/:brandOwnerId", async (req: express.Request, res: express.Response) => {
-  try {
-    const lifecycle = await shipmentOperationsService.getBrandOwnerLifecycle(req.params.brandOwnerId, extractShipmentOperationsQueryParams(req));
-    return res.json({ success: true, ...lifecycle });
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || "Brand owner lifecycle retrieval failed" });
-  }
-});
-
-// 1. GET /api/operations/orders & /api/v1/operations/orders
-const handleGetOperationsOrders = async (req: express.Request, res: express.Response) => {
-  try {
-    const { paymentStatus, deliveryStatus, fulfilmentStatus, search, limit } = req.query;
-    const orders = await operationsService.listOrders({
-      paymentStatus: paymentStatus ? String(paymentStatus) : undefined,
-      deliveryStatus: deliveryStatus ? String(deliveryStatus) : undefined,
-      fulfilmentStatus: fulfilmentStatus ? String(fulfilmentStatus) : undefined,
-      search: search ? String(search) : undefined,
-      limit: limit ? parseInt(String(limit), 10) : undefined,
-    });
-    return res.json({ success: true, count: orders.length, orders });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || "Failed to retrieve operations orders" });
-  }
-};
-app.get("/api/operations/orders", handleGetOperationsOrders);
-app.get("/api/v1/operations/orders", handleGetOperationsOrders);
+// The former /api/shipment-operations/* parallel writer was removed. Its separate
+// shipment_* lifecycle was not authoritative; use /api/operations/* and order_* docs.
+app.all('/api/shipment-operations/*', (_req, res) => res.status(410).json({ success: false, error: 'This legacy parallel lifecycle is retired. Use /api/operations/*.' }));
+app.all('/api/v1/shipment-operations/*', (_req, res) => res.status(410).json({ success: false, error: 'This legacy parallel lifecycle is retired. Use /api/v1/operations/*.' }));
 
 // 2. Dedicated Stage Operational Listing Endpoints (Sections 24, 32-36, 50)
 const extractStageQueryParams = (req: express.Request) => ({
@@ -1873,13 +1555,17 @@ const extractStageQueryParams = (req: express.Request) => ({
 const handleGetBrandOwnerAssignmentStage = async (req: express.Request, res: express.Response) => {
   try {
     const result = await operationsService.listStageRecords('assignment', extractStageQueryParams(req));
-    return res.json({ success: true, ...result });
+    return res.json({ success: true, ...result, orders: result.records, count: result.pagination.totalRecords });
   } catch (error: any) {
     return res.status(500).json({ error: error?.message || "Failed to retrieve brand owner assignment records" });
   }
 };
 app.get("/api/operations/brand-owner-assignment", handleGetBrandOwnerAssignmentStage);
 app.get("/api/v1/operations/brand-owner-assignment", handleGetBrandOwnerAssignmentStage);
+app.get("/api/sales-orders/brand-owner-assignment", handleGetBrandOwnerAssignmentStage);
+app.get("/api/v1/sales-orders/brand-owner-assignment", handleGetBrandOwnerAssignmentStage);
+app.get("/api/operations/orders", handleGetBrandOwnerAssignmentStage);
+app.get("/api/v1/operations/orders", handleGetBrandOwnerAssignmentStage);
 
 // Complete Packing
 const handleGetPackingStage = async (req: express.Request, res: express.Response) => {
@@ -1927,8 +1613,10 @@ app.get("/api/v1/operations/delivery/orders", handleGetDeliveryStage);
 const handleGetReturnsStage = async (req: express.Request, res: express.Response) => {
   try {
     const result = await operationsService.listStageRecords('returns', extractStageQueryParams(req));
-    const rawReturns = await getCollectionDocs("order_returns");
-    return res.json({ success: true, ...result, returns: rawReturns, count: result.pagination.totalRecords });
+    const returns = result.records.flatMap((record: any) => record.returnRecords?.length
+      ? record.returnRecords
+      : [{ id: record.id, orderId: record.id, orderNumber: record.orderNumber, customerName: record.customerName, status: 'ELIGIBLE' }]);
+    return res.json({ success: true, ...result, returns, count: result.pagination.totalRecords });
   } catch (error: any) {
     return res.status(500).json({ error: error?.message || "Failed to retrieve return records" });
   }
@@ -2029,23 +1717,9 @@ app.get("/api/v1/operations/orders/:orderId/timeline", handleGetOrderTimeline);
 // POST /api/operations/orders/:orderId/status & /api/v1/...
 const handleUpdateStatus = async (req: express.Request, res: express.Response) => {
   try {
-    const { status, updatedBy, notes, assignments } = req.body || {};
+    const { status } = req.body || {};
     if (!status) return res.status(400).json({ error: "status parameter is required" });
-    const fulfilment = await operationsService.updateStatusDirectly(req.params.orderId, status, updatedBy, notes, getIdempotencyKey(req));
-
-    await shipmentOperationsService.syncPackingAndOperationalTables(
-      req.params.orderId,
-      assignments || [],
-      updatedBy || 'Ops Manager',
-      status
-    );
-
-    return res.json({
-      success: true,
-      message: `Record inserted successfully in table: shipment_brand_owner_assignments (Order status: ${status})`,
-      table: "shipment_brand_owner_assignments",
-      fulfilment
-    });
+    return res.status(409).json({ success: false, error: 'Direct status changes are disabled. Use the current operation-stage action.' });
   } catch (error: any) {
     return res.status(400).json({
       success: false,
@@ -2064,7 +1738,6 @@ const handleCompletePacking = async (req: express.Request, res: express.Response
   try {
     const { packerId, notes } = req.body || {};
     const packing = await operationsService.completePacking(req.params.orderId, packerId, notes, getIdempotencyKey(req));
-    await shipmentOperationsService.syncPackingAndOperationalTables(req.params.orderId, [], packerId || 'Warehouse Staff');
     return res.json({ success: true, packing });
   } catch (error: any) {
     return res.status(400).json({ error: error?.message || "Failed to complete packing" });
@@ -2076,7 +1749,7 @@ app.post("/api/v1/operations/orders/:orderId/packing/complete", handleCompletePa
 // 10. POST /api/operations/orders/:orderId/brand-owner & /api/v1/...
 const handleAssignBrandOwner = async (req: express.Request, res: express.Response) => {
   try {
-    const { assignments, assignedBy, status } = req.body || {};
+    const { assignments, assignedBy } = req.body || {};
     if (!Array.isArray(assignments) || assignments.length === 0) {
       return res.status(400).json({
         success: false,
@@ -2085,25 +1758,10 @@ const handleAssignBrandOwner = async (req: express.Request, res: express.Respons
       });
     }
     const result = await operationsService.assignBrandOwners(req.params.orderId, assignments, assignedBy, getIdempotencyKey(req));
-    const targetStatus = status || 'PACKING';
-    const fulfilment = status
-      ? await operationsService.updateStatusDirectly(req.params.orderId, status, assignedBy || 'Ops Manager')
-      : undefined;
-
-    // Always sync packing & operational tables (populates shipment_brand_owner_assignments)
-    await shipmentOperationsService.syncPackingAndOperationalTables(
-      req.params.orderId,
-      assignments,
-      assignedBy || 'Ops Manager',
-      targetStatus
-    );
-
     return res.json({
       success: true,
-      message: `Brand owner assignments saved and sales order status updated to ${targetStatus}.`,
-      table: "shipment_brand_owner_assignments",
+      message: "Brand owner assignments saved.",
       brandAssignments: result,
-      fulfilment
     });
   } catch (error: any) {
     return res.status(400).json({
@@ -2115,10 +1773,13 @@ const handleAssignBrandOwner = async (req: express.Request, res: express.Respons
 };
 app.post("/api/operations/orders/:orderId/brand-owner", handleAssignBrandOwner);
 app.post("/api/v1/operations/orders/:orderId/brand-owner", handleAssignBrandOwner);
+app.post("/api/sales-orders/:orderId/brand-owner", handleAssignBrandOwner);
+app.post("/api/v1/sales-orders/:orderId/brand-owner", handleAssignBrandOwner);
 
 // Generic Firestore Proxy Endpoints for BaseRepository Fallbacks
 app.get("/api/db/:collection", async (req: express.Request, res: express.Response) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     const docs = await getCollectionDocs(req.params.collection);
     return res.json({ success: true, docs });
   } catch (err: any) {
@@ -2128,6 +1789,7 @@ app.get("/api/db/:collection", async (req: express.Request, res: express.Respons
 
 app.get("/api/db/:collection/:id", async (req: express.Request, res: express.Response) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     const docs = await getCollectionDocs(req.params.collection);
     const doc = docs.find((d) => String(d.id) === String(req.params.id));
     return res.json({ success: true, doc });
@@ -2138,6 +1800,7 @@ app.get("/api/db/:collection/:id", async (req: express.Request, res: express.Res
 
 app.post("/api/db/:collection", async (req: express.Request, res: express.Response) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     await saveCollectionDoc(req.params.collection, req.body);
     return res.json({ success: true });
   } catch (err: any) {
@@ -2147,6 +1810,7 @@ app.post("/api/db/:collection", async (req: express.Request, res: express.Respon
 
 app.delete("/api/db/:collection/:id", async (req: express.Request, res: express.Response) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     await deleteCollectionDoc(req.params.collection, req.params.id);
     return res.json({ success: true });
   } catch (err: any) {
@@ -2783,6 +2447,7 @@ app.delete("/api/v1/units/:id", handleDeleteUnitById);
 // GENERIC DATABASE PROXY ROUTE (Supports BaseRepository proxy fallbacks)
 app.get("/api/db/:collection", async (req, res) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     const docs = await getCollectionDocs(req.params.collection);
     return res.json({ success: true, docs });
   } catch (err: any) {
@@ -2792,6 +2457,7 @@ app.get("/api/db/:collection", async (req, res) => {
 
 app.get("/api/db/:collection/:id", async (req, res) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     const docs = await getCollectionDocs(req.params.collection);
     const doc = docs.find((d) => String(d.id) === String(req.params.id));
     if (!doc) return res.status(404).json({ error: "Document not found" });
@@ -2803,6 +2469,7 @@ app.get("/api/db/:collection/:id", async (req, res) => {
 
 app.post("/api/db/:collection", async (req, res) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     await saveCollectionDoc(req.params.collection, req.body);
     return res.json({ success: true });
   } catch (err: any) {
@@ -2812,6 +2479,7 @@ app.post("/api/db/:collection", async (req, res) => {
 
 app.delete("/api/db/:collection/:id", async (req, res) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     await deleteCollectionDoc(req.params.collection, req.params.id);
     return res.json({ success: true });
   } catch (err: any) {

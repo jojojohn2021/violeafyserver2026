@@ -28,14 +28,11 @@ import {
   Eye,
 } from 'lucide-react';
 import { useCRM } from '../store';
-import { BaseRepository } from '../repositories/baseRepository';
 import {
   brandOwnerRepository,
 } from '../repositories/repositories';
-import { persistProductionBrandAssignments } from '../services/productionShipmentAssignmentService';
+import { apiFetch } from '../utils/apiFetch';
 import { BrandOwner } from '../types';
-
-const operationHistoryRepository = new BaseRepository<any>('order_operation_history');
 
 interface OperationsOrder {
   id: string;
@@ -59,7 +56,7 @@ export interface OrderOperationsViewProps {
 }
 
 export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initialStage = 'all' }) => {
-  const { salesOrders, products } = useCRM();
+  const { products } = useCRM();
   const [activeSubTab, setActiveSubTab] = useState<'all' | 'assignment' | 'packing' | 'shipment' | 'delivery' | 'returns' | 'unpaid'>(initialStage);
   const [orders, setOrders] = useState<OperationsOrder[]>([]);
   const [returnsList, setReturnsList] = useState<any[]>([]);
@@ -105,8 +102,6 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   // Form Modals State
   const [activeModal, setActiveModal] = useState<'packing' | 'brand' | 'shipment' | 'delivery' | 'return' | 'reverseShipment' | null>(null);
-  const [showSaveConfirmModal, setShowSaveConfirmModal] = useState<boolean>(false);
-  const [isSavingStatus, setIsSavingStatus] = useState<boolean>(false);
 
   // Print & Share Modals State
   const [printOrder, setPrintOrder] = useState<OperationsOrder | null>(null);
@@ -136,7 +131,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
     }
 
     try {
-      const res = await fetch('/api/db/product_brand_owners');
+      const res = await apiFetch('/api/db/product_brand_owners');
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.docs)) {
@@ -174,7 +169,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
       const brandMatch = (assignments || []).find(
         (b: any) => String(b.productId) === prodKey || b.orderItemId === itemKey
       );
-      const ownerName = brandMatch?.brandOwnerName || prod.brandOwner || prod.brand || '';
+      const ownerName = brandMatch?.brandOwnerName || '';
       return isBrandOwnerAssigned(ownerName);
     });
   };
@@ -201,7 +196,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
     const newAssignment = {
       orderItemId: itemId,
       productId: prodId,
-      brandOwnerId: targetOwner?.id || 'brand_owner_default',
+      brandOwnerId: targetOwner?.id || '',
       brandOwnerName: newOwnerName,
       contactEmail: getOwnerEmail(targetOwner),
       contactMobile: getOwnerMobile(targetOwner),
@@ -272,7 +267,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
       params.append('page', String(page));
       params.append('limit', String(limit));
 
-      const res = await fetch(`${endpoint}?${params.toString()}`);
+      const res = await apiFetch(`${endpoint}?${params.toString()}`);
       const contentType = res.headers.get('content-type') || '';
       const data = contentType.includes('application/json') ? await res.json() : null;
       if (data?.success) {
@@ -290,14 +285,8 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
           });
         }
       } else {
-        setOrders(salesOrders.map((order) => ({
-          ...order,
-          fulfilmentStatus: order.deliveryStatus === 'Delivered'
-            ? 'DELIVERED'
-            : order.deliveryStatus === 'Shipped'
-            ? 'DISPATCHED'
-            : 'NOT_STARTED',
-        })));
+        setOrders([]);
+        showStatus(data?.error || 'Could not load order operations from the server.', 'error');
       }
 
       if (activeSubTab === 'returns' && data?.success) {
@@ -305,6 +294,8 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
       }
     } catch (err: any) {
       console.error('Failed to fetch operations data:', err);
+      setOrders([]);
+      showStatus(err?.message || 'Could not load order operations from the server.', 'error');
     } finally {
       setLoading(false);
     }
@@ -312,7 +303,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   useEffect(() => {
     fetchOrders();
-  }, [activeSubTab, page, limit, appliedFilters, searchQuery, salesOrders]);
+  }, [activeSubTab, page, limit, appliedFilters, searchQuery]);
 
   const handleSearchSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -348,7 +339,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
   const fetchOrderDetails = async (orderId: string) => {
     setDetailsLoading(true);
     try {
-      const res = await fetch(`/api/operations/orders/${orderId}`);
+      const res = await apiFetch(`/api/operations/orders/${orderId}`);
       const contentType = res.headers.get('content-type') || '';
       if (!res.ok || !contentType.includes('application/json')) {
         throw new Error(`Operations details API unavailable (HTTP ${res.status}).`);
@@ -356,33 +347,18 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
       const data = await res.json();
       if (data.success) {
         setOrderDetails(data);
-        const activeAssignments = data.brandAssignments?.length
-          ? data.brandAssignments
-          : brandAssignments;
+        setSelectedStatus(data.fulfilment?.status || 'NOT_STARTED');
+        const activeAssignments = data.brandAssignments || [];
+        setBrandAssignments(activeAssignments);
         const prods = data.order?.products || selectedOrder?.products || [];
         const allAssigned = checkAllBrandOwnersAssigned(prods, activeAssignments);
         setSelectedStatus(allAssigned ? 'PACKING' : 'NOT_STARTED');
         return;
       }
       throw new Error(data.error || 'Failed to load order details.');
-    } catch (err) {
-      console.error('Operations API unavailable; loading operational history directly from Firestore:', err);
-      try {
-        const history = await operationHistoryRepository.getAll();
-        const timeline = history
-          .filter((event: any) => String(event.orderId) === String(orderId))
-          .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setOrderDetails((previous: any) => {
-          const sameOrderDetails = String(previous?.order?.id || '') === String(orderId) ? previous : {};
-          return {
-            ...sameOrderDetails,
-            order: sameOrderDetails.order || (String(selectedOrder?.id || '') === String(orderId) ? selectedOrder : { id: orderId }),
-            timeline,
-          };
-        });
-      } catch (historyError) {
-        console.error('Failed to load operational history directly from Firestore:', historyError);
-      }
+    } catch (err: any) {
+      setOrderDetails(null);
+      showStatus(err?.message || 'Could not load operational order details.', 'error');
     } finally {
       setDetailsLoading(false);
     }
@@ -427,7 +403,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   const handleCompletePacking = async (orderId: string) => {
     try {
-      const res = await fetch(`/api/operations/orders/${orderId}/packing/complete`, {
+      const res = await apiFetch(`/api/operations/orders/${orderId}/packing/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packerId: packerIdInput, notes: packingNotesInput }),
@@ -448,26 +424,24 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   const handleAssignBrandOwners = async (orderId: string) => {
     try {
-      const res = await fetch(`/api/operations/orders/${orderId}/brand-owner`, {
+      const products = selectedOrder?.products || orderDetails?.order?.products || [];
+      const validAssignments = (brandAssignments || []).filter(
+        (a) => a.brandOwnerId || (a.brandOwnerName && a.brandOwnerName.trim() !== '' && a.brandOwnerName !== '-- Select Brand Owner --')
+      );
+      if (validAssignments.length === 0) {
+        throw new Error('Please select a valid brand owner from the dropdown before saving.');
+      }
+      const res = await apiFetch(`/api/operations/orders/${orderId}/brand-owner`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments: brandAssignments, assignedBy: 'Ops Manager' }),
+        body: JSON.stringify({ assignments: validAssignments, assignedBy: 'Ops Manager' }),
       });
       const data = await res.json();
-      if (data.success) {
-        const prods = selectedOrder?.products || orderDetails?.order?.products || [];
-        const allAssigned = checkAllBrandOwnersAssigned(prods, brandAssignments);
-        const newStatus = allAssigned ? 'PACKING' : 'NOT_STARTED';
-        setSelectedStatus(newStatus);
-        await fetch(`/api/operations/orders/${orderId}/status`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: newStatus, updatedBy: 'Ops Manager' }),
-        });
+      if (res.ok && data.success) {
         showStatus(data.message || 'Record inserted successfully in table: shipment_brand_owner_assignments');
         setActiveModal(null);
-        fetchOrderDetails(orderId);
-        fetchOrders();
+        await fetchOrderDetails(orderId);
+        await fetchOrders();
       } else {
         showStatus(data.error || 'Failed to insert record into table shipment_brand_owner_assignments', 'error');
       }
@@ -478,7 +452,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   const handleCreateShipment = async (orderId: string) => {
     try {
-      const res = await fetch(`/api/operations/orders/${orderId}/shipment`, {
+      const res = await apiFetch(`/api/operations/orders/${orderId}/shipment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(shipmentForm),
@@ -499,7 +473,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   const handleDispatchShipment = async (shipmentId: string, orderId: string) => {
     try {
-      const res = await fetch(`/api/operations/shipments/${shipmentId}/dispatch`, {
+      const res = await apiFetch(`/api/operations/shipments/${shipmentId}/dispatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dispatchedBy: 'Logistics Supervisor' }),
@@ -519,7 +493,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   const handleRecordDelivery = async (targetId: string, orderId: string) => {
     try {
-      const res = await fetch(`/api/operations/shipments/${targetId}/delivery`, {
+      const res = await apiFetch(`/api/operations/shipments/${targetId}/delivery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deliveryForm),
@@ -550,13 +524,13 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
         reason: returnForm.reason,
       }));
 
-      const res = await fetch(`/api/operations/orders/${orderId}/returns`, {
+      const res = await apiFetch(`/api/operations/orders/${orderId}/returns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items, reason: returnForm.reason, notes: returnForm.notes, requestedBy: 'Customer Support' }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         showStatus('Return request registered. Reverse logistics initiated!');
         setActiveModal(null);
         fetchOrders();
@@ -571,7 +545,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
 
   const handleCreateReverseShipment = async () => {
     try {
-      const res = await fetch(`/api/operations/returns/${reverseShipmentForm.returnId}/reverse-shipment`, {
+      const res = await apiFetch(`/api/operations/returns/${reverseShipmentForm.returnId}/reverse-shipment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reverseShipmentForm),
@@ -607,7 +581,7 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
         (b: any) => String(b.productId) === prodKey || b.orderItemId === itemKey
       );
 
-      const currentOwnerName = match?.brandOwnerName || prod.brandOwner || prod.brand || '';
+      const currentOwnerName = match?.brandOwnerName || '';
       const matchedOwnerObj = brandOwnersList.find(
         (bo) =>
           bo.name?.trim().toLowerCase() === currentOwnerName?.trim().toLowerCase() ||
@@ -626,59 +600,11 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
     });
   };
 
-  const handleSaveStatus = () => {
-    if (!selectedOrder) return;
-    setShowSaveConfirmModal(true);
-  };
-
-  const confirmSaveStatus = async () => {
-    if (!selectedOrder) return;
-    setIsSavingStatus(true);
-    try {
-      const activeAssignments = getEffectiveBrandAssignments();
-      if (activeAssignments.length === 0) {
-        throw new Error('No order items were found to save brand owner assignments.');
-      }
-
-      let successMessage: string;
-      try {
-        const saveRes = await fetch(`/api/operations/orders/${selectedOrder.id}/brand-owner`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            assignments: activeAssignments,
-            assignedBy: 'Ops Manager',
-            status: selectedStatus,
-          }),
-        });
-        const saveData = await saveRes.json().catch(() => ({}));
-        if (!saveRes.ok || !saveData.success) {
-          throw new Error(saveData.error || `Operations API unavailable (HTTP ${saveRes.status}).`);
-        }
-        successMessage = saveData.message || `Brand owner assignments and status ${selectedStatus} saved successfully.`;
-      } catch (apiError) {
-        console.warn('[Order Operations] API save failed; trying authenticated Firestore repositories.', apiError);
-        await persistProductionBrandAssignments(selectedOrder, activeAssignments, selectedStatus);
-        successMessage = `Brand owner assignments and status ${selectedStatus} saved to Firestore.`;
-      }
-
-      showStatus(successMessage);
-      setSelectedOrder((prev) => (prev ? { ...prev, fulfilmentStatus: selectedStatus } : null));
-      await fetchOrders();
-      await fetchOrderDetails(selectedOrder.id);
-    } catch (err: any) {
-      showStatus(err.message || 'Failed to save brand owner assignments.', 'error');
-    } finally {
-      setIsSavingStatus(false);
-      setShowSaveConfirmModal(false);
-    }
-  };
-
   const openPrintOrderModal = async (order: OperationsOrder) => {
     setPrintOrder(order);
     setPrintLoading(true);
     try {
-      const res = await fetch(`/api/operations/orders/${order.id}`);
+      const res = await apiFetch(`/api/operations/orders/${order.id}`);
       const data = await res.json();
       if (data.success) {
         setPrintDetails(data);
@@ -779,7 +705,7 @@ VioLeafy E-Commerce Platform`;
         <div>
           <div className="flex items-center gap-2">
             <Package className="w-7 h-7 text-emerald-200" />
-            <h2 className="text-xl font-black uppercase tracking-tight">Order Operations & Fulfilment Hub</h2>
+            <h2 className="text-xl font-black uppercase tracking-tight">Brand Owner Assignment</h2>
           </div>
           <p className="text-xs text-emerald-100 font-medium mt-1">
             Non-Invasive Operations Control: Packing, Multi-Brand Item Assignment, Courier Dispatch, Delivery Audits & Returns
@@ -1001,15 +927,11 @@ VioLeafy E-Commerce Platform`;
                       </span>
                     </td>
                     <td className="p-3 text-right">
-                      <button
-                        onClick={() => {
-                          setReverseShipmentForm((prev) => ({ ...prev, returnId: ret.id }));
-                          setActiveModal('reverseShipment');
-                        }}
-                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold uppercase transition"
-                      >
-                        Reverse Shipment
-                      </button>
+                      {ret.status === 'ELIGIBLE' ? (
+                        <button onClick={() => { const order = orders.find((entry) => entry.id === ret.id); if (order) openOrderModal(order); }} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-bold uppercase transition">Process Return</button>
+                      ) : (
+                        <button onClick={() => { setReverseShipmentForm((prev) => ({ ...prev, returnId: ret.id })); setActiveModal('reverseShipment'); }} className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold uppercase transition">Reverse Shipment</button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -1202,44 +1124,15 @@ VioLeafy E-Commerce Platform`;
               ) : (
                 <>
                   {/* Quick Action Control Bar */}
-                  {activeSubTab !== 'assignment' && (
+                  {activeSubTab !== 'all' && activeSubTab !== 'unpaid' && (
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                       <h4 className="font-black text-slate-700 uppercase text-[10px] tracking-wider">Fulfilment Action Pipeline</h4>
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => setActiveModal('packing')}
-                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Complete Packing
-                        </button>
-
-                        <button
-                          onClick={() => setActiveModal('brand')}
-                          className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <UserCheck className="w-3.5 h-3.5" /> Item Brand Owner Assignment
-                        </button>
-
-                        <button
-                          onClick={() => setActiveModal('shipment')}
-                          className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Truck className="w-3.5 h-3.5" /> Create Shipment
-                        </button>
-
-                        <button
-                          onClick={() => setActiveModal('delivery')}
-                          className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <MapPin className="w-3.5 h-3.5" /> Confirm Delivery
-                        </button>
-
-                        <button
-                          onClick={() => setActiveModal('return')}
-                          className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" /> Process Return
-                        </button>
+                        {activeSubTab === 'assignment' && <button onClick={() => setActiveModal('brand')} className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"><UserCheck className="w-3.5 h-3.5" /> Assign Brand Owner</button>}
+                        {activeSubTab === 'packing' && <button onClick={() => setActiveModal('packing')} className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"><CheckCircle2 className="w-3.5 h-3.5" /> Complete Packing</button>}
+                        {activeSubTab === 'shipment' && <button onClick={() => setActiveModal('shipment')} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"><Truck className="w-3.5 h-3.5" /> Create Shipment</button>}
+                        {activeSubTab === 'delivery' && <button onClick={() => setActiveModal('delivery')} className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"><MapPin className="w-3.5 h-3.5" /> Confirm Delivery</button>}
+                        {activeSubTab === 'returns' && <button onClick={() => setActiveModal('return')} className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl transition flex items-center gap-1.5 cursor-pointer"><RotateCcw className="w-3.5 h-3.5" /> Process Return</button>}
 
                         <button
                           onClick={() => openPrintOrderModal(selectedOrder)}
@@ -1260,7 +1153,16 @@ VioLeafy E-Commerce Platform`;
 
                   {/* Order Items & Brand Owner Grid */}
                   <div className="space-y-2">
-                    <h4 className="font-extrabold text-slate-800 uppercase text-[11px]">Sales Order Items</h4>
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-extrabold text-slate-800 uppercase text-[11px]">Sales Order Items</h4>
+                      <button
+                        onClick={() => handleAssignBrandOwners(selectedOrder.id)}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        Save Brand Owner Assignment
+                      </button>
+                    </div>
                     <div className="border border-slate-200 rounded-xl overflow-x-auto">
                       <table className="w-full text-left text-xs min-w-[700px]">
                         <thead className="bg-slate-100 uppercase text-[10px] font-extrabold text-slate-600">
@@ -1286,7 +1188,7 @@ VioLeafy E-Commerce Platform`;
                             const brandMatch = (activeAssignments || []).find(
                               (b: any) => String(b.productId) === prodKey || b.orderItemId === itemKey
                             );
-                            const currentOwnerName = brandMatch?.brandOwnerName || prod.brandOwner || prod.brand || '';
+                            const currentOwnerName = brandMatch?.brandOwnerName || '';
                             const matchedOwnerObj = brandOwnersList.find(
                               (bo) =>
                                 bo.name?.trim().toLowerCase() === currentOwnerName?.trim().toLowerCase() ||
@@ -1395,15 +1297,16 @@ VioLeafy E-Commerce Platform`;
             {/* Modal Footer */}
             <div className="bg-slate-100 p-4 border-t border-slate-200 flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-slate-600 font-medium">
-                <span>Selected Status:</span>
+                <span>Current lifecycle status:</span>
                 <span className="font-extrabold font-mono text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300">{selectedStatus}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={handleSaveStatus}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-sm transition flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  onClick={() => handleAssignBrandOwners(selectedOrder.id)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer transition active:scale-95 flex items-center gap-1.5 shadow-sm"
                 >
-                  <CheckCircle2 className="w-4 h-4" /> Save Status
+                  <UserCheck className="w-4 h-4" />
+                  Save Brand Owner Assignment
                 </button>
                 <button
                   onClick={() => setSelectedOrder(null)}
@@ -1449,6 +1352,18 @@ VioLeafy E-Commerce Platform`;
                 Complete Packing
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'reverseShipment' && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <h3 className="font-extrabold text-base text-slate-900">Create Reverse Shipment</h3>
+            <label className="block text-[10px] font-extrabold uppercase text-slate-500">Courier Agency<input value={reverseShipmentForm.courierAgency} onChange={(event) => setReverseShipmentForm({ ...reverseShipmentForm, courierAgency: event.target.value })} className="w-full mt-1 p-2 text-xs border rounded-lg" /></label>
+            <label className="block text-[10px] font-extrabold uppercase text-slate-500">Tracking Number<input value={reverseShipmentForm.trackingNumber} onChange={(event) => setReverseShipmentForm({ ...reverseShipmentForm, trackingNumber: event.target.value })} className="w-full mt-1 p-2 text-xs border rounded-lg font-mono" /></label>
+            <label className="block text-[10px] font-extrabold uppercase text-slate-500">Remarks<input value={reverseShipmentForm.remarks} onChange={(event) => setReverseShipmentForm({ ...reverseShipmentForm, remarks: event.target.value })} className="w-full mt-1 p-2 text-xs border rounded-lg" /></label>
+            <div className="flex justify-end gap-2"><button onClick={() => setActiveModal(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold">Cancel</button><button onClick={handleCreateReverseShipment} className="px-4 py-2 bg-purple-600 text-white rounded-xl font-bold">Create Reverse Tracking</button></div>
           </div>
         </div>
       )}
@@ -1599,42 +1514,6 @@ VioLeafy E-Commerce Platform`;
       )}
 
       {/* FORM MODAL: REVERSE SHIPMENT */}
-      {activeModal === 'reverseShipment' && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <h3 className="font-extrabold text-base text-slate-900">Create Reverse Shipment</h3>
-            <div>
-              <label className="text-[10px] font-extrabold uppercase text-slate-500">Reverse Courier Agency</label>
-              <input
-                type="text"
-                value={reverseShipmentForm.courierAgency}
-                onChange={(e) => setReverseShipmentForm({ ...reverseShipmentForm, courierAgency: e.target.value })}
-                className="w-full mt-1 p-2 text-xs border rounded-lg"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-extrabold uppercase text-slate-500">Reverse Tracking Number</label>
-              <input
-                type="text"
-                value={reverseShipmentForm.trackingNumber}
-                onChange={(e) => setReverseShipmentForm({ ...reverseShipmentForm, trackingNumber: e.target.value })}
-                className="w-full mt-1 p-2 text-xs border rounded-lg font-mono"
-                placeholder="RET987654321"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setActiveModal(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold cursor-pointer">
-                Cancel
-              </button>
-              <button onClick={handleCreateReverseShipment} className="px-4 py-2 bg-purple-600 text-white rounded-xl font-bold cursor-pointer">
-                Create Reverse Tracking
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FORM MODAL: PROCESS RETURN */}
       {activeModal === 'return' && selectedOrder && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
@@ -1835,45 +1714,6 @@ VioLeafy E-Commerce Platform`;
         </div>
       )}
 
-      {/* CONFIRMATION POPUP MODAL FOR SAVE STATUS */}
-      {showSaveConfirmModal && selectedOrder && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-slate-100 text-center">
-            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-base text-slate-900">Save Status & Assignments?</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Do you want to save status <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">{selectedStatus}</span> and update records in the Firestore database?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-center gap-3 pt-2">
-              <button
-                disabled={isSavingStatus}
-                onClick={confirmSaveStatus}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {isSavingStatus ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
-                  </>
-                ) : (
-                  'Yes'
-                )}
-              </button>
-              <button
-                disabled={isSavingStatus}
-                onClick={() => setShowSaveConfirmModal(false)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition active:scale-95 cursor-pointer"
-              >
-                No
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

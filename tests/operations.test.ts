@@ -68,6 +68,16 @@ function createMockDatabase() {
   return { collections, dbAccessor };
 }
 
+async function prepareOrderForShipment(service: OperationsService, orderId: string) {
+  const details = await service.getOrderDetails(orderId);
+  await service.assignBrandOwners(orderId, (details.order.products || []).map((product: any, index: number) => ({
+    orderItemId: `item_${index + 1}`,
+    productId: product.productId || product.id,
+    brandOwnerId: `owner_${index + 1}`,
+  })));
+  return service.completePacking(orderId, 'Test Packer');
+}
+
 describe('Order Operations & Fulfilment API Integration Tests', () => {
 
   it('1. Should list existing sales_orders combined with isolated fulfilment status', async () => {
@@ -81,21 +91,60 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     assert.equal(orders[1].paymentStatus, 'Pending');
   });
 
-  it('2. Should complete packing lifecycle without mutating sales_orders', async () => {
+  it('2. Should require complete assignment before packing and persist completed packing without mutating sales_orders', async () => {
     const { collections, dbAccessor } = createMockDatabase();
     const service = new OperationsService(dbAccessor);
 
     const initialSalesOrderCopy = JSON.stringify(collections.sales_orders);
 
-    // Complete packing
+    await assert.rejects(
+      () => service.completePacking('ord_1001', 'Packer-Alpha'),
+      /Brand owner assignment must be complete/
+    );
+    await service.assignBrandOwners('ord_1001', [
+      { orderItemId: 'item_1', productId: 'prod_apple', brandOwnerId: 'bo_fresh' },
+      { orderItemId: 'item_2', productId: 'prod_honey', brandOwnerId: 'bo_bee' },
+    ]);
     const packing2 = await service.completePacking('ord_1001', 'Packer-Alpha', 'Verified seals and item counts');
-    assert.equal(packing2.status, 'PACKING');
+    assert.equal(packing2.status, 'COMPLETED');
+    assert.ok(packing2.completedAt);
 
     const details = await service.getOrderDetails('ord_1001');
-    assert.equal(details.fulfilment.status, 'PACKING');
+    assert.equal(details.fulfilment.status, 'READY_FOR_DISPATCH');
+    const packingStage = await service.listStageRecords('packing');
+    const shipmentStage = await service.listStageRecords('shipment');
+    assert.equal(packingStage.records.some((record) => record.id === 'ord_1001'), false);
+    assert.equal(shipmentStage.records.some((record) => record.id === 'ord_1001'), true);
 
     // Verify original sales_orders records remained completely untouched
     assert.equal(JSON.stringify(collections.sales_orders), initialSalesOrderCopy);
+  });
+
+  it('2b. Should expose only the currently eligible next stage after assignment and packing', async () => {
+    const { dbAccessor } = createMockDatabase();
+    const service = new OperationsService(dbAccessor);
+    assert.equal((await service.listStageRecords('packing')).pagination.totalRecords, 0);
+    assert.equal((await service.listStageRecords('shipment')).pagination.totalRecords, 0);
+
+    await service.assignBrandOwners('ord_1001', [
+      { orderItemId: 'item_1', productId: 'prod_apple', brandOwnerId: 'bo_fresh' },
+      { orderItemId: 'item_2', productId: 'prod_honey', brandOwnerId: 'bo_bee' },
+    ]);
+    assert.equal((await service.listStageRecords('packing')).pagination.totalRecords, 1);
+    assert.equal((await service.listStageRecords('shipment')).pagination.totalRecords, 0);
+
+    await service.completePacking('ord_1001', 'Packer');
+    assert.equal((await service.listStageRecords('packing')).pagination.totalRecords, 0);
+    assert.equal((await service.listStageRecords('shipment')).pagination.totalRecords, 1);
+  });
+
+  it('2c. Should reject direct fulfilment transitions that skip an operation stage', async () => {
+    const { dbAccessor } = createMockDatabase();
+    const service = new OperationsService(dbAccessor);
+    await assert.rejects(
+      () => service.updateStatusDirectly('ord_1001', 'DELIVERED'),
+      /Direct status changes are disabled/
+    );
   });
 
   it('3. Should assign brand owners at item level in isolated collection', async () => {
@@ -118,6 +167,11 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     const { dbAccessor } = createMockDatabase();
     const service = new OperationsService(dbAccessor);
 
+    await assert.rejects(
+      () => service.createShipment('ord_1001', { courierAgency: 'Delhivery', trackingNumber: 'EARLY' }),
+      /Packing must be completed/
+    );
+    await prepareOrderForShipment(service, 'ord_1001');
     const shipment = await service.createShipment('ord_1001', {
       courierAgency: 'Delhivery',
       trackingNumber: 'DELHI123456',
@@ -141,6 +195,7 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     const { dbAccessor } = createMockDatabase();
     const service = new OperationsService(dbAccessor);
 
+    await prepareOrderForShipment(service, 'ord_1001');
     const shipment = await service.createShipment('ord_1001', {
       courierAgency: 'FedEx',
       trackingNumber: 'FDX998877',
@@ -153,17 +208,16 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     const details = await service.getOrderDetails('ord_1001');
     assert.equal(details.fulfilment.status, 'DISPATCHED');
 
-    // Concurrent double dispatch attempt must throw controlled error
-    await assert.rejects(
-      async () => service.dispatchShipment(shipment.id, 'Second Dispatcher'),
-      (err: any) => err.message === 'SHIPMENT_ALREADY_DISPATCHED'
-    );
+    const replay = await service.dispatchShipment(shipment.id, 'Second Dispatcher');
+    assert.equal(replay.id, shipment.id);
+    assert.equal(replay.dispatchedBy, 'Logistics Lead');
   });
 
   it('6. Should record permanent delivery history', async () => {
     const { dbAccessor } = createMockDatabase();
     const service = new OperationsService(dbAccessor);
 
+    await prepareOrderForShipment(service, 'ord_1001');
     const shipment = await service.createShipment('ord_1001', {
       courierAgency: 'Bluedart',
       trackingNumber: 'BD776655',
@@ -188,10 +242,21 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     const service = new OperationsService(dbAccessor);
 
     // Create outbound shipment
+    await prepareOrderForShipment(service, 'ord_1001');
     const outboundShipment = await service.createShipment('ord_1001', {
       courierAgency: 'Express Courier',
       trackingNumber: 'OUTBOUND_123',
     });
+
+    await assert.rejects(
+      () => service.createReturn('ord_1001', {
+        items: [{ orderItemId: 'item_1', productId: 'prod_apple', quantity: 1, reason: 'DAMAGED' }],
+        reason: 'DAMAGED',
+      }),
+      /only available after delivery/
+    );
+    await service.dispatchShipment(outboundShipment.id);
+    await service.recordDelivery(outboundShipment.id, { recipientName: 'Aarav Sharma' });
 
     // Create return
     const returnRecord = await service.createReturn('ord_1001', {
@@ -221,17 +286,41 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     assert.equal(resolved.status, 'REFUNDED');
   });
 
-  it('8. Should support Idempotency-Key header to prevent duplicate operations', async () => {
+  it('8. Should replay completed operations from durable records without requiring process-local keys', async () => {
     const { dbAccessor } = createMockDatabase();
     const service = new OperationsService(dbAccessor);
 
-    const key = 'idem_key_unique_001';
-    const packing1 = await service.completePacking('ord_1001', 'Packer-A', 'Notes A', key);
-    const packing2 = await service.completePacking('ord_1001', 'Packer-B', 'Notes B', key);
+    await service.assignBrandOwners('ord_1001', [
+      { orderItemId: 'item_1', productId: 'prod_apple', brandOwnerId: 'bo_fresh' },
+      { orderItemId: 'item_2', productId: 'prod_honey', brandOwnerId: 'bo_bee' },
+    ]);
+    const packing1 = await service.completePacking('ord_1001', 'Packer-A', 'Notes A');
+    const secondService = new OperationsService(dbAccessor);
+    const packing2 = await secondService.completePacking('ord_1001', 'Packer-B', 'Notes B');
 
-    // Repeated call with same idempotency key must return cached exact result
     assert.equal(packing1.id, packing2.id);
     assert.equal(packing2.packedBy, 'Packer-A');
+
+    const shipment1 = await service.createShipment('ord_1001', { courierAgency: 'Courier', trackingNumber: 'TRACK-1' });
+    const shipment2 = await secondService.createShipment('ord_1001', { courierAgency: 'Other', trackingNumber: 'TRACK-2' });
+    assert.equal(shipment1.id, shipment2.id);
+    assert.equal(shipment2.trackingNumber, 'TRACK-1');
+  });
+
+  it('8b. Should reject delivery before dispatch and replay a recorded delivery', async () => {
+    const { dbAccessor } = createMockDatabase();
+    const service = new OperationsService(dbAccessor);
+    await prepareOrderForShipment(service, 'ord_1001');
+    const shipment = await service.createShipment('ord_1001', { courierAgency: 'Courier', trackingNumber: 'TRACK-DEL' });
+    await assert.rejects(
+      () => service.recordDelivery(shipment.id, { recipientName: 'Aarav Sharma' }),
+      /dispatched, undelivered shipment/
+    );
+    await service.dispatchShipment(shipment.id);
+    const first = await service.recordDelivery(shipment.id, { recipientName: 'Aarav Sharma' });
+    const replay = await new OperationsService(dbAccessor).recordDelivery(shipment.id, { recipientName: 'Different Recipient' });
+    assert.equal(replay.id, first.id);
+    assert.equal(replay.recipientName, 'Aarav Sharma');
   });
 
   it('9. Should list stage-specific records with multi-field search and pagination', async () => {

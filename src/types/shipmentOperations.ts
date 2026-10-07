@@ -14,6 +14,7 @@ export interface StatusHistoryEntry {
 
 export interface ShipmentOperationalCommon {
   id: string;
+  brandOwnerAssignid?: string;
   salesOrderId: string;
   invoiceId: string;
   invoiceNumber?: string;

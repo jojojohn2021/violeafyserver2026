@@ -792,11 +792,16 @@ export class OperationsService {
     let record = existing.find((b) => String(b.orderId) === String(orderId));
 
     const now = new Date().toISOString();
-    const formattedAssignments: BrandOwnerItemAssignment[] = assignments.map((a) => ({
-      ...a,
-      assignedAt: now,
-      assignedBy: assignedBy || 'Operations Admin',
-    }));
+    const formattedAssignments: BrandOwnerItemAssignment[] = assignments.map((a: any) => {
+      const brandOwnerAssignid = a.brandOwnerAssignid || a.id || this.generateId('boa');
+      return {
+        ...a,
+        id: a.id || brandOwnerAssignid,
+        brandOwnerAssignid,
+        assignedAt: now,
+        assignedBy: assignedBy || 'Operations Admin',
+      };
+    });
 
     if (record && record.assignments.length === formattedAssignments.length && formattedAssignments.every((assignment) =>
       record!.assignments.some((existing: BrandOwnerItemAssignment) =>
@@ -811,13 +816,16 @@ export class OperationsService {
     }
 
     if (!record) {
+      const recordId = this.generateId('boa');
       record = {
-        id: this.generateId('boa'),
+        id: recordId,
+        brandOwnerAssignid: recordId,
         orderId,
         assignments: formattedAssignments,
         updatedAt: now,
       };
     } else {
+      record.brandOwnerAssignid = record.brandOwnerAssignid || record.id || this.generateId('boa');
       record.assignments = formattedAssignments;
       record.updatedAt = now;
     }
@@ -830,10 +838,11 @@ export class OperationsService {
         (String(assignment.productId) === productId || assignment.orderItemId === itemId) && Boolean(assignment.brandOwnerId)
       );
     });
-    const computedStatus = allAssigned ? 'PACKING' : 'NOT_STARTED';
+    const computedStatus = 'PACKING';
 
-    if (allAssigned && details.order) {
+    if (details.order) {
       details.order.deliveryStatus = 'PACKING';
+      details.order.updatedAt = now;
       await this.db.saveCollectionDoc('sales_orders', details.order);
     }
 
@@ -842,8 +851,10 @@ export class OperationsService {
     console.log(`[VIO-FIRESTORE] Record inserted successfully in table: shipment_brand_owner_assignments (ID: ${record.id})`);
 
     for (const assignment of formattedAssignments) {
+      const brandOwnerAssignid = assignment.brandOwnerAssignid || assignment.id || this.generateId('boa');
       const shipmentAssignmentItem = {
-        id: this.generateId('boa'),
+        id: brandOwnerAssignid,
+        brandOwnerAssignid,
         salesOrderId: orderId,
         orderId,
         productId: assignment.productId,

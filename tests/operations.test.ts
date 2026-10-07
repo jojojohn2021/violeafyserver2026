@@ -116,8 +116,8 @@ describe('Order Operations & Fulfilment API Integration Tests', () => {
     assert.equal(packingStage.records.some((record) => record.id === 'ord_1001'), false);
     assert.equal(shipmentStage.records.some((record) => record.id === 'ord_1001'), true);
 
-    // Verify original sales_orders records remained completely untouched
-    assert.equal(JSON.stringify(collections.sales_orders), initialSalesOrderCopy);
+    // Verify sales_orders record has deliveryStatus updated to PACKING after Brand Owner Assignment
+    assert.equal(collections.sales_orders[0].deliveryStatus, 'PACKING');
   });
 
   it('2b. Should expose only the currently eligible next stage after assignment and packing', async () => {

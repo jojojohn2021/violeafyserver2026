@@ -46,6 +46,8 @@ export interface PackingRecord {
 }
 
 export interface BrandOwnerItemAssignment {
+  id?: string;
+  brandOwnerAssignid?: string;
   orderItemId: string;
   productId: string;
   brandOwnerId: string;
@@ -59,6 +61,7 @@ export interface BrandOwnerItemAssignment {
 
 export interface BrandOwnerAssignmentRecord {
   id: string;
+  brandOwnerAssignid?: string;
   orderId: string;
   assignments: BrandOwnerItemAssignment[];
   updatedAt: string;

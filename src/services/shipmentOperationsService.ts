@@ -245,8 +245,10 @@ export class ShipmentOperationsService {
       },
     ];
 
+    const generatedBoaId = this.generateId('boa');
     const record: ShipmentBrandOwnerAssignment = {
-      id: this.generateId('boa'),
+      id: generatedBoaId,
+      brandOwnerAssignid: generatedBoaId,
       salesOrderId: String(payload.salesOrderId),
       invoiceId,
       invoiceNumber,
@@ -326,8 +328,10 @@ export class ShipmentOperationsService {
       },
     ];
 
+    const generatedNewBoaId = this.generateId('boa');
     const newRecord: ShipmentBrandOwnerAssignment = {
-      id: this.generateId('boa'),
+      id: generatedNewBoaId,
+      brandOwnerAssignid: generatedNewBoaId,
       salesOrderId: existing.salesOrderId,
       invoiceId: existing.invoiceId,
       invoiceNumber: existing.invoiceNumber,
@@ -1067,8 +1071,10 @@ export class ShipmentOperationsService {
       );
 
       if (!activeBA) {
+        const generatedSyncBoaId = this.generateId('boa');
         const baRecord: ShipmentBrandOwnerAssignment = {
-          id: this.generateId('boa'),
+          id: generatedSyncBoaId,
+          brandOwnerAssignid: generatedSyncBoaId,
           salesOrderId: canonicalOrderId,
           invoiceId,
           invoiceNumber,

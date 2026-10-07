@@ -75,7 +75,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<SalesOrderRecord | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [modalDetailsLoading, setModalDetailsLoading] = useState<boolean>(false);
-  const [brandAssignments, setBrandAssignments] = useState<{ orderItemId: string; productId: string; brandOwnerId: string; brandOwnerName: string; contactEmail?: string; contactMobile?: string; whatsappNo?: string }[]>([]);
+  const [brandAssignments, setBrandAssignments] = useState<{ brandOwnerAssignid?: string; orderItemId: string; productId: string; brandOwnerId: string; brandOwnerName: string; contactEmail?: string; contactMobile?: string; whatsappNo?: string }[]>([]);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   // Fetch Brand Owners Master List
@@ -242,6 +242,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
               (bo) => bo.name?.toLowerCase().trim() === existingMatch?.brandOwnerName?.toLowerCase().trim() || String(bo.id) === String(existingMatch?.brandOwnerId)
             );
             return {
+              brandOwnerAssignid: existingMatch?.brandOwnerAssignid || existingMatch?.id || `boa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
               orderItemId: iKey,
               productId: pKey,
               brandOwnerId: existingMatch?.brandOwnerId || boObj?.id || '',
@@ -271,6 +272,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
         (bo) => bo.name?.toLowerCase().trim() === existingMatch?.brandOwnerName?.toLowerCase().trim() || String(bo.id) === String(existingMatch?.brandOwnerId)
       );
       return {
+        brandOwnerAssignid: existingMatch?.brandOwnerAssignid || existingMatch?.id || `boa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         orderItemId: iKey,
         productId: pKey,
         brandOwnerId: existingMatch?.brandOwnerId || boObj?.id || '',
@@ -316,9 +318,12 @@ export const BrandOwnerAssignmentView: React.FC = () => {
       return;
     }
 
-    const validAssignments = brandAssignments.filter(
-      (a) => a.brandOwnerId && a.brandOwnerName && a.brandOwnerName !== '-- Select Brand Owner --'
-    );
+    const validAssignments = brandAssignments
+      .filter((a) => a.brandOwnerId && a.brandOwnerName && a.brandOwnerName !== '-- Select Brand Owner --')
+      .map((a) => ({
+        ...a,
+        brandOwnerAssignid: a.brandOwnerAssignid || `boa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      }));
 
     if (validAssignments.length === 0) {
       showStatus('Please select a valid Brand Owner for at least one item before saving.', 'error');
@@ -338,6 +343,9 @@ export const BrandOwnerAssignmentView: React.FC = () => {
       const data = await res.json();
 
       if (res.ok && data.success) {
+        if (selectedOrder) {
+          selectedOrder.deliveryStatus = 'PACKING';
+        }
         showStatus('Brand Owner Assignments saved successfully!');
         setIsModalOpen(false);
         fetchOrders();
@@ -791,8 +799,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
         const assignedProductsCount = brandAssignments.filter(
           (a) => a.brandOwnerId && a.brandOwnerName && a.brandOwnerName !== '-- Select Brand Owner --'
         ).length;
-        const isAllProductsAssigned = totalProductsCount > 0 && assignedProductsCount === totalProductsCount;
-        const modalDeliveryStatus = isAllProductsAssigned ? 'PACKING' : selectedOrder.deliveryStatus;
+        const modalDeliveryStatus = assignedProductsCount > 0 || selectedOrder.deliveryStatus === 'PACKING' ? 'PACKING' : selectedOrder.deliveryStatus;
 
         return (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">

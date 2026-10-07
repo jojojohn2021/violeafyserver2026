@@ -854,7 +854,6 @@ export class OperationsService {
         id: brandOwnerAssignid,
         brandOwnerAssignid,
         salesOrderId: orderId,
-        orderId,
         productId: assignment.productId,
         orderItemId: assignment.orderItemId,
         brandOwnerId: assignment.brandOwnerId,

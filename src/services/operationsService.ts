@@ -847,8 +847,6 @@ export class OperationsService {
     }
 
     await this.db.saveCollectionDoc('order_brand_assignments', record);
-    await this.db.saveCollectionDoc('shipment_brand_owner_assignments', sanitizeFirestorePayload(record));
-    console.log(`[VIO-FIRESTORE] Record inserted successfully in table: shipment_brand_owner_assignments (ID: ${record.id})`);
 
     for (const assignment of formattedAssignments) {
       const brandOwnerAssignid = assignment.brandOwnerAssignid || assignment.id || this.generateId('boa');

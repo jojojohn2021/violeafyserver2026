@@ -850,6 +850,52 @@ export class OperationsService {
 
     for (const assignment of formattedAssignments) {
       const brandOwnerAssignid = assignment.brandOwnerAssignid || assignment.id || this.generateId('boa');
+      const matchingProduct = orderProducts.find((p: any, idx: number) => {
+        const pId = String(p.productId || p.id || `p_${idx}`);
+        const iId = String(p.itemId || p.orderItemId || `item_${p.productId || p.id || idx}`);
+        return String(assignment.productId) === pId || String(assignment.orderItemId) === iId || String(assignment.productId) === String(p.id);
+      });
+
+      const orderqty = matchingProduct
+        ? Number(matchingProduct.quantity ?? matchingProduct.qty ?? matchingProduct.orderqty ?? 0)
+        : Number((assignment as any).quantity || (assignment as any).orderqty || 0);
+      const orderunit = matchingProduct
+        ? String(matchingProduct.unit ?? matchingProduct.orderunit ?? '')
+        : String((assignment as any).unit || (assignment as any).orderunit || '');
+      const orderpackingsize = matchingProduct
+        ? String(matchingProduct.packingSize ?? matchingProduct.packingsize ?? matchingProduct.orderpackingsize ?? '')
+        : String((assignment as any).packingSize || (assignment as any).packingsize || (assignment as any).orderpackingsize || '');
+
+      const buildFulfilmentChild = (child?: any) => ({
+        id: child?.id || `ofc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        orderItemId: String(assignment.orderItemId || matchingProduct?.itemId || `item_${assignment.productId}`),
+        orderqty: child?.orderqty !== undefined ? child.orderqty : orderqty,
+        orderunit: child?.orderunit !== undefined ? child.orderunit : orderunit,
+        orderpackingsize: child?.orderpackingsize !== undefined ? child.orderpackingsize : orderpackingsize,
+        outpackingsize: child?.outpackingsize !== undefined ? child.outpackingsize : '',
+        outquantity: child?.outquantity !== undefined ? child.outquantity : 0,
+        outunit: child?.outunit !== undefined ? child.outunit : '',
+        outpackingstatus: child?.outpackingstatus || 'PACKING',
+        outbalanceqty: child?.outbalanceqty !== undefined ? child.outbalanceqty : 0,
+        outpackdate: child?.outpackdate || (assignment as any).packdate || now,
+        outpickupdate: child?.outpickupdate || (assignment as any).pickupdate || (assignment as any).outpickupdate || '',
+        outcouriername: child?.outcouriername || (assignment as any).couriername || (assignment as any).courier || '',
+        outcourierdocketno: child?.outcourierdocketno || (assignment as any).courierdocketno || (assignment as any).docketno || '',
+        outestimateddatetoreach: child?.outestimateddatetoreach || (assignment as any).outestimateddatetoreach || '',
+        outstatus: child?.outstatus || (assignment as any).outstatus || '',
+        outdealyreasons: child?.outdealyreasons || (assignment as any).outdealyreasons || '',
+        outexpecteddateofdespatchdate: child?.outexpecteddateofdespatchdate || (assignment as any).outexpecteddateofdespatchdate || '',
+        outemailssenddetails: child?.outemailssenddetails || (assignment as any).emailssenddetails || null,
+      });
+
+      const rawChildren = Array.isArray((assignment as any).orderfulfilment) && (assignment as any).orderfulfilment.length > 0
+        ? (assignment as any).orderfulfilment
+        : [];
+
+      const processedFulfilment = rawChildren.length > 0
+        ? rawChildren.map((c: any) => buildFulfilmentChild(c))
+        : [buildFulfilmentChild()];
+
       const shipmentAssignmentItem = {
         id: brandOwnerAssignid,
         brandOwnerAssignid,
@@ -864,10 +910,20 @@ export class OperationsService {
         assignedBy: assignedBy || 'Operations Admin',
         assignedAt: now,
         status: 'ASSIGNED',
+        packdate: (assignment as any).packdate || now,
+        pickupdate: (assignment as any).pickupdate || (assignment as any).outpickupdate || '',
+        couriername: (assignment as any).couriername || (assignment as any).courier || '',
+        courierdocketno: (assignment as any).courierdocketno || (assignment as any).docketno || '',
+        fulfillmentstatus: (assignment as any).fulfillmentstatus || 'ASSIGNED',
+        deliverydate: (assignment as any).deliverydate || '',
+        deliverystatus: (assignment as any).deliverystatus || '',
+        deliverynote: (assignment as any).deliverynote || '',
+        emailssenddetails: (assignment as any).emailssenddetails || null,
+        orderfulfilment: processedFulfilment,
         createdAt: now,
         updatedAt: now,
       };
-      await this.db.saveCollectionDoc('shipment_brand_owner_assignments', sanitizeFirestorePayload(shipmentAssignmentItem));
+      await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', sanitizeFirestorePayload(shipmentAssignmentItem));
     }
 
     await this.updateFulfilmentStatus(orderId, computedStatus, { brandAssignmentId: record.id });

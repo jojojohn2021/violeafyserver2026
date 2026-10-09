@@ -145,7 +145,7 @@ service cloud.firestore {
     match /order_operation_history/{recordId} {
       allow read, write: if isSignedIn();
     }
-    match /shipment_brand_owner_assignments/{recordId} {
+    match /shipment_brand_owner_fulfilment/{recordId} {
       allow read, write: if isSignedIn();
     }
     match /shipment_packing/{recordId} {

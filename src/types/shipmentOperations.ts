@@ -33,12 +33,51 @@ export interface ShipmentOperationalCommon {
   statusHistory: StatusHistoryEntry[];
 }
 
+export interface ShipmentBrandOwnerFulfilmentChildRecord {
+  id?: string;
+  orderItemId: string;
+  orderqty?: number | string;
+  orderunit?: string;
+  orderpackingsize?: string;
+  outpackingsize?: string;
+  outquantity?: number | string;
+  outunit?: string;
+  outpackingstatus?: string;
+  outbalanceqty?: number | string;
+  outpackdate?: string;
+  outpickupdate?: string;
+  outcouriername?: string;
+  outcourierdocketno?: string;
+  outestimateddatetoreach?: string;
+  outstatus?: string;
+  outdealyreasons?: string;
+  outexpecteddateofdespatchdate?: string;
+  outemailssenddetails?: string | Record<string, any> | any[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface ShipmentBrandOwnerAssignment extends ShipmentOperationalCommon {
   quantity?: number;
   notes?: string;
   courier?: string;
   docketno?: string;
   pickupdate?: string;
+
+  // New fields for shipment_brand_owner_fulfilment
+  packdate?: string;
+  couriername?: string;
+  courierdocketno?: string;
+  fulfillmentstatus?: string;
+  deliverydate?: string;
+  deliverystatus?: string;
+  deliverynote?: string;
+  emailssenddetails?: string | Record<string, any> | any[];
+
+  // Child records array (orderfulfilment) linked to orderItemId to insert PACKING DETAILS of MULTIPLE RECORDS EACH ORDERITEMID
+  orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];
+
+
   status: BrandOwnerAssignmentStatus;
 }
 

@@ -325,7 +325,7 @@ export class InvoiceRepository extends BaseRepository<any> {
 
 export class ShipmentBrandOwnerAssignmentRepository extends BaseRepository<any> {
   constructor() {
-    super('shipment_brand_owner_assignments');
+    super('shipment_brand_owner_fulfilment');
   }
 }
 

@@ -1,5 +1,6 @@
 import {
   ShipmentBrandOwnerAssignment,
+  ShipmentBrandOwnerFulfilmentChildRecord,
   ShipmentPacking,
   ShipmentShipment,
   ShipmentDelivery,
@@ -170,18 +171,18 @@ export class ShipmentOperationsService {
 
   // ==========================================
   // 1. BRAND OWNER ASSIGNMENT APIs
-  // Collection: shipment_brand_owner_assignments
+  // Collection: shipment_brand_owner_fulfilment
   // ==========================================
 
   async listBrandOwnerAssignments(
     filters: OperationalFilterParams = {}
   ): Promise<PaginatedResult<ShipmentBrandOwnerAssignment>> {
-    const docs = await this.db.getCollectionDocs('shipment_brand_owner_assignments');
+    const docs = await this.db.getCollectionDocs('shipment_brand_owner_fulfilment');
     return this.paginateAndFilter<ShipmentBrandOwnerAssignment>(docs, filters);
   }
 
   async getBrandOwnerAssignmentById(id: string): Promise<ShipmentBrandOwnerAssignment> {
-    const docs = await this.db.getCollectionDocs('shipment_brand_owner_assignments');
+    const docs = await this.db.getCollectionDocs('shipment_brand_owner_fulfilment');
     const doc = docs.find((d) => String(d.id) === String(id));
     if (!doc) {
       throw new Error(`Brand Owner Assignment record '${id}' not found.`);
@@ -203,6 +204,17 @@ export class ShipmentOperationsService {
       courier?: string;
       docketno?: string;
       pickupdate?: string;
+      packdate?: string;
+      couriername?: string;
+      courierdocketno?: string;
+      fulfillmentstatus?: string;
+      deliverydate?: string;
+      deliverystatus?: string;
+      deliverynote?: string;
+      emailssenddetails?: any;
+      orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];
+  
+    
     },
     createdBy: string = 'System'
   ): Promise<ShipmentBrandOwnerAssignment> {
@@ -214,7 +226,7 @@ export class ShipmentOperationsService {
     const now = new Date().toISOString();
 
     const existingDocs: ShipmentBrandOwnerAssignment[] = await this.db.getCollectionDocs(
-      'shipment_brand_owner_assignments'
+      'shipment_brand_owner_fulfilment'
     );
     const active = existingDocs.find(
       (d) =>
@@ -261,9 +273,18 @@ export class ShipmentOperationsService {
       brandOwnerName: payload.brandOwnerName || '',
       status: 'ASSIGNED',
       notes: payload.notes,
-      courier: payload.courier,
-      docketno: payload.docketno,
+      courier: payload.courier || payload.couriername,
+      docketno: payload.docketno || payload.courierdocketno,
       pickupdate: payload.pickupdate,
+      packdate: payload.packdate || now,
+      couriername: payload.couriername || payload.courier || '',
+      courierdocketno: payload.courierdocketno || payload.docketno || '',
+      fulfillmentstatus: payload.fulfillmentstatus || 'ASSIGNED',
+      deliverydate: payload.deliverydate || '',
+      deliverystatus: payload.deliverystatus || '',
+      deliverynote: payload.deliverynote || '',
+      emailssenddetails: payload.emailssenddetails || null,
+      orderfulfilment: Array.isArray(payload.orderfulfilment) ? payload.orderfulfilment : [],
       transactionDate: now,
       createdAt: now,
       updatedAt: now,
@@ -272,12 +293,12 @@ export class ShipmentOperationsService {
     };
 
     try {
-      await this.db.saveCollectionDoc('shipment_brand_owner_assignments', sanitizeFirestorePayload(record));
-      console.log(`[VIO-FIRESTORE] Record inserted successfully in table: shipment_brand_owner_assignments (ID: ${record.id})`);
+      await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', sanitizeFirestorePayload(record));
+      console.log(`[VIO-FIRESTORE] Record inserted successfully in table: shipment_brand_owner_fulfilment (ID: ${record.id})`);
       return record;
     } catch (err: any) {
-      console.error(`[VIO-FIRESTORE] Failed to insert record into table shipment_brand_owner_assignments:`, err);
-      throw new Error(`Failed to insert record into table shipment_brand_owner_assignments: ${err?.message || err}`);
+      console.error(`[VIO-FIRESTORE] Failed to insert record into table shipment_brand_owner_fulfilment:`, err);
+      throw new Error(`Failed to insert record into table shipment_brand_owner_fulfilment: ${err?.message || err}`);
     }
   }
 
@@ -291,6 +312,15 @@ export class ShipmentOperationsService {
       courier?: string;
       docketno?: string;
       pickupdate?: string;
+      packdate?: string;
+      couriername?: string;
+      courierdocketno?: string;
+      fulfillmentstatus?: string;
+      deliverydate?: string;
+      deliverystatus?: string;
+      deliverynote?: string;
+      emailssenddetails?: any;
+      orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];
     },
     updatedBy: string = 'System'
   ): Promise<ShipmentBrandOwnerAssignment> {
@@ -315,7 +345,7 @@ export class ShipmentOperationsService {
         reason: `Reassigned to Brand Owner ID ${newPayload.brandOwnerId}`,
       },
     ];
-    await this.db.saveCollectionDoc('shipment_brand_owner_assignments', sanitizeFirestorePayload(existing));
+    await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', sanitizeFirestorePayload(existing));
 
     // 2. Create new assignment record as ASSIGNED
     const newHistory: StatusHistoryEntry[] = [
@@ -344,9 +374,18 @@ export class ShipmentOperationsService {
       brandOwnerName: newPayload.brandOwnerName || '',
       status: 'ASSIGNED',
       notes: newPayload.notes || existing.notes,
-      courier: newPayload.courier || existing.courier,
-      docketno: newPayload.docketno || existing.docketno,
+      courier: newPayload.courier || newPayload.couriername || existing.courier,
+      docketno: newPayload.docketno || newPayload.courierdocketno || existing.docketno,
       pickupdate: newPayload.pickupdate || existing.pickupdate,
+      packdate: newPayload.packdate || existing.packdate || now,
+      couriername: newPayload.couriername || newPayload.courier || existing.couriername || existing.courier || '',
+      courierdocketno: newPayload.courierdocketno || newPayload.docketno || existing.courierdocketno || existing.docketno || '',
+      fulfillmentstatus: newPayload.fulfillmentstatus || existing.fulfillmentstatus || 'ASSIGNED',
+      deliverydate: newPayload.deliverydate || existing.deliverydate || '',
+      deliverystatus: newPayload.deliverystatus || existing.deliverystatus || '',
+      deliverynote: newPayload.deliverynote || existing.deliverynote || '',
+      emailssenddetails: newPayload.emailssenddetails || existing.emailssenddetails || null,
+      orderfulfilment: Array.isArray(newPayload.orderfulfilment) ? newPayload.orderfulfilment : (Array.isArray(existing.orderfulfilment) ? existing.orderfulfilment : []),
       transactionDate: now,
       createdAt: now,
       updatedAt: now,
@@ -355,18 +394,58 @@ export class ShipmentOperationsService {
     };
 
     try {
-      await this.db.saveCollectionDoc('shipment_brand_owner_assignments', sanitizeFirestorePayload(newRecord));
-      console.log(`[VIO-FIRESTORE] Record inserted successfully in table: shipment_brand_owner_assignments (ID: ${newRecord.id})`);
+      await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', sanitizeFirestorePayload(newRecord));
+      console.log(`[VIO-FIRESTORE] Record inserted successfully in table: shipment_brand_owner_fulfilment (ID: ${newRecord.id})`);
       return newRecord;
     } catch (err: any) {
-      console.error(`[VIO-FIRESTORE] Failed to insert record into table shipment_brand_owner_assignments:`, err);
-      throw new Error(`Failed to insert record into table shipment_brand_owner_assignments: ${err?.message || err}`);
+      console.error(`[VIO-FIRESTORE] Failed to insert record into table shipment_brand_owner_fulfilment:`, err);
+      throw new Error(`Failed to insert record into table shipment_brand_owner_fulfilment: ${err?.message || err}`);
     }
   }
 
   async getBrandOwnerAssignmentHistory(id: string): Promise<StatusHistoryEntry[]> {
     const record = await this.getBrandOwnerAssignmentById(id);
     return record.statusHistory || [];
+  }
+
+  async addPackingChildRecord(
+    fulfilmentRecordId: string,
+    childRecord: ShipmentBrandOwnerFulfilmentChildRecord,
+    updatedBy: string = 'System'
+  ): Promise<ShipmentBrandOwnerAssignment> {
+    const record = await this.getBrandOwnerAssignmentById(fulfilmentRecordId);
+    const now = new Date().toISOString();
+    const newChild: ShipmentBrandOwnerFulfilmentChildRecord = {
+      id: childRecord.id || this.generateId('child_pck'),
+      orderItemId: String(childRecord.orderItemId || record.itemId || ''),
+      outpackingsize: childRecord.outpackingsize || '',
+      outquantity: childRecord.outquantity ?? 0,
+      outunit: childRecord.outunit || '',
+      outpackingstatus: childRecord.outpackingstatus || 'PACKED',
+      outbalanceqty: childRecord.outbalanceqty ?? 0,
+      outpackdate: childRecord.outpackdate || now,
+      outpickupdate: childRecord.outpickupdate || '',
+      outcouriername: childRecord.outcouriername || '',
+      outcourierdocketno: childRecord.outcourierdocketno || '',
+      outestimateddatetoreach: childRecord.outestimateddatetoreach || '',
+      outstatus: childRecord.outstatus || 'PACKED',
+      outdealyreasons: childRecord.outdealyreasons || '',
+      outexpecteddateofdespatchdate: childRecord.outexpecteddateofdespatchdate || '',
+      outemailssenddetails: childRecord.outemailssenddetails || null,
+      createdAt: childRecord.createdAt || now,
+      updatedAt: now,
+    };
+
+    const existingDetails = Array.isArray(record.orderfulfilment) ? record.orderfulfilment : [];
+    const updatedDetails = [...existingDetails, newChild];
+
+    record.orderfulfilment = updatedDetails;
+    record.updatedAt = now;
+    record.updatedBy = updatedBy;
+
+    await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', sanitizeFirestorePayload(record));
+    console.log(`[VIO-FIRESTORE] Child packing record added to table shipment_brand_owner_fulfilment (Record ID: ${record.id})`);
+    return record;
   }
 
   // ==========================================
@@ -403,7 +482,7 @@ export class ShipmentOperationsService {
 
     // Prerequisite Validation: Packing cannot be completed without a valid active Brand Owner assignment
     const assignments: ShipmentBrandOwnerAssignment[] = await this.db.getCollectionDocs(
-      'shipment_brand_owner_assignments'
+      'shipment_brand_owner_fulfilment'
     );
     const activeAssignments = assignments.filter(
       (a) => String(a.salesOrderId) === String(payload.salesOrderId) && a.status === 'ASSIGNED'
@@ -813,7 +892,7 @@ export class ShipmentOperationsService {
     reason: string = 'Cancelled by Operator'
   ): Promise<any> {
     const colMap: Record<string, string> = {
-      'brand-owner': 'shipment_brand_owner_assignments',
+      'brand-owner': 'shipment_brand_owner_fulfilment',
       packing: 'shipment_packing',
       shipment: 'shipment_shipments',
       delivery: 'shipment_deliveries',
@@ -859,7 +938,7 @@ export class ShipmentOperationsService {
     const { salesOrder, invoiceId } = await this.getSalesOrderInfo(salesOrderId);
 
     const [assignments, packings, shipments, deliveries, returns] = await Promise.all([
-      this.db.getCollectionDocs('shipment_brand_owner_assignments'),
+      this.db.getCollectionDocs('shipment_brand_owner_fulfilment'),
       this.db.getCollectionDocs('shipment_packing'),
       this.db.getCollectionDocs('shipment_shipments'),
       this.db.getCollectionDocs('shipment_deliveries'),
@@ -981,7 +1060,7 @@ export class ShipmentOperationsService {
     totalAssignmentsCount: number;
   }> {
     const docs: ShipmentBrandOwnerAssignment[] = await this.db.getCollectionDocs(
-      'shipment_brand_owner_assignments'
+      'shipment_brand_owner_fulfilment'
     );
 
     const matching = docs.filter(
@@ -1063,8 +1142,8 @@ export class ShipmentOperationsService {
       const brandOwnerId = String(assignmentMatch?.brandOwnerId || prod.brandOwnerId || 'brand_owner_default');
       const brandOwnerName = String(assignmentMatch?.brandOwnerName || prod.brandOwner || prod.brand || 'Unassigned');
 
-      // Table 1: shipment_brand_owner_assignments
-      const existingBA: ShipmentBrandOwnerAssignment[] = await this.db.getCollectionDocs('shipment_brand_owner_assignments');
+      // Table 1: shipment_brand_owner_fulfilment
+      const existingBA: ShipmentBrandOwnerAssignment[] = await this.db.getCollectionDocs('shipment_brand_owner_fulfilment');
       const activeBA = existingBA.find(
         (b) => (String(b.salesOrderId) === canonicalOrderId || matchesOrderId({ id: b.salesOrderId, orderNumber: b.salesOrderId }, salesOrderId)) &&
                (String(b.productId) === pId || b.itemId === itemKey) && b.status === 'ASSIGNED'
@@ -1094,7 +1173,7 @@ export class ShipmentOperationsService {
             { fromStatus: null, toStatus: 'ASSIGNED', transactionDate: now, performedBy: operator, reason: 'Brand Owner Assigned on Packing' }
           ],
         };
-        await this.db.saveCollectionDoc('shipment_brand_owner_assignments', sanitizeFirestorePayload(baRecord));
+        await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', sanitizeFirestorePayload(baRecord));
       } else if (activeBA.brandOwnerId !== brandOwnerId || activeBA.brandOwnerName !== brandOwnerName) {
         await this.reassignBrandOwner(activeBA.id, { brandOwnerId, brandOwnerName }, operator);
       }
@@ -1236,7 +1315,7 @@ export class ShipmentOperationsService {
 
     const [savedOrders, savedAssignments] = await Promise.all([
       this.db.getCollectionDocs('sales_orders'),
-      this.db.getCollectionDocs('shipment_brand_owner_assignments'),
+      this.db.getCollectionDocs('shipment_brand_owner_fulfilment'),
     ]);
     const savedOrder = savedOrders.find((order) => String(order.id) === canonicalOrderId);
     if (savedOrder?.deliveryStatus !== fulfilmentStatus) {

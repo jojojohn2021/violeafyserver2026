@@ -229,6 +229,8 @@ export interface SalesProduct {
   category?: string;
   brand?: string;
   brandOwner?: string;
+  unit?: string;
+  packingSize?: string;
 }
 
 export interface SalesOrder {

@@ -19,6 +19,7 @@ import {
   findCustomerInCollections,
 } from "./src/services/referralChainService";
 import { OperationsService } from "./src/services/operationsService";
+import { ShipmentOperationsService } from "./src/services/shipmentOperationsService";
 
 dotenv.config();
 
@@ -54,7 +55,7 @@ async function requireAuthenticatedRequest(req: express.Request, res: express.Re
 
 const protectedOperationCollections = new Set([
   'order_fulfilment', 'order_packing', 'order_brand_assignments', 'order_shipments', 'order_delivery', 'order_returns',
-  'order_operation_history', 'shipment_brand_owner_assignments', 'shipment_packing', 'shipment_shipments',
+  'order_operation_history', 'shipment_brand_owner_fulfilment', 'shipment_packing', 'shipment_shipments',
   'shipment_deliveries', 'shipment_returns', 'payments',
 ]);
 
@@ -1528,6 +1529,11 @@ const operationsService = new OperationsService({
   saveCollectionDoc,
   deleteCollectionDoc,
 });
+const shipmentOperationsService = new ShipmentOperationsService({
+  getCollectionDocs,
+  saveCollectionDoc,
+  deleteCollectionDoc,
+});
 
 // Helper for extracting Idempotency-Key
 function getIdempotencyKey(req: express.Request): string | undefined {
@@ -1723,8 +1729,8 @@ const handleUpdateStatus = async (req: express.Request, res: express.Response) =
   } catch (error: any) {
     return res.status(400).json({
       success: false,
-      error: `Failed to insert record into table shipment_brand_owner_assignments: ${error?.message || error}`,
-      table: "shipment_brand_owner_assignments"
+      error: `Failed to insert record into table shipment_brand_owner_fulfilment: ${error?.message || error}`,
+      table: "shipment_brand_owner_fulfilment"
     });
   }
 };
@@ -1753,8 +1759,8 @@ const handleAssignBrandOwner = async (req: express.Request, res: express.Respons
     if (!Array.isArray(assignments) || assignments.length === 0) {
       return res.status(400).json({
         success: false,
-        error: "Failed to insert record into table shipment_brand_owner_assignments: assignments array is required",
-        table: "shipment_brand_owner_assignments"
+        error: "Failed to insert record into table shipment_brand_owner_fulfilment: assignments array is required",
+        table: "shipment_brand_owner_fulfilment"
       });
     }
     const result = await operationsService.assignBrandOwners(req.params.orderId, assignments, assignedBy, getIdempotencyKey(req));
@@ -1766,8 +1772,8 @@ const handleAssignBrandOwner = async (req: express.Request, res: express.Respons
   } catch (error: any) {
     return res.status(400).json({
       success: false,
-      error: `Failed to insert record into table shipment_brand_owner_assignments: ${error?.message || error}`,
-      table: "shipment_brand_owner_assignments"
+      error: `Failed to insert record into table shipment_brand_owner_fulfilment: ${error?.message || error}`,
+      table: "shipment_brand_owner_fulfilment"
     });
   }
 };
@@ -1775,6 +1781,27 @@ app.post("/api/operations/orders/:orderId/brand-owner", handleAssignBrandOwner);
 app.post("/api/v1/operations/orders/:orderId/brand-owner", handleAssignBrandOwner);
 app.post("/api/sales-orders/:orderId/brand-owner", handleAssignBrandOwner);
 app.post("/api/v1/sales-orders/:orderId/brand-owner", handleAssignBrandOwner);
+
+// 10b. POST /api/operations/shipment-fulfilment/:id/child-packing
+const handleAddFulfilmentChildPacking = async (req: express.Request, res: express.Response) => {
+  try {
+    const { id } = req.params;
+    const childRecord = req.body || {};
+    if (!childRecord.orderItemId) {
+      return res.status(400).json({ success: false, error: "orderItemId parameter is required for child packing detail record." });
+    }
+    const updatedRecord = await shipmentOperationsService.addPackingChildRecord(id, childRecord, (req as any).user?.name || 'Ops Admin');
+    return res.json({
+      success: true,
+      message: "Child packing detail record inserted into shipment_brand_owner_fulfilment",
+      fulfilment: updatedRecord,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Failed to insert child packing detail record into shipment_brand_owner_fulfilment" });
+  }
+};
+app.post("/api/operations/shipment-fulfilment/:id/child-packing", handleAddFulfilmentChildPacking);
+app.post("/api/v1/operations/shipment-fulfilment/:id/child-packing", handleAddFulfilmentChildPacking);
 
 // Generic Firestore Proxy Endpoints for BaseRepository Fallbacks
 app.get("/api/db/:collection", async (req: express.Request, res: express.Response) => {

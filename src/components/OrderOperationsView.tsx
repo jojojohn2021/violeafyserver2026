@@ -438,15 +438,15 @@ export const OrderOperationsView: React.FC<OrderOperationsViewProps> = ({ initia
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showStatus(data.message || 'Record inserted successfully in table: shipment_brand_owner_assignments');
+        showStatus(data.message || 'Record inserted successfully in table: shipment_brand_owner_fulfilment');
         setActiveModal(null);
         await fetchOrderDetails(orderId);
         await fetchOrders();
       } else {
-        showStatus(data.error || 'Failed to insert record into table shipment_brand_owner_assignments', 'error');
+        showStatus(data.error || 'Failed to insert record into table shipment_brand_owner_fulfilment', 'error');
       }
     } catch (err: any) {
-      showStatus(err.message || 'Failed to insert record into table shipment_brand_owner_assignments', 'error');
+      showStatus(err.message || 'Failed to insert record into table shipment_brand_owner_fulfilment', 'error');
     }
   };
 

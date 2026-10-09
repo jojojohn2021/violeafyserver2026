@@ -22,7 +22,7 @@ function createMockDatabase() {
         createdAt: '2026-10-04T10:00:00.000Z',
       },
     ],
-    shipment_brand_owner_assignments: [],
+    shipment_brand_owner_fulfilment: [],
     shipment_packing: [],
     shipment_shipments: [],
     shipment_deliveries: [],
@@ -97,7 +97,7 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
       'Ops Admin'
     );
 
-    const allAssignments = collections.shipment_brand_owner_assignments;
+    const allAssignments = collections.shipment_brand_owner_fulfilment;
     assert.equal(allAssignments.length, 2);
 
     // Old assignment must be CANCELLED
@@ -273,15 +273,15 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
     assert.equal(salesOrder.deliveryStatus, 'PACKING');
 
     // 2. Verify item-wise entries created across all 5 tables
-    assert.equal(collections.shipment_brand_owner_assignments.length, 2);
+    assert.equal(collections.shipment_brand_owner_fulfilment.length, 2);
     assert.equal(collections.shipment_packing.length, 2);
     assert.equal(collections.shipment_shipments.length, 2);
     assert.equal(collections.shipment_deliveries.length, 2);
     assert.equal(collections.shipment_returns.length, 2);
 
     // Verify brand owner assignment values
-    assert.equal(collections.shipment_brand_owner_assignments[0].brandOwnerName, 'Vio Nature Science');
-    assert.equal(collections.shipment_brand_owner_assignments[0].status, 'ASSIGNED');
+    assert.equal(collections.shipment_brand_owner_fulfilment[0].brandOwnerName, 'Vio Nature Science');
+    assert.equal(collections.shipment_brand_owner_fulfilment[0].status, 'ASSIGNED');
 
     // Verify packing status
     assert.equal(collections.shipment_packing[0].status, 'PACKING');
@@ -301,9 +301,9 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
       },
     ], 'Ops Manager');
 
-    assert.equal(collections.shipment_brand_owner_assignments.length, 1);
-    assert.equal(collections.shipment_brand_owner_assignments[0].itemId, 'item_custom_1');
-    assert.equal(collections.shipment_brand_owner_assignments[0].brandOwnerId, 'bo_custom');
+    assert.equal(collections.shipment_brand_owner_fulfilment.length, 1);
+    assert.equal(collections.shipment_brand_owner_fulfilment[0].itemId, 'item_custom_1');
+    assert.equal(collections.shipment_brand_owner_fulfilment[0].brandOwnerId, 'bo_custom');
   });
 
   it('10. Sync persists the supplied fulfilment status on the sales order', async () => {
@@ -313,5 +313,59 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
     await service.syncPackingAndOperationalTables('SO_2026_0001', [], 'Ops Manager', 'NOT_STARTED');
 
     assert.equal(collections.sales_orders[0].deliveryStatus, 'NOT_STARTED');
+  });
+
+  it('11. Should store new top-level fulfilment fields and support multiple child packing detail records linked to orderItemId', async () => {
+    const { dbAccessor, collections } = createMockDatabase();
+    const service = new ShipmentOperationsService(dbAccessor);
+
+    const record = await service.createBrandOwnerAssignment({
+      salesOrderId: 'SO_2026_0001',
+      itemId: 'item_prod_cleaner',
+      productId: 'prod_cleaner',
+      brandOwnerId: 'bo_vio_nature',
+      brandOwnerName: 'Vio Nature Science',
+      packdate: '2026-10-09',
+      pickupdate: '2026-10-10',
+      couriername: 'BlueDart Express',
+      courierdocketno: 'BD12345678',
+      fulfillmentstatus: 'PACKED',
+      deliverydate: '2026-10-12',
+      deliverystatus: 'IN_TRANSIT',
+      deliverynote: 'Handle with care',
+      emailssenddetails: 'Dispatch notification email sent to customer',
+    });
+
+    assert.equal(record.packdate, '2026-10-09');
+    assert.equal(record.pickupdate, '2026-10-10');
+    assert.equal(record.couriername, 'BlueDart Express');
+    assert.equal(record.courierdocketno, 'BD12345678');
+    assert.equal(record.fulfillmentstatus, 'PACKED');
+    assert.equal(record.deliverydate, '2026-10-12');
+    assert.equal(record.deliverystatus, 'IN_TRANSIT');
+    assert.equal(record.deliverynote, 'Handle with care');
+
+    const updated = await service.addPackingChildRecord(record.id, {
+      orderItemId: 'item_prod_cleaner',
+      outpackingsize: 'Box 500ml x 6',
+      outquantity: 6,
+      outunit: 'BOTTLE',
+      outpackingstatus: 'PACKED',
+      outbalanceqty: 0,
+      outpackdate: '2026-10-09',
+      outpickupdate: '2026-10-10',
+      outcouriername: 'BlueDart Express',
+      outcourierdocketno: 'BD12345678',
+      outestimateddatetoreach: '2026-10-12',
+      outstatus: 'READY_TO_DISPATCH',
+      outdealyreasons: 'None',
+      outexpecteddateofdespatchdate: '2026-10-10',
+      outemailssenddetails: 'Child packing update logged',
+    });
+
+    assert.equal(updated.orderfulfilment.length, 1);
+    assert.equal(updated.orderfulfilment[0].orderItemId, 'item_prod_cleaner');
+    assert.equal(updated.orderfulfilment[0].outpackingsize, 'Box 500ml x 6');
+    assert.equal(updated.orderfulfilment[0].outcourierdocketno, 'BD12345678');
   });
 });

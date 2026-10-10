@@ -22,7 +22,11 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { useCRM } from '../store';
-import { brandOwnerRepository } from '../repositories/repositories';
+import {
+  brandOwnerRepository,
+  orderRepository,
+  shipmentBrandOwnerAssignmentRepository,
+} from '../repositories/repositories';
 import { apiFetch } from '../utils/apiFetch';
 import { BrandOwner } from '../types';
 
@@ -104,9 +108,81 @@ export const BrandOwnerAssignmentView: React.FC = () => {
     }
   };
 
+  // Direct Firestore fallback for Sales Orders from sales_orders collection
+  const fetchOrdersFromFirestore = async () => {
+    try {
+      const allOrders = await orderRepository.getAll();
+      let filtered: SalesOrderRecord[] = (allOrders || []).map((o: any) => ({
+        id: String(o.id || o.orderNumber),
+        orderNumber: String(o.orderNumber || o.id),
+        customerId: String(o.customerId || ''),
+        customerName: String(o.customerName || 'Customer'),
+        customerMobile: o.customerMobile || o.mobile || '',
+        customerEmail: o.customerEmail || o.email || '',
+        products: Array.isArray(o.products) ? o.products : [],
+        totalValue: Number(o.totalValue || o.total || 0),
+        paymentStatus: String(o.paymentStatus || 'PAID'),
+        deliveryStatus: String(o.deliveryStatus || 'PENDING'),
+        fulfilmentStatus: String(o.fulfilmentStatus || o.fulfillmentStatus || 'ASSIGNED'),
+        brandAssignments: Array.isArray(o.brandAssignments) ? o.brandAssignments : [],
+        createdAt: o.createdAt || new Date().toISOString(),
+        lastUpdated: o.lastUpdated || o.updatedAt || '',
+        salesChannel: o.salesChannel || '',
+      }));
+
+      // Apply search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        filtered = filtered.filter(
+          (o) =>
+            o.orderNumber.toLowerCase().includes(q) ||
+            o.customerName.toLowerCase().includes(q) ||
+            (o.customerMobile && o.customerMobile.toLowerCase().includes(q))
+        );
+      }
+      if (customerNameFilter.trim()) {
+        const q = customerNameFilter.toLowerCase();
+        filtered = filtered.filter((o) => o.customerName.toLowerCase().includes(q));
+      }
+      if (mobileFilter.trim()) {
+        const q = mobileFilter.toLowerCase();
+        filtered = filtered.filter((o) => o.customerMobile && o.customerMobile.toLowerCase().includes(q));
+      }
+      if (itemNameFilter.trim()) {
+        const q = itemNameFilter.toLowerCase();
+        filtered = filtered.filter((o) =>
+          o.products.some((p: any) => (p.name || p.productName || '').toLowerCase().includes(q))
+        );
+      }
+      if (dateFilter.trim()) {
+        filtered = filtered.filter((o) => o.createdAt && o.createdAt.startsWith(dateFilter));
+      }
+
+      setPaginationInfo({
+        page,
+        limit,
+        totalRecords: filtered.length,
+        totalPages: Math.ceil(filtered.length / limit) || 1,
+        hasPrevious: page > 1,
+        hasNext: page < Math.ceil(filtered.length / limit),
+      });
+
+      const start = (page - 1) * limit;
+      setOrders(filtered.slice(start, start + limit));
+      return true;
+    } catch (err: any) {
+      console.error('Direct Firestore sales_orders fetch failed:', err);
+      setOrders([]);
+      showStatus(err?.message || 'Error fetching orders from sales_orders database table.', 'error');
+      return false;
+    }
+  };
+
   // Fetch Sales Orders populated from sales_orders tables
   const fetchOrders = async () => {
     setLoading(true);
+    let loadedFromApi = false;
+
     try {
       const endpoint = '/api/operations/brand-owner-assignment';
       const params = new URLSearchParams();
@@ -119,34 +195,38 @@ export const BrandOwnerAssignmentView: React.FC = () => {
       params.append('limit', String(limit));
 
       const res = await apiFetch(`${endpoint}?${params.toString()}`);
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        const fetchedOrders: SalesOrderRecord[] = data.records || data.orders || [];
-        setOrders(fetchedOrders);
-        if (data.pagination) {
-          setPaginationInfo(data.pagination);
-        } else {
-          setPaginationInfo({
-            page: 1,
-            limit,
-            totalRecords: fetchedOrders.length,
-            totalPages: Math.ceil(fetchedOrders.length / limit) || 1,
-            hasPrevious: page > 1,
-            hasNext: page < Math.ceil(fetchedOrders.length / limit),
-          });
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (data && data.success) {
+            const fetchedOrders: SalesOrderRecord[] = data.records || data.orders || [];
+            setOrders(fetchedOrders);
+            if (data.pagination) {
+              setPaginationInfo(data.pagination);
+            } else {
+              setPaginationInfo({
+                page: 1,
+                limit,
+                totalRecords: fetchedOrders.length,
+                totalPages: Math.ceil(fetchedOrders.length / limit) || 1,
+                hasPrevious: page > 1,
+                hasNext: page < Math.ceil(fetchedOrders.length / limit),
+              });
+            }
+            loadedFromApi = true;
+          }
         }
-      } else {
-        setOrders([]);
-        showStatus(data?.error || 'Failed to populate sales_orders records for Brand Owner Assignment.', 'error');
       }
-    } catch (err: any) {
-      console.error('Failed to fetch sales_orders records:', err);
-      setOrders([]);
-      showStatus(err?.message || 'Error connecting to sales_orders server API.', 'error');
-    } finally {
-      setLoading(false);
+    } catch (apiErr) {
+      console.warn('API endpoint fetch fallback to direct Firestore:', apiErr);
     }
+
+    if (!loadedFromApi) {
+      await fetchOrdersFromFirestore();
+    }
+
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -229,36 +309,39 @@ export const BrandOwnerAssignmentView: React.FC = () => {
     try {
       const res = await apiFetch(`/api/operations/orders/${order.id}`);
       if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.order) {
-          const fetchedAssignments = data.brandAssignments || [];
-          const initialMap = (data.order.products || order.products || []).map((p: any, idx: number) => {
-            const pKey = getProdKey(p, idx);
-            const iKey = getItemIdKey(p, idx);
-            const existingMatch = fetchedAssignments.find(
-              (b: any) => String(b.productId) === pKey || b.orderItemId === iKey
-            );
-            const boObj = brandOwnersList.find(
-              (bo) => bo.name?.toLowerCase().trim() === existingMatch?.brandOwnerName?.toLowerCase().trim() || String(bo.id) === String(existingMatch?.brandOwnerId)
-            );
-            return {
-              brandOwnerAssignid: existingMatch?.brandOwnerAssignid || existingMatch?.id || `boa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-              orderItemId: iKey,
-              productId: pKey,
-              brandOwnerId: existingMatch?.brandOwnerId || boObj?.id || '',
-              brandOwnerName: existingMatch?.brandOwnerName || boObj?.name || '',
-              contactEmail: existingMatch?.contactEmail || boObj?.contactEmail || boObj?.email || '',
-              contactMobile: existingMatch?.contactMobile || boObj?.contactMobile || (boObj as any)?.phone || '',
-              whatsappNo: existingMatch?.whatsappNo || boObj?.whatsappNo || '',
-            };
-          });
-          setBrandAssignments(initialMap);
-          setModalDetailsLoading(false);
-          return;
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (data && data.success && data.order) {
+            const fetchedAssignments = data.brandAssignments || [];
+            const initialMap = (data.order.products || order.products || []).map((p: any, idx: number) => {
+              const pKey = getProdKey(p, idx);
+              const iKey = getItemIdKey(p, idx);
+              const existingMatch = fetchedAssignments.find(
+                (b: any) => String(b.productId) === pKey || b.orderItemId === iKey
+              );
+              const boObj = brandOwnersList.find(
+                (bo) => bo.name?.toLowerCase().trim() === existingMatch?.brandOwnerName?.toLowerCase().trim() || String(bo.id) === String(existingMatch?.brandOwnerId)
+              );
+              return {
+                brandOwnerAssignid: existingMatch?.brandOwnerAssignid || existingMatch?.id || `boa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                orderItemId: iKey,
+                productId: pKey,
+                brandOwnerId: existingMatch?.brandOwnerId || boObj?.id || '',
+                brandOwnerName: existingMatch?.brandOwnerName || boObj?.name || '',
+                contactEmail: existingMatch?.contactEmail || boObj?.contactEmail || boObj?.email || '',
+                contactMobile: existingMatch?.contactMobile || boObj?.contactMobile || (boObj as any)?.phone || '',
+                whatsappNo: existingMatch?.whatsappNo || boObj?.whatsappNo || '',
+              };
+            });
+            setBrandAssignments(initialMap);
+            setModalDetailsLoading(false);
+            return;
+          }
         }
       }
     } catch (err) {
-      console.warn('Failed to load detailed order record, building fallback state:', err);
+      console.warn('Failed to load detailed order record from API, building fallback state:', err);
     }
 
     // Fallback assignment list initialization
@@ -331,6 +414,9 @@ export const BrandOwnerAssignmentView: React.FC = () => {
     }
 
     setSubmitting(true);
+    let saved = false;
+
+    // 1. Try authoritative operations API
     try {
       const res = await apiFetch(`/api/operations/orders/${selectedOrder.id}/brand-owner`, {
         method: 'POST',
@@ -340,23 +426,95 @@ export const BrandOwnerAssignmentView: React.FC = () => {
           assignedBy: 'Ops Admin',
         }),
       });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        if (selectedOrder) {
-          selectedOrder.deliveryStatus = 'PACKING';
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (data && data.success) {
+            saved = true;
+          }
         }
-        showStatus('Brand Owner Assignments saved successfully!');
-        setIsModalOpen(false);
-        fetchOrders();
-      } else {
-        showStatus(data.error || 'Failed to save Brand Owner assignment.', 'error');
       }
-    } catch (err: any) {
-      showStatus(err.message || 'Error occurred while saving brand owner assignment.', 'error');
-    } finally {
-      setSubmitting(false);
+    } catch (apiErr) {
+      console.warn('API save fallback to direct Firestore:', apiErr);
     }
+
+    // 2. Direct Firestore fallback
+    if (!saved) {
+      try {
+        const now = new Date().toISOString();
+        const updatedDeliveryStatus = 'PACKING';
+
+        // Update sales_orders document directly
+        await orderRepository.update(selectedOrder.id, {
+          deliveryStatus: updatedDeliveryStatus as any,
+          brandAssignments: validAssignments,
+          lastUpdated: now,
+        } as any);
+
+        // Also persist assignment records into shipment_brand_owner_fulfilment
+        for (const a of validAssignments) {
+          const prodMatch = (selectedOrder.products || []).find(
+            (p: any, idx: number) => getProdKey(p, idx) === a.productId || getItemIdKey(p, idx) === a.orderItemId
+          );
+          const packingSize = prodMatch?.packingSize || prodMatch?.orderpackingsize || 'Standard';
+          const unit = prodMatch?.unit || prodMatch?.orderunit || 'PCS';
+          const qty = Number(prodMatch?.quantity ?? prodMatch?.qty ?? 1);
+          const today = now.split('T')[0];
+
+          const boaDoc = {
+            id: a.brandOwnerAssignid,
+            brandOwnerAssignid: a.brandOwnerAssignid,
+            salesOrderId: String(selectedOrder.id),
+            orderItemId: a.orderItemId,
+            itemId: a.orderItemId,
+            productId: a.productId,
+            productName: prodMatch?.name || prodMatch?.productName || 'Product Item',
+            brandOwnerId: a.brandOwnerId,
+            brandOwnerName: a.brandOwnerName,
+            orderpackingsize: packingSize,
+            orderunit: unit,
+            orderqty: qty,
+            outpackdate: today,
+            outpackingsize: packingSize,
+            outunit: unit,
+            outquantity: qty,
+            outstatus: 'PACKING',
+            outbalanceqty: 0,
+            outexpecteddateofdespatchdate: today,
+            outdealyreasons: '',
+            fulfillmentstatus: 'PACKING',
+            status: 'ASSIGNED',
+            orderfulfilment: [],
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          try {
+            await shipmentBrandOwnerAssignmentRepository.update(a.brandOwnerAssignid, boaDoc);
+          } catch {
+            await shipmentBrandOwnerAssignmentRepository.create(boaDoc);
+          }
+        }
+
+        saved = true;
+      } catch (repoErr: any) {
+        console.error('Direct Firestore save failed:', repoErr);
+        showStatus(repoErr?.message || 'Failed to save brand owner assignments to database.', 'error');
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    if (saved) {
+      if (selectedOrder) {
+        selectedOrder.deliveryStatus = 'PACKING';
+      }
+      showStatus('Brand Owner Assignments saved successfully! Delivery status updated to PACKING.');
+      setIsModalOpen(false);
+      fetchOrders();
+    }
+    setSubmitting(false);
   };
 
   // Filter orders locally if needed

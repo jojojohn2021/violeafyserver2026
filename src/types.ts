@@ -259,6 +259,9 @@ export interface SalesOrder {
   referralCode?: string;
   orderType?: 'Online' | 'Shop';
   salesChannel?: 'Amazon' | 'Flipkart' | 'Vamjo' | 'Meesho' | 'Shop' | 'Website' | 'Distributor' | 'Other Marketplace' | string;
+  brandAssignments?: any[];
+  lastUpdated?: string;
+  [key: string]: any;
 }
 
 export interface BrandConfig {

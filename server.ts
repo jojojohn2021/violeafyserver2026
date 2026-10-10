@@ -1803,6 +1803,126 @@ const handleAddFulfilmentChildPacking = async (req: express.Request, res: expres
 app.post("/api/operations/shipment-fulfilment/:id/child-packing", handleAddFulfilmentChildPacking);
 app.post("/api/v1/operations/shipment-fulfilment/:id/child-packing", handleAddFulfilmentChildPacking);
 
+// 10c. GET & POST /api/operations/shipment-brand-owner-fulfilment (Complete Packing View)
+const handleGetShipmentBrandOwnerFulfilment = async (req: express.Request, res: express.Response) => {
+  try {
+    const docs = await getCollectionDocs('shipment_brand_owner_fulfilment');
+    return res.json({ success: true, count: docs.length, docs });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || "Failed to retrieve shipment_brand_owner_fulfilment records" });
+  }
+};
+app.get("/api/operations/shipment-brand-owner-fulfilment", handleGetShipmentBrandOwnerFulfilment);
+app.get("/api/v1/operations/shipment-brand-owner-fulfilment", handleGetShipmentBrandOwnerFulfilment);
+
+const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res: express.Response) => {
+  try {
+    const { record, newRecord } = req.body || {};
+    if (!record || !record.id) {
+      return res.status(400).json({ success: false, error: "Record with a valid ID is required for saving." });
+    }
+
+    // Save/update existing record in shipment_brand_owner_fulfilment
+    await saveCollectionDoc('shipment_brand_owner_fulfilment', record);
+
+    // If outbalanceqty > 0, save the new split orderfulfilment record
+    if (newRecord && newRecord.id) {
+      await saveCollectionDoc('shipment_brand_owner_fulfilment', newRecord);
+      try {
+        await saveCollectionDoc('orderfulfilment', newRecord);
+      } catch (err) {
+        console.warn('[VIO-FIRESTORE] Warning syncing to orderfulfilment collection:', err);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: "Packing record and fulfillment details saved successfully.",
+      record,
+      newRecord: newRecord || null,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || "Failed to save packing record into database." });
+  }
+};
+app.post("/api/operations/shipment-brand-owner-fulfilment/save", handleSaveShipmentBrandOwnerFulfilment);
+app.post("/api/v1/operations/shipment-brand-owner-fulfilment/save", handleSaveShipmentBrandOwnerFulfilment);
+
+const handleSyncShipmentBrandOwnerFulfilmentFromOrders = async (req: express.Request, res: express.Response) => {
+  try {
+    const [salesOrders, existingDocs] = await Promise.all([
+      getCollectionDocs('sales_orders'),
+      getCollectionDocs('shipment_brand_owner_fulfilment'),
+    ]);
+
+    const existingMap = new Set(existingDocs.map((d: any) => `${d.salesOrderId}_${d.orderItemId || d.itemId || d.productId}`));
+    let addedCount = 0;
+
+    for (const order of salesOrders) {
+      const prods = Array.isArray(order.products) ? order.products : [];
+      const assignments = Array.isArray(order.brandAssignments) ? order.brandAssignments : [];
+
+      for (let idx = 0; idx < prods.length; idx++) {
+        const prod = prods[idx];
+        const pId = String(prod.productId || prod.id || `p_${idx}`);
+        const iId = String(prod.itemId || prod.orderItemId || `item_${pId}`);
+        const key = `${order.id}_${iId}`;
+
+        if (!existingMap.has(key)) {
+          const matchAssignment = assignments.find((a: any) => String(a.productId) === pId || String(a.orderItemId) === iId);
+          const brandOwnerName = matchAssignment?.brandOwnerName || prod.brandOwnerName || 'Vio Nature Science';
+          const brandOwnerId = matchAssignment?.brandOwnerId || prod.brandOwnerId || 'bo_default';
+          const qty = Number(prod.quantity ?? prod.qty ?? prod.orderqty ?? 1);
+          const unit = String(prod.unit ?? prod.orderunit ?? 'PCS');
+          const packingSize = String(prod.packingSize ?? prod.packingsize ?? prod.orderpackingsize ?? 'Standard');
+          const today = new Date().toISOString().split('T')[0];
+          const newId = `boa_${order.id}_${pId}`;
+
+          const newDoc = {
+            id: newId,
+            brandOwnerAssignid: newId,
+            salesOrderId: String(order.id),
+            orderItemId: iId,
+            itemId: iId,
+            productId: pId,
+            productName: prod.name || prod.productName || `Product ${idx + 1}`,
+            brandOwnerId,
+            brandOwnerName,
+            orderpackingsize: packingSize,
+            orderunit: unit,
+            orderqty: qty,
+            outpackdate: today,
+            outpackingsize: packingSize,
+            outunit: unit,
+            outquantity: qty,
+            outstatus: 'PACKING',
+            outbalanceqty: 0,
+            outexpecteddateofdespatchdate: today,
+            outdealyreasons: '',
+            fulfillmentstatus: 'PACKING',
+            status: 'ASSIGNED',
+            orderfulfilment: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+
+          await saveCollectionDoc('shipment_brand_owner_fulfilment', newDoc);
+          existingMap.add(key);
+          addedCount++;
+        }
+      }
+    }
+
+    const updatedDocs = await getCollectionDocs('shipment_brand_owner_fulfilment');
+    return res.json({ success: true, addedCount, totalDocs: updatedDocs.length, docs: updatedDocs });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || "Failed to sync orders." });
+  }
+};
+app.post("/api/operations/shipment-brand-owner-fulfilment/sync-from-orders", handleSyncShipmentBrandOwnerFulfilmentFromOrders);
+app.post("/api/v1/operations/shipment-brand-owner-fulfilment/sync-from-orders", handleSyncShipmentBrandOwnerFulfilmentFromOrders);
+
+
 // Generic Firestore Proxy Endpoints for BaseRepository Fallbacks
 app.get("/api/db/:collection", async (req: express.Request, res: express.Response) => {
   try {

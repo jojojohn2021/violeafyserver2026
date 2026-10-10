@@ -20,6 +20,8 @@ import SettingsView from './components/SettingsView';
 import FirestoreErrorBanner from './components/FirestoreErrorBanner';
 import { OrderOperationsView } from './components/OrderOperationsView';
 import { BrandOwnerAssignmentView } from './components/BrandOwnerAssignmentView';
+import CompletePackingView from './components/CompletePackingView';
+import CreateShipmentView from './components/CreateShipmentView';
 
 import { 
   BarChart3, Users, Briefcase, Calendar, TrendingUp, MessageSquare, 
@@ -122,8 +124,8 @@ function CRMAppShell() {
     { id: 'referrals', name: 'Dashboard', icon: Gift, moduleCheck: 'Referral Hub' },
     { id: 'sales_orders', name: 'Invoices', icon: Receipt, moduleCheck: 'Sales Orders' },
     { id: 'brand_owner_assignment', name: 'Brand Owner Assignment', icon: UserCheck, moduleCheck: 'Sales Orders' },
-    { id: 'complete_packing', name: 'Complete Packing', icon: PackageCheck, moduleCheck: 'Sales Orders' },
-    { id: 'create_shipment', name: 'Create Shipment', icon: Truck, moduleCheck: 'Sales Orders' },
+    { id: 'complete_packing', name: 'COMPLETE PACKING', icon: PackageCheck, moduleCheck: 'Sales Orders' },
+    { id: 'create_shipment', name: 'CREATE SHIPMENT', icon: Truck, moduleCheck: 'Sales Orders' },
     { id: 'confirm_delivery', name: 'Confirm Delivery', icon: CheckCircle2, moduleCheck: 'Sales Orders' },
     { id: 'process_return', name: 'Process Return', icon: RotateCcw, moduleCheck: 'Sales Orders' },
     { id: 'order_operations', name: 'All Operations Summary', icon: Package, moduleCheck: 'Sales Orders' },
@@ -254,8 +256,8 @@ function CRMAppShell() {
               {activeTab === 'referrals' && <ReferralPartnerHubView />}
               {activeTab === 'sales_orders' && <SalesOrdersView />}
               {activeTab === 'brand_owner_assignment' && <BrandOwnerAssignmentView />}
-              {activeTab === 'complete_packing' && <OrderOperationsView initialStage="packing" />}
-              {activeTab === 'create_shipment' && <OrderOperationsView initialStage="shipment" />}
+              {activeTab === 'complete_packing' && <CompletePackingView />}
+              {activeTab === 'create_shipment' && <CreateShipmentView />}
               {activeTab === 'confirm_delivery' && <OrderOperationsView initialStage="delivery" />}
               {activeTab === 'process_return' && <OrderOperationsView initialStage="returns" />}
               {activeTab === 'order_operations' && <OrderOperationsView initialStage="all" />}

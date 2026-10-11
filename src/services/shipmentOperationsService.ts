@@ -52,6 +52,10 @@ function matchesOrderId(order: any, targetId: string): boolean {
          targetClean === oNumClean;
 }
 
+export function generateShipId(): string {
+  return `ship_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+}
+
 export class ShipmentOperationsService {
   constructor(private db: DataAccessor) {}
 
@@ -259,8 +263,10 @@ export class ShipmentOperationsService {
     ];
 
     const generatedBoaId = this.generateId('boa');
+    const shipid = (payload as any).shipid || this.generateId('ship');
     const record: ShipmentBrandOwnerAssignment = {
       id: generatedBoaId,
+      shipid,
       brandOwnerAssignid: generatedBoaId,
       salesOrderId: String(payload.salesOrderId),
       invoiceId,
@@ -362,8 +368,10 @@ export class ShipmentOperationsService {
     ];
 
     const generatedNewBoaId = this.generateId('boa');
+    const shipid = (newPayload as any).shipid || (existing as any).shipid || this.generateId('ship');
     const newRecord: ShipmentBrandOwnerAssignment = {
       id: generatedNewBoaId,
+      shipid,
       brandOwnerAssignid: generatedNewBoaId,
       salesOrderId: existing.salesOrderId,
       invoiceId: existing.invoiceId,
@@ -421,6 +429,7 @@ export class ShipmentOperationsService {
     const now = new Date().toISOString();
     const newChild: ShipmentBrandOwnerFulfilmentChildRecord = {
       id: childRecord.id || this.generateId('child_pck'),
+      shipid: childRecord.shipid || (record as any).shipid || this.generateId('ship'),
       orderItemId: String(childRecord.orderItemId || record.itemId || ''),
       outpackingsize: childRecord.outpackingsize || '',
       outquantity: childRecord.outquantity ?? 0,
@@ -1159,8 +1168,10 @@ export class ShipmentOperationsService {
 
       if (!activeBA) {
         const generatedSyncBoaId = this.generateId('boa');
+        const shipid = this.generateId('ship');
         const baRecord: ShipmentBrandOwnerAssignment = {
           id: generatedSyncBoaId,
+          shipid,
           brandOwnerAssignid: generatedSyncBoaId,
           salesOrderId: canonicalOrderId,
           invoiceId,

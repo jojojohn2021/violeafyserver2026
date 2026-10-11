@@ -14,6 +14,7 @@ export interface StatusHistoryEntry {
 
 export interface ShipmentOperationalCommon {
   id: string;
+  shipid?: string;
   brandOwnerAssignid?: string;
   salesOrderId: string;
   invoiceId: string;
@@ -35,6 +36,7 @@ export interface ShipmentOperationalCommon {
 
 export interface ShipmentBrandOwnerFulfilmentChildRecord {
   id?: string;
+  shipid?: string;
   orderItemId: string;
   orderqty?: number | string;
   orderunit?: string;

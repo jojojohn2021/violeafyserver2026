@@ -327,6 +327,20 @@ export class ShipmentBrandOwnerAssignmentRepository extends BaseRepository<any> 
   constructor() {
     super('shipment_brand_owner_fulfilment');
   }
+
+  override async create(item: any): Promise<void> {
+    if (!item.shipid) {
+      item.shipid = `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+    return super.create(item);
+  }
+
+  override async update(id: string, item: any): Promise<void> {
+    if (!item.shipid) {
+      item.shipid = `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+    return super.update(id, item);
+  }
 }
 
 export class ShipmentPackingRepository extends BaseRepository<any> {

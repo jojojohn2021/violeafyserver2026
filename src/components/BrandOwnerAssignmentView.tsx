@@ -79,7 +79,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<SalesOrderRecord | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [modalDetailsLoading, setModalDetailsLoading] = useState<boolean>(false);
-  const [brandAssignments, setBrandAssignments] = useState<{ brandOwnerAssignid?: string; orderItemId: string; productId: string; brandOwnerId: string; brandOwnerName: string; contactEmail?: string; contactMobile?: string; whatsappNo?: string }[]>([]);
+  const [brandAssignments, setBrandAssignments] = useState<{ brandOwnerAssignid?: string; shipid?: string; orderItemId: string; productId: string; brandOwnerId: string; brandOwnerName: string; contactEmail?: string; contactMobile?: string; whatsappNo?: string }[]>([]);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   // Fetch Brand Owners Master List
@@ -325,6 +325,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
               );
               return {
                 brandOwnerAssignid: existingMatch?.brandOwnerAssignid || existingMatch?.id || `boa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                shipid: existingMatch?.shipid,
                 orderItemId: iKey,
                 productId: pKey,
                 brandOwnerId: existingMatch?.brandOwnerId || boObj?.id || '',
@@ -356,6 +357,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
       );
       return {
         brandOwnerAssignid: existingMatch?.brandOwnerAssignid || existingMatch?.id || `boa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        shipid: existingMatch?.shipid,
         orderItemId: iKey,
         productId: pKey,
         brandOwnerId: existingMatch?.brandOwnerId || boObj?.id || '',
@@ -464,6 +466,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
 
           const boaDoc = {
             id: a.brandOwnerAssignid,
+            shipid: a.shipid || `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             brandOwnerAssignid: a.brandOwnerAssignid,
             salesOrderId: String(selectedOrder.id),
             orderItemId: a.orderItemId,

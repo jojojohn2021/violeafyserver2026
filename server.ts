@@ -179,6 +179,10 @@ async function saveCollectionDoc(collection: string, item: any): Promise<void> {
   assertNoLegacyMedia(item);
   const id = String(item.id || item._id || Date.now());
 
+  if (collection === 'shipment_brand_owner_fulfilment' && !item.shipid) {
+    item.shipid = `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
   if (adminDb) {
     try {
       const payload = sanitizeFirestorePayload({ ...item });
@@ -1965,6 +1969,7 @@ const handleSyncShipmentBrandOwnerFulfilmentFromOrders = async (req: express.Req
 
           const newDoc = {
             id: newId,
+            shipid: `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             brandOwnerAssignid: newId,
             salesOrderId: String(order.id),
             orderItemId: iId,

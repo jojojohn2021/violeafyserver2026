@@ -866,8 +866,11 @@ export class OperationsService {
         ? rawChildren.map((c: any) => buildFulfilmentChild(c))
         : [buildFulfilmentChild()];
 
+      const shipid = (assignment as any).shipid || this.generateId('ship');
+
       const shipmentAssignmentItem = {
         id: brandOwnerAssignid,
+        shipid,
         brandOwnerAssignid,
         salesOrderId: orderId,
         productId: assignment.productId,
@@ -1121,6 +1124,9 @@ export class OperationsService {
         String(f.orderNo) === String(salesOrder?.orderNumber)
     );
     if (matchFul) {
+      if (!matchFul.shipid) {
+        matchFul.shipid = this.generateId('ship');
+      }
       matchFul.outstatus = cleanStatus === 'SHIPPED' ? 'SHIPPED' : 'READY_FOR_DISPATCH';
       matchFul.fulfillmentstatus = matchFul.outstatus;
       if (shipment.courierAgency) matchFul.outcouriername = shipment.courierAgency;

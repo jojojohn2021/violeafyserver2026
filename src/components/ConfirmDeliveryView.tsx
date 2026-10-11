@@ -1,0 +1,1175 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  CheckCircle2,
+  Search,
+  RefreshCw,
+  AlertTriangle,
+  Package,
+  Calendar,
+  X,
+  Filter,
+  Save,
+  Building2,
+  Clock,
+  Layers,
+  Info,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  User,
+  Phone,
+  FolderOpen,
+  HelpCircle,
+  Eye,
+  Check,
+  Truck,
+  ShieldCheck,
+} from 'lucide-react';
+import { useCRM } from '../store';
+import {
+  shipmentBrandOwnerAssignmentRepository,
+  productRepository,
+  orderRepository,
+} from '../repositories/repositories';
+import { apiFetch } from '../utils/apiFetch';
+import { ProductPerformance } from '../types';
+
+export type ConfirmDeliveryStatusOption = 'SHIPPED' | 'COMPLETED';
+
+export interface ConfirmDeliveryGridRow {
+  // Hidden fields
+  id: string; // id = hidden
+  brandOwnerAssignid: string; // brandOwnerAssignid = Hidden
+  orderItemId: string; // orderItemId = hidden
+  productId?: string;
+  salesOrderId?: string;
+  brandOwnerName: string; // brandOwnerName = hidden
+  orderpackingsize: string; // orderpackingsize = hidden
+  orderunit: string; // orderunit = hidden
+  orderqty: number; // orderqty = hidden
+
+  // Grid & Updation Screen fields
+  orderDate: string; // Order Date = sales_orders->createdAt (update value from sales_orders Linkid=salesOrderId)
+  orderNo: string; // Order No = salesOrderId
+  customerName: string; // Customer = salesorders->customerName (update value from sales_orders Linkid=salesOrderId)
+  customerMobile: string; // Mobile = salesorders->customerMobile (update value from sales_orders Linkid=salesOrderId)
+  productName: string; // Products = (update value from products->name link id -> orderItemId)
+  Outpackingsize: string; // Outpackingsize = disable (update value orderpackingsize)
+  outunit: string; // outunit = disable (update value orderunit)
+  outquantity: number; // outquantity = disable
+  outstatus: ConfirmDeliveryStatusOption; // outstatus = selection combo box (values -> SHIPPED | COMPLETED)
+  fulfillmentstatus: string; // fulfillmentstatus = outstatus
+  outpickupdate: string; // outpickupdate = disable
+  outcouriername: string; // outcouriername = disable
+  outcourierdocketno: string; // outcourierdocketno = disable
+  outdealyreasons: string; // outdealyreasons = maximum 70 characters
+  deliverydate: string; // deliverydate = systemdate by default
+  deliverycondition: string; // deliverycondition = maximum 50 characters
+
+  // Additional metadata
+  outpackdate?: string;
+  sku?: string;
+  rawDoc?: any;
+}
+
+export const ConfirmDeliveryView: React.FC = () => {
+  const { products: globalProducts, salesOrders: globalSalesOrders } = useCRM();
+  const [productsMaster, setProductsMaster] = useState<ProductPerformance[]>([]);
+  const [salesOrdersMaster, setSalesOrdersMaster] = useState<any[]>([]);
+  const [rows, setRows] = useState<ConfirmDeliveryGridRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+
+  // Search & Filter state
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'SHIPPED' | 'COMPLETED' | 'ALL'>('SHIPPED');
+
+  // Track recently updated records so they stay visible after saving/status change
+  const [recentlyUpdatedIds, setRecentlyUpdatedIds] = useState<Set<string>>(new Set());
+
+  // Pagination state
+  const [page, setPage] = useState<number>(1);
+  const [limit, setLimit] = useState<number>(10);
+
+  // Updation Screen Modal state (non-grid layout)
+  const [isEditScreenOpen, setIsEditScreenOpen] = useState<boolean>(false);
+  const [editingRow, setEditingRow] = useState<ConfirmDeliveryGridRow | null>(null);
+
+  // Confirmation Yes/No Message Box Modal state
+  const [confirmModalOpen, setConfirmModalOpen] = useState<boolean>(false);
+  const [pendingSaveRow, setPendingSaveRow] = useState<ConfirmDeliveryGridRow | null>(null);
+
+  // System Date helper (YYYY-MM-DD)
+  const getSystemDate = () => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const showStatus = (text: string, type: 'success' | 'error' | 'warning' = 'success') => {
+    setStatusMessage({ type, text });
+    setTimeout(() => setStatusMessage(null), 5000);
+  };
+
+  // 1. Fetch Products master list to map products->name linking id -> orderItemId
+  const fetchProductsMaster = async () => {
+    try {
+      if (Array.isArray(globalProducts) && globalProducts.length > 0) {
+        setProductsMaster(globalProducts);
+        return;
+      }
+      const prods = await productRepository.getAll();
+      if (Array.isArray(prods) && prods.length > 0) {
+        setProductsMaster(prods);
+        return;
+      }
+    } catch (err) {
+      console.warn('Direct product fetch fallback:', err);
+    }
+
+    try {
+      const res = await apiFetch('/api/db/products');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.docs)) {
+          setProductsMaster(data.docs);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch products master list:', err);
+    }
+  };
+
+  // 2. Fetch Sales Orders master list to link sales_orders->createdAt, customerName, customerMobile by salesOrderId
+  const fetchSalesOrdersMaster = async () => {
+    try {
+      if (Array.isArray(globalSalesOrders) && globalSalesOrders.length > 0) {
+        setSalesOrdersMaster(globalSalesOrders);
+        return;
+      }
+      const orders = await orderRepository.getAll();
+      if (Array.isArray(orders) && orders.length > 0) {
+        setSalesOrdersMaster(orders);
+        return;
+      }
+    } catch (err) {
+      console.warn('Direct sales order fetch fallback:', err);
+    }
+
+    try {
+      const res = await apiFetch('/api/db/sales_orders');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.docs)) {
+          setSalesOrdersMaster(data.docs);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch sales orders master list:', err);
+    }
+  };
+
+  // Helper to map orderItemId / productId to Product Name
+  const resolveProductName = (orderItemId: string, productId: string, fallbackName?: string): string => {
+    if (productsMaster.length > 0) {
+      const match = productsMaster.find(
+        (p) =>
+          String(p.id) === String(productId) ||
+          String(p.id) === String(orderItemId) ||
+          String(p.sku || '').toLowerCase() === String(productId || '').toLowerCase()
+      );
+      if (match?.name) return match.name;
+    }
+
+    if (salesOrdersMaster.length > 0) {
+      for (const order of salesOrdersMaster) {
+        const prods = Array.isArray(order.products) ? order.products : [];
+        const match = prods.find(
+          (p: any) =>
+            String(p.itemId || p.orderItemId || p.id || p.productId) === String(orderItemId) ||
+            String(p.productId || p.id) === String(productId)
+        );
+        if (match?.productName || match?.name) {
+          return match.productName || match.name;
+        }
+      }
+    }
+
+    return fallbackName || `Product (${productId || orderItemId || 'Item'})`;
+  };
+
+  // Helper to find sales_order by salesOrderId
+  const resolveSalesOrder = (salesOrderId: string) => {
+    if (!salesOrderId || salesOrdersMaster.length === 0) return null;
+    const cleanId = String(salesOrderId).toLowerCase().trim();
+    return salesOrdersMaster.find(
+      (so) =>
+        String(so.id).toLowerCase().trim() === cleanId ||
+        String(so.orderNumber || so.orderNo || '').toLowerCase().trim() === cleanId
+    );
+  };
+
+  // 3. Fetch records from shipment_brand_owner_fulfilment table filtering for fulfillmentstatus = SHIPPED
+  const fetchConfirmDeliveryRecords = async () => {
+    setLoading(true);
+    try {
+      let rawDocs: any[] = [];
+      const res = await apiFetch('/api/operations/shipment-brand-owner-fulfilment');
+      if (res.ok) {
+        const data = await res.json();
+        rawDocs = Array.isArray(data.docs) ? data.docs : [];
+      } else {
+        rawDocs = await shipmentBrandOwnerAssignmentRepository.getAll();
+      }
+
+      const systemDate = getSystemDate();
+
+      // Spec rule: List only the records satisfying fulfillmentstatus = SHIPPED (or outstatus = SHIPPED or recently updated)
+      const filteredDocs = rawDocs.filter((doc: any) => {
+        const docId = String(doc.id || '');
+        if (recentlyUpdatedIds.has(docId)) return true;
+
+        const fStatus = String(doc.fulfillmentstatus || doc.outstatus || doc.status || '').toUpperCase().trim();
+        const dStatus = String(doc.deliverystatus || '').toUpperCase().trim();
+        return fStatus === 'SHIPPED' || fStatus === 'COMPLETED' || dStatus === 'DELIVERED';
+      });
+
+      const mappedRows: ConfirmDeliveryGridRow[] = filteredDocs.map((doc: any, idx: number) => {
+        const docId = String(doc.id || `doc_${idx}`);
+        const brandOwnerAssignid = String(doc.brandOwnerAssignid || doc.id || `boa_${idx}`);
+        const orderItemId = String(doc.orderItemId || doc.itemId || `item_${doc.productId || idx}`);
+        const productId = String(doc.productId || '');
+        const brandOwnerName = String(doc.brandOwnerName || doc.brandOwner || 'Not Assigned');
+
+        const orderpackingsize = String(
+          doc.orderpackingsize ??
+          doc.packingsize ??
+          doc.orderfulfilment?.[0]?.orderpackingsize ??
+          'Standard'
+        );
+        const orderunit = String(
+          doc.orderunit ??
+          doc.unit ??
+          doc.orderfulfilment?.[0]?.orderunit ??
+          'PCS'
+        );
+        const orderqty = Number(
+          doc.orderqty !== undefined
+            ? doc.orderqty
+            : doc.quantity !== undefined
+            ? doc.quantity
+            : doc.orderfulfilment?.[0]?.orderqty ?? 1
+        );
+
+        // Outpackingsize = disable (update value orderpackingsize)
+        const Outpackingsize = String(doc.outpackingsize || doc.Outpackingsize || orderpackingsize);
+
+        // outunit = disable (update value orderunit)
+        const outunit = String(doc.outunit || orderunit);
+
+        // outquantity = disable
+        const outquantity = doc.outquantity !== undefined && doc.outquantity !== null
+          ? Number(doc.outquantity)
+          : orderqty;
+
+        // outstatus = selection combo box (values -> SHIPPED | COMPLETED)
+        const currentRawStatus = String(doc.outstatus || doc.fulfillmentstatus || 'SHIPPED').toUpperCase().trim();
+        const outstatus: ConfirmDeliveryStatusOption = currentRawStatus === 'COMPLETED' ? 'COMPLETED' : 'SHIPPED';
+
+        // fulfillmentstatus = outstatus
+        const fulfillmentstatus = outstatus;
+
+        // outpickupdate = disable
+        const outpickupdate = doc.outpickupdate ? String(doc.outpickupdate) : doc.pickupdate ? String(doc.pickupdate) : systemDate;
+
+        // outcouriername = disable
+        const outcouriername = String(doc.outcouriername || doc.couriername || doc.courier || 'Delhivery');
+
+        // outcourierdocketno = disable
+        const outcourierdocketno = String(doc.outcourierdocketno || doc.courierdocketno || doc.docketno || '');
+
+        // outdealyreasons = maximum 70 characters
+        const outdealyreasons = String(doc.outdealyreasons || '').slice(0, 70);
+
+        // deliverydate = systemdate by default
+        const deliverydate = doc.deliverydate || doc.outdeliverydate ? String(doc.deliverydate || doc.outdeliverydate) : systemDate;
+
+        // deliverycondition = maximum 50 characters
+        const deliverycondition = String(doc.deliverycondition || doc.outdeliverycondition || '').slice(0, 50);
+
+        // Products = (update value from products->name link id -> orderItemId)
+        const productName = resolveProductName(orderItemId, productId, doc.productName || doc.name);
+
+        // Link with sales_orders using Linkid=salesOrderId
+        const salesOrderId = String(doc.salesOrderId || doc.orderId || doc.orderNumber || '');
+        const matchedOrder = resolveSalesOrder(salesOrderId);
+
+        // Order Date = sales_orders->createdAt(update value from sales_orders Linkid=salesOrderId)
+        const rawCreatedAt = matchedOrder?.createdAt || doc.orderDate || doc.createdAt || '';
+        let orderDate = '';
+        if (rawCreatedAt) {
+          if (typeof rawCreatedAt === 'string' && rawCreatedAt.includes('T')) {
+            orderDate = rawCreatedAt.split('T')[0];
+          } else if (typeof rawCreatedAt === 'string') {
+            orderDate = rawCreatedAt;
+          } else if (rawCreatedAt && typeof rawCreatedAt.toDate === 'function') {
+            try {
+              orderDate = rawCreatedAt.toDate().toISOString().split('T')[0];
+            } catch (e) {
+              orderDate = String(rawCreatedAt);
+            }
+          } else if (rawCreatedAt && typeof rawCreatedAt.seconds === 'number') {
+            orderDate = new Date(rawCreatedAt.seconds * 1000).toISOString().split('T')[0];
+          }
+        }
+        if (!orderDate) {
+          orderDate = systemDate;
+        }
+
+        // Order No = salesOrderId
+        const orderNo = salesOrderId || String(doc.orderNo || doc.orderNumber || docId);
+
+        // Customer = salesorders->customerName(update value from sales_orders Linkid=salesOrderId)
+        const customerName = String(
+          matchedOrder?.customerName ||
+          doc.customerName ||
+          doc.customer ||
+          'N/A'
+        );
+
+        // Mobile = salesorders->customerMobile((update value from sales_orders Linkid=salesOrderId)
+        const customerMobile = String(
+          matchedOrder?.customerMobile ||
+          matchedOrder?.contactNo ||
+          doc.customerMobile ||
+          doc.contactNo ||
+          doc.mobile ||
+          'N/A'
+        );
+
+        const outpackdate = doc.outpackdate ? String(doc.outpackdate) : systemDate;
+
+        return {
+          id: docId,
+          brandOwnerAssignid,
+          orderItemId,
+          productId,
+          salesOrderId,
+          brandOwnerName,
+          orderpackingsize,
+          orderunit,
+          orderqty,
+          orderDate,
+          orderNo,
+          customerName,
+          customerMobile,
+          productName,
+          Outpackingsize,
+          outunit,
+          outquantity,
+          outstatus,
+          fulfillmentstatus,
+          outpickupdate,
+          outcouriername,
+          outcourierdocketno,
+          outdealyreasons,
+          deliverydate,
+          deliverycondition,
+          outpackdate,
+          sku: doc.sku || '',
+          rawDoc: doc,
+        };
+      });
+
+      setRows(mappedRows);
+    } catch (err: any) {
+      console.error('Failed to load delivery confirmation records:', err);
+      showStatus(err?.message || 'Error loading records from shipment_brand_owner_fulfilment', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProductsMaster();
+    fetchSalesOrdersMaster();
+  }, []);
+
+  useEffect(() => {
+    fetchConfirmDeliveryRecords();
+  }, [productsMaster, salesOrdersMaster]);
+
+  // Handle opening the new updation screen modal for a selected row
+  const handleOpenEditScreen = (row: ConfirmDeliveryGridRow) => {
+    setEditingRow({ ...row });
+    setIsEditScreenOpen(true);
+  };
+
+  // Updation Screen Field change handlers
+  const handleEditFieldChange = (field: keyof ConfirmDeliveryGridRow, val: any) => {
+    if (!editingRow) return;
+    setEditingRow((prev) => (prev ? { ...prev, [field]: val } : null));
+  };
+
+  const handleEditStatusChange = (newStatus: ConfirmDeliveryStatusOption) => {
+    if (!editingRow) return;
+    setEditingRow((prev) =>
+      prev
+        ? {
+            ...prev,
+            outstatus: newStatus,
+            fulfillmentstatus: newStatus,
+          }
+        : null
+    );
+  };
+
+  // Grid level row field changes
+  const handleRowStatusChange = (id: string, newStatus: ConfirmDeliveryStatusOption) => {
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, outstatus: newStatus, fulfillmentstatus: newStatus } : r))
+    );
+  };
+
+  const handleRowDelayReasonChange = (id: string, text: string) => {
+    const sanitized = text.slice(0, 70);
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, outdealyreasons: sanitized } : r)));
+  };
+
+  const handleRowDeliveryDateChange = (id: string, dateStr: string) => {
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, deliverydate: dateStr } : r)));
+  };
+
+  const handleRowDeliveryConditionChange = (id: string, text: string) => {
+    const sanitized = text.slice(0, 50);
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, deliverycondition: sanitized } : r)));
+  };
+
+  // Click Save on grid row or in edit modal -> prompt confirmation modal
+  const promptSaveConfirmation = (rowToSave: ConfirmDeliveryGridRow) => {
+    setPendingSaveRow({ ...rowToSave });
+    setConfirmModalOpen(true);
+  };
+
+  // Save selected record to database upon user Yes confirmation
+  const executeSaveRecord = async () => {
+    if (!pendingSaveRow) return;
+
+    const row = pendingSaveRow;
+    setSavingId(row.id);
+    setConfirmModalOpen(false);
+
+    try {
+      const now = new Date().toISOString();
+
+      // Base updated record for shipment_brand_owner_fulfilment
+      const updatedDoc: any = {
+        ...(row.rawDoc || {}),
+        id: row.id,
+        brandOwnerAssignid: row.brandOwnerAssignid,
+        orderItemId: row.orderItemId,
+        itemId: row.orderItemId,
+        productId: row.productId || '',
+        productName: row.productName,
+        brandOwnerName: row.brandOwnerName,
+        salesOrderId: row.salesOrderId || '',
+        orderpackingsize: row.orderpackingsize,
+        orderunit: row.orderunit,
+        orderqty: row.orderqty,
+        Outpackingsize: row.Outpackingsize,
+        outpackingsize: row.Outpackingsize,
+        outunit: row.outunit,
+        outquantity: row.outquantity,
+        outpickupdate: row.outpickupdate,
+        pickupdate: row.outpickupdate,
+        outcouriername: row.outcouriername,
+        couriername: row.outcouriername,
+        outcourierdocketno: row.outcourierdocketno,
+        courierdocketno: row.outcourierdocketno,
+        outdealyreasons: row.outdealyreasons,
+        outstatus: row.outstatus,
+        fulfillmentstatus: row.outstatus, // fulfillmentstatus = outstatus
+        status: row.outstatus === 'COMPLETED' ? 'DELIVERED' : (row.rawDoc?.status || 'ASSIGNED'),
+        deliverystatus: row.outstatus === 'COMPLETED' ? 'DELIVERED' : (row.rawDoc?.deliverystatus || 'IN_TRANSIT'),
+        deliverydate: row.deliverydate || getSystemDate(),
+        outdeliverydate: row.deliverydate || getSystemDate(),
+        deliverycondition: row.deliverycondition || '',
+        outdeliverycondition: row.deliverycondition || '',
+        updatedAt: now,
+      };
+
+      // 1. Try backend authoritative API endpoint
+      let savedSuccessfully = false;
+      try {
+        const apiRes = await apiFetch('/api/operations/shipment-brand-owner-fulfilment/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            record: updatedDoc,
+          }),
+        });
+        const apiData = await apiRes.json();
+        if (apiRes.ok && apiData.success) {
+          savedSuccessfully = true;
+        }
+      } catch (apiErr) {
+        console.warn('API save fallback to direct repository:', apiErr);
+      }
+
+      // 2. Direct Firestore fallback repository update
+      if (!savedSuccessfully) {
+        await shipmentBrandOwnerAssignmentRepository.update(row.id, updatedDoc);
+      }
+
+      // Update the values in local state grid rows (keep status changes after save)
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                ...row,
+                fulfillmentstatus: row.outstatus,
+                rawDoc: updatedDoc,
+              }
+            : r
+        )
+      );
+
+      // Track recently updated row so it stays visible in grid
+      setRecentlyUpdatedIds((prev) => new Set(prev).add(row.id));
+
+      showStatus(
+        `Delivery Confirmation saved successfully for Order #${row.orderNo}! (Status: ${row.outstatus})`,
+        'success'
+      );
+
+      // Close updation screen if it was open
+      if (isEditScreenOpen) {
+        setIsEditScreenOpen(false);
+        setEditingRow(null);
+      }
+    } catch (err: any) {
+      console.error('Failed to save delivery confirmation record:', err);
+      showStatus(err?.message || 'Failed to save record into database.', 'error');
+    } finally {
+      setSavingId(null);
+      setPendingSaveRow(null);
+    }
+  };
+
+  // Filtered & Search Rows
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      // Status filter
+      if (statusFilter !== 'ALL' && row.outstatus !== statusFilter) {
+        // Keep recently updated records visible regardless of filter
+        if (!recentlyUpdatedIds.has(row.id)) {
+          return false;
+        }
+      }
+
+      // Search Query
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      return (
+        row.orderNo.toLowerCase().includes(q) ||
+        row.customerName.toLowerCase().includes(q) ||
+        row.customerMobile.toLowerCase().includes(q) ||
+        row.productName.toLowerCase().includes(q) ||
+        row.outcourierdocketno.toLowerCase().includes(q) ||
+        row.outcouriername.toLowerCase().includes(q) ||
+        row.deliverycondition.toLowerCase().includes(q)
+      );
+    });
+  }, [rows, statusFilter, searchQuery, recentlyUpdatedIds]);
+
+  // Pagination calculation
+  const totalPages = Math.ceil(filteredRows.length / limit) || 1;
+  const paginatedRows = useMemo(() => {
+    const start = (page - 1) * limit;
+    return filteredRows.slice(start, start + limit);
+  }, [filteredRows, page, limit]);
+
+  return (
+    <div className="space-y-6">
+      {/* Top Header & Title */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-emerald-900 text-white p-6 rounded-2xl shadow-lg border border-emerald-800">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <ShieldCheck className="w-8 h-8 text-emerald-400" />
+            <h1 className="text-2xl font-black uppercase tracking-tight">Confirm Delivery</h1>
+          </div>
+          <p className="text-xs text-emerald-200 mt-1 font-medium">
+            Record final delivery details & customer receiving conditions for shipped packages in <code className="bg-emerald-950 px-1.5 py-0.5 rounded text-emerald-300 font-mono">shipment_brand_owner_fulfilment</code>.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={fetchConfirmDeliveryRecords}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-extrabold uppercase rounded-xl transition cursor-pointer border border-emerald-700 active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh List
+          </button>
+        </div>
+      </div>
+
+      {/* Status Alert Banner */}
+      {statusMessage && (
+        <div
+          className={`p-4 rounded-xl flex items-center justify-between gap-3 text-xs font-extrabold shadow-sm border ${
+            statusMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : statusMessage.type === 'error'
+              ? 'bg-rose-50 text-rose-800 border-rose-200'
+              : 'bg-amber-50 text-amber-800 border-amber-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {statusMessage.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : statusMessage.type === 'error' ? (
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+            ) : (
+              <Info className="w-5 h-5 text-amber-600 shrink-0" />
+            )}
+            <span>{statusMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setStatusMessage(null)}
+            className="p-1 hover:bg-black/5 rounded-lg transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Filter & Search Toolbar */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+        {/* Search Bar */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search Order No, Customer, Mobile, Courier Docket, Condition..."
+            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Filter Controls */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Status Filter */}
+          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold">
+            <Filter className="w-3.5 h-3.5 text-slate-500" />
+            <span className="text-slate-500 font-extrabold uppercase text-[10px]">Status:</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as any);
+                setPage(1);
+              }}
+              className="bg-transparent font-bold text-slate-700 focus:outline-none cursor-pointer"
+            >
+              <option value="SHIPPED">SHIPPED Only</option>
+              <option value="COMPLETED">COMPLETED Only</option>
+              <option value="ALL">All Records</option>
+            </select>
+          </div>
+
+          <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+            Total Records: <span className="text-emerald-700 font-extrabold">{filteredRows.length}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Grid View Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="py-20 flex flex-col items-center justify-center gap-3 text-slate-400">
+            <RefreshCw className="w-8 h-8 animate-spin text-emerald-600" />
+            <p className="text-xs font-extrabold uppercase tracking-wider">Loading Shipped Delivery Records...</p>
+          </div>
+        ) : paginatedRows.length === 0 ? (
+          <div className="py-20 flex flex-col items-center justify-center gap-3 text-slate-400">
+            <Package className="w-12 h-12 text-slate-300" />
+            <p className="text-sm font-extrabold text-slate-600 uppercase">No Shipped Records Found</p>
+            <p className="text-xs text-slate-400 max-w-sm text-center">
+              There are currently no records with status <code className="bg-slate-100 text-slate-600 px-1 rounded font-mono">fulfillmentstatus = SHIPPED</code> in table <code className="bg-slate-100 text-slate-600 px-1 rounded font-mono">shipment_brand_owner_fulfilment</code>.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider border-b border-slate-800">
+                  <th className="py-3.5 px-4 sticky left-0 bg-slate-900 z-10">Order Info</th>
+                  <th className="py-3.5 px-4">Ship Date</th>
+                  <th className="py-3.5 px-4">Customer & Contact</th>
+                  <th className="py-3.5 px-4">Product</th>
+                  <th className="py-3.5 px-4">Packing / Unit / Qty</th>
+                  <th className="py-3.5 px-4">Courier Info</th>
+                  <th className="py-3.5 px-4 text-center sticky right-0 bg-slate-900 z-10">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 text-xs font-medium">
+                {paginatedRows.map((row) => {
+                  const isCompleted = row.outstatus === 'COMPLETED' || row.fulfillmentstatus === 'COMPLETED';
+
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`transition ${
+                        isCompleted
+                          ? 'bg-emerald-100/90 hover:bg-emerald-100 font-semibold text-emerald-950 border-l-4 border-l-emerald-600 shadow-xs'
+                          : recentlyUpdatedIds.has(row.id)
+                          ? 'bg-emerald-50/50 hover:bg-emerald-50'
+                          : 'hover:bg-slate-50/80'
+                      }`}
+                    >
+                      {/* Order Info (Order Date, Order No) */}
+                      <td className={`py-3.5 px-4 sticky left-0 z-10 shadow-xs ${isCompleted ? 'bg-emerald-100' : 'bg-white'}`}>
+                        <div className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>#{row.orderNo}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                          <span>Date: {row.orderDate || 'N/A'}</span>
+                        </div>
+                      </td>
+
+                      {/* Ship Date */}
+                      <td className="py-3.5 px-4 font-mono text-slate-700 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{row.outpickupdate || 'N/A'}</span>
+                        </div>
+                      </td>
+
+                      {/* Customer & Mobile */}
+                      <td className="py-3.5 px-4">
+                        <div className="font-extrabold text-slate-800 text-xs flex items-center gap-1">
+                          <User className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{row.customerName}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center gap-1">
+                          <Phone className="w-3 h-3 text-slate-400" />
+                          <span>{row.customerMobile}</span>
+                        </div>
+                      </td>
+
+                      {/* Product Name */}
+                      <td className="py-3.5 px-4 max-w-xs">
+                        <div className="font-extrabold text-slate-900 text-xs truncate" title={row.productName}>
+                          {row.productName}
+                        </div>
+                        {row.sku && (
+                          <div className="text-[10px] text-slate-400 font-mono truncate">
+                            SKU: {row.sku}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Outpackingsize / outunit / outquantity (Disabled) */}
+                      <td className="py-3.5 px-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 text-[11px]">
+                            <span className="text-slate-400 font-bold uppercase text-[9px]">Packing:</span>
+                            <span className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                              {row.Outpackingsize}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                            <span>Unit: <strong className="text-slate-700">{row.outunit}</strong></span>
+                            <span>Qty: <strong className="text-slate-700">{row.outquantity}</strong></span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Courier Info (Disabled outcouriername & outcourierdocketno) */}
+                      <td className="py-3.5 px-4">
+                        <div className="font-bold text-slate-800 text-xs flex items-center gap-1">
+                          <Truck className="w-3.5 h-3.5 text-slate-500" />
+                          <span>{row.outcouriername || 'N/A'}</span>
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+                          Docket #: <span className="font-bold text-slate-700">{row.outcourierdocketno || 'N/A'}</span>
+                        </div>
+                      </td>
+
+                      {/* Actions: Open Button only */}
+                      <td className={`py-3.5 px-4 sticky right-0 z-10 shadow-xs text-center ${isCompleted ? 'bg-emerald-100' : 'bg-white'}`}>
+                        <div className="flex items-center justify-center">
+                          {/* Open Button -> opens updation screen modal */}
+                          <button
+                            onClick={() => handleOpenEditScreen(row)}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-extrabold text-xs uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5 border border-slate-300 shadow-2xs active:scale-95"
+                            title="Open detail screen for updation"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Open</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Grid Footer Pagination */}
+        {filteredRows.length > 0 && (
+          <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+              <span>Show</span>
+              <select
+                value={limit}
+                onChange={(e) => {
+                  setLimit(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none"
+              >
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+              <span>entries per page</span>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <span>
+                Page <strong className="text-slate-900">{page}</strong> of{' '}
+                <strong className="text-slate-900">{totalPages}</strong>
+              </span>
+              <div className="flex items-center gap-1 ml-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="p-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-40 transition cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="p-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-40 transition cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* UPDATION SCREEN MODAL (Non-Grid Form Layout for Updation) */}
+      {/* ========================================================================= */}
+      {isEditScreenOpen && editingRow && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-emerald-900 text-white p-6 flex items-center justify-between border-b border-emerald-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-800 rounded-xl border border-emerald-700">
+                  <ShieldCheck className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black uppercase tracking-tight">Confirm Delivery Details</h2>
+                  <p className="text-xs text-emerald-200 font-mono mt-0.5">Order No: #{editingRow.orderNo}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsEditScreenOpen(false);
+                  setEditingRow(null);
+                }}
+                className="p-2 hover:bg-emerald-800 rounded-xl text-emerald-200 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form Body (Non-Grid Layout) */}
+            <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+              {/* Order & Customer Information Section (Read-Only) */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b border-slate-200 pb-2">
+                  <FileText className="w-4 h-4 text-emerald-600" />
+                  <span>Order & Customer Summary</span>
+                </h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Order Date:</span>
+                    <p className="font-extrabold text-slate-800 font-mono">{editingRow.orderDate}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Order No:</span>
+                    <p className="font-extrabold text-slate-800 font-mono">#{editingRow.orderNo}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Customer:</span>
+                    <p className="font-extrabold text-slate-800">{editingRow.customerName}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Mobile:</span>
+                    <p className="font-extrabold text-slate-800 font-mono">{editingRow.customerMobile}</p>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Products:</span>
+                    <p className="font-extrabold text-slate-900">{editingRow.productName}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Package & Courier Information (Disabled Fields) */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b border-slate-200 pb-2">
+                  <Truck className="w-4 h-4 text-indigo-600" />
+                  <span>Shipment & Dispatch Details (Disabled)</span>
+                </h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Out Packing Size:</span>
+                    <input
+                      type="text"
+                      disabled
+                      value={editingRow.Outpackingsize}
+                      className="w-full mt-1 px-3 py-1.5 bg-slate-200/80 border border-slate-300 rounded-xl font-bold text-slate-600 text-xs cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Out Unit:</span>
+                    <input
+                      type="text"
+                      disabled
+                      value={editingRow.outunit}
+                      className="w-full mt-1 px-3 py-1.5 bg-slate-200/80 border border-slate-300 rounded-xl font-bold text-slate-600 text-xs cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Out Quantity:</span>
+                    <input
+                      type="text"
+                      disabled
+                      value={editingRow.outquantity}
+                      className="w-full mt-1 px-3 py-1.5 bg-slate-200/80 border border-slate-300 rounded-xl font-bold text-slate-600 text-xs cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Ship Date (Pickupdate):</span>
+                    <input
+                      type="text"
+                      disabled
+                      value={editingRow.outpickupdate}
+                      className="w-full mt-1 px-3 py-1.5 bg-slate-200/80 border border-slate-300 rounded-xl font-mono font-bold text-slate-600 text-xs cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Courier Name:</span>
+                    <input
+                      type="text"
+                      disabled
+                      value={editingRow.outcouriername}
+                      className="w-full mt-1 px-3 py-1.5 bg-slate-200/80 border border-slate-300 rounded-xl font-bold text-slate-600 text-xs cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Docket Number:</span>
+                    <input
+                      type="text"
+                      disabled
+                      value={editingRow.outcourierdocketno}
+                      className="w-full mt-1 px-3 py-1.5 bg-slate-200/80 border border-slate-300 rounded-xl font-mono font-bold text-slate-600 text-xs cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Editable Fields Form */}
+              <div className="space-y-4 pt-2">
+                <h3 className="text-xs font-black uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Update Delivery Status & Condition</span>
+                </h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* outstatus combo box (SHIPPED | COMPLETED) */}
+                  <div>
+                    <label className="block text-xs font-black uppercase text-slate-700 mb-1">
+                      Fulfillment Status (outstatus):
+                    </label>
+                    <select
+                      value={editingRow.outstatus}
+                      onChange={(e) => handleEditStatusChange(e.target.value as ConfirmDeliveryStatusOption)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-extrabold text-xs text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="SHIPPED">SHIPPED</option>
+                      <option value="COMPLETED">COMPLETED</option>
+                    </select>
+                    <span className="text-[10px] text-slate-400 font-mono mt-1 block">
+                      fulfillmentstatus will automatically equal outstatus
+                    </span>
+                  </div>
+
+                  {/* deliverydate (Default systemDate) */}
+                  <div>
+                    <label className="block text-xs font-black uppercase text-slate-700 mb-1">
+                      Delivery Date:
+                    </label>
+                    <input
+                      type="date"
+                      value={editingRow.deliverydate}
+                      onChange={(e) => handleEditFieldChange('deliverydate', e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-mono font-semibold text-xs text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* deliverycondition (max 50 chars) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-black uppercase text-slate-700">
+                      Delivery Condition (Max 50 characters):
+                    </label>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {editingRow.deliverycondition.length}/50
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={50}
+                    value={editingRow.deliverycondition}
+                    onChange={(e) => handleEditFieldChange('deliverycondition', e.target.value.slice(0, 50))}
+                    placeholder="Enter customer receiving condition (e.g. Delivered safely in good condition)"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* outdealyreasons (max 70 chars) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-black uppercase text-slate-700">
+                      Delay Reasons (Max 70 characters):
+                    </label>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {editingRow.outdealyreasons.length}/70
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={70}
+                    value={editingRow.outdealyreasons}
+                    onChange={(e) => handleEditFieldChange('outdealyreasons', e.target.value.slice(0, 70))}
+                    placeholder="Enter any delay reasons if applicable"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Bottom Action Bar (Close & Save Buttons) */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditScreenOpen(false);
+                  setEditingRow(null);
+                }}
+                className="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-slate-100 transition cursor-pointer"
+              >
+                Close
+              </button>
+
+              <button
+                type="button"
+                onClick={() => promptSaveConfirmation(editingRow)}
+                className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-md transition cursor-pointer flex items-center gap-2 active:scale-95"
+              >
+                <Save className="w-4 h-4" />
+                <span>Save</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* CONFIRMATION POPUP MODAL (Popup msg box to confirm save Yes/No) */}
+      {/* ========================================================================= */}
+      {confirmModalOpen && pendingSaveRow && (
+        <div className="fixed inset-0 z-[60] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-emerald-800">
+              <div className="p-3 bg-emerald-100 rounded-2xl shrink-0">
+                <HelpCircle className="w-6 h-6 text-emerald-700" />
+              </div>
+              <div>
+                <h3 className="text-base font-black uppercase tracking-tight">Confirm Save Data</h3>
+                <p className="text-xs text-slate-500 font-medium">Order #{pendingSaveRow.orderNo}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              Are you sure you want to update delivery confirmation details for order item{' '}
+              <strong className="text-slate-900 font-bold">{pendingSaveRow.productName}</strong> in table{' '}
+              <code className="bg-slate-200 text-slate-800 px-1 rounded font-mono">shipment_brand_owner_fulfilment</code>?
+              <br />
+              <span className="mt-2 block text-[11px] font-extrabold text-emerald-700">
+                Status: {pendingSaveRow.outstatus} | Date: {pendingSaveRow.deliverydate}
+              </span>
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmModalOpen(false);
+                  setPendingSaveRow(null);
+                }}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer"
+              >
+                No / Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={executeSaveRecord}
+                className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-md transition cursor-pointer flex items-center gap-2 active:scale-95"
+              >
+                <Check className="w-4 h-4" />
+                <span>Yes, Confirm Save</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ConfirmDeliveryView;

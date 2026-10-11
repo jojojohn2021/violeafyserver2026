@@ -209,6 +209,7 @@ export class ShipmentOperationsService {
       courierdocketno?: string;
       fulfillmentstatus?: string;
       deliverydate?: string;
+      deliverycondition?: string;
       deliverystatus?: string;
       deliverynote?: string;
       emailssenddetails?: any;
@@ -281,6 +282,7 @@ export class ShipmentOperationsService {
       courierdocketno: payload.courierdocketno || payload.docketno || '',
       fulfillmentstatus: payload.fulfillmentstatus || 'ASSIGNED',
       deliverydate: payload.deliverydate || '',
+      deliverycondition: payload.deliverycondition || '',
       deliverystatus: payload.deliverystatus || '',
       deliverynote: payload.deliverynote || '',
       emailssenddetails: payload.emailssenddetails || null,
@@ -317,6 +319,7 @@ export class ShipmentOperationsService {
       courierdocketno?: string;
       fulfillmentstatus?: string;
       deliverydate?: string;
+      deliverycondition?: string;
       deliverystatus?: string;
       deliverynote?: string;
       emailssenddetails?: any;
@@ -382,6 +385,7 @@ export class ShipmentOperationsService {
       courierdocketno: newPayload.courierdocketno || newPayload.docketno || existing.courierdocketno || existing.docketno || '',
       fulfillmentstatus: newPayload.fulfillmentstatus || existing.fulfillmentstatus || 'ASSIGNED',
       deliverydate: newPayload.deliverydate || existing.deliverydate || '',
+      deliverycondition: newPayload.deliverycondition || existing.deliverycondition || '',
       deliverystatus: newPayload.deliverystatus || existing.deliverystatus || '',
       deliverynote: newPayload.deliverynote || existing.deliverynote || '',
       emailssenddetails: newPayload.emailssenddetails || existing.emailssenddetails || null,
@@ -432,6 +436,10 @@ export class ShipmentOperationsService {
       outdealyreasons: childRecord.outdealyreasons || '',
       outexpecteddateofdespatchdate: childRecord.outexpecteddateofdespatchdate || '',
       outemailssenddetails: childRecord.outemailssenddetails || null,
+      outdeliverydate: childRecord.outdeliverydate || childRecord.deliverydate || '',
+      outdeliverycondition: childRecord.outdeliverycondition || childRecord.deliverycondition || '',
+      deliverydate: childRecord.deliverydate || childRecord.outdeliverydate || '',
+      deliverycondition: childRecord.deliverycondition || childRecord.outdeliverycondition || '',
       createdAt: childRecord.createdAt || now,
       updatedAt: now,
     };

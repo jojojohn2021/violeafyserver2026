@@ -22,6 +22,7 @@ import { OrderOperationsView } from './components/OrderOperationsView';
 import { BrandOwnerAssignmentView } from './components/BrandOwnerAssignmentView';
 import CompletePackingView from './components/CompletePackingView';
 import CreateShipmentView from './components/CreateShipmentView';
+import ConfirmDeliveryView from './components/ConfirmDeliveryView';
 
 import { 
   BarChart3, Users, Briefcase, Calendar, TrendingUp, MessageSquare, 
@@ -126,7 +127,7 @@ function CRMAppShell() {
     { id: 'brand_owner_assignment', name: 'Brand Owner Assignment', icon: UserCheck, moduleCheck: 'Sales Orders' },
     { id: 'complete_packing', name: 'COMPLETE PACKING', icon: PackageCheck, moduleCheck: 'Sales Orders' },
     { id: 'create_shipment', name: 'CREATE SHIPMENT', icon: Truck, moduleCheck: 'Sales Orders' },
-    { id: 'confirm_delivery', name: 'Confirm Delivery', icon: CheckCircle2, moduleCheck: 'Sales Orders' },
+    { id: 'confirm_delivery', name: 'CONFIRM DELIVERY', icon: CheckCircle2, moduleCheck: 'Sales Orders' },
     { id: 'process_return', name: 'Process Return', icon: RotateCcw, moduleCheck: 'Sales Orders' },
     { id: 'order_operations', name: 'All Operations Summary', icon: Package, moduleCheck: 'Sales Orders' },
     { id: 'customers', name: 'Customer Directory', icon: UserCheck, moduleCheck: 'Customer Directory' },
@@ -258,7 +259,7 @@ function CRMAppShell() {
               {activeTab === 'brand_owner_assignment' && <BrandOwnerAssignmentView />}
               {activeTab === 'complete_packing' && <CompletePackingView />}
               {activeTab === 'create_shipment' && <CreateShipmentView />}
-              {activeTab === 'confirm_delivery' && <OrderOperationsView initialStage="delivery" />}
+              {activeTab === 'confirm_delivery' && <ConfirmDeliveryView />}
               {activeTab === 'process_return' && <OrderOperationsView initialStage="returns" />}
               {activeTab === 'order_operations' && <OrderOperationsView initialStage="all" />}
               {activeTab === 'schedules' && <TasksCalendarView />}

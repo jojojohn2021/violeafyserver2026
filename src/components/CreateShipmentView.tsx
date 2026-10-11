@@ -26,6 +26,7 @@ import {
   ArrowRight,
   ExternalLink,
   HelpCircle,
+  MessageSquare,
 } from 'lucide-react';
 import { useCRM } from '../store';
 import {
@@ -109,6 +110,56 @@ export const CreateShipmentView: React.FC = () => {
 
   // Confirmation Yes/No Message Box Modal state
   const [confirmModalOpen, setConfirmModalOpen] = useState<boolean>(false);
+
+  // WhatsApp Notification State
+  const [waSending, setWaSending] = useState<boolean>(false);
+  const [waStatusMsg, setWaStatusMsg] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+
+  const handleSendWhatsAppNotification = async (row: CreateShipmentGridRow) => {
+    const orderId = row.salesOrderId || row.orderNo;
+    if (!orderId) {
+      setWaStatusMsg({ type: 'error', text: 'No order ID linked to this shipment record.' });
+      return;
+    }
+    setWaSending(true);
+    setWaStatusMsg(null);
+    try {
+      const stage = row.outstatus === 'SHIPPED' ? 'Shipped' : 'Create Shipment';
+      const res = await apiFetch(`/api/operations/orders/${orderId}/send-whatsapp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stage,
+          metadata: {
+            courierName: row.outcouriername,
+            trackingNumber: row.outcourierdocketno,
+            status: row.outstatus,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setWaStatusMsg({
+          type: 'success',
+          text: data.skipped
+            ? `WhatsApp skipped: ${data.message || 'Notification already sent for this stage.'}`
+            : `WhatsApp message sent successfully to customer! Message ID: ${data.messageId || 'accepted'}`,
+        });
+      } else {
+        setWaStatusMsg({
+          type: 'error',
+          text: data.error || 'Failed to send WhatsApp message. Check Firestore WhatsApp configuration.',
+        });
+      }
+    } catch (err: any) {
+      setWaStatusMsg({
+        type: 'error',
+        text: `Network error: ${err.message || 'Unable to communicate with server'}`,
+      });
+    } finally {
+      setWaSending(false);
+    }
+  };
 
   // System Date helper (YYYY-MM-DD)
   const getSystemDate = () => {
@@ -426,6 +477,7 @@ export const CreateShipmentView: React.FC = () => {
   // Handle opening the update screen for a selected row
   const handleOpenEditScreen = (row: CreateShipmentGridRow) => {
     setEditingRow({ ...row });
+    setWaStatusMsg(null);
     setIsEditScreenOpen(true);
   };
 
@@ -509,6 +561,7 @@ export const CreateShipmentView: React.FC = () => {
 
       // 1. Try backend authoritative API
       let savedSuccessfully = false;
+      let notifFeedback = '';
       try {
         const apiRes = await apiFetch('/api/operations/shipment-brand-owner-fulfilment/save', {
           method: 'POST',
@@ -520,6 +573,9 @@ export const CreateShipmentView: React.FC = () => {
         const apiData = await apiRes.json();
         if (apiRes.ok && apiData.success) {
           savedSuccessfully = true;
+          if (apiData.notification?.status === 'dispatched') {
+            notifFeedback = ' • WhatsApp notification dispatched to customer!';
+          }
         }
       } catch (apiErr) {
         console.warn('API save fallback to direct repository:', apiErr);
@@ -549,8 +605,8 @@ export const CreateShipmentView: React.FC = () => {
 
       showStatus(
         row.outstatus === 'SHIPPED'
-          ? `Shipment marked as SHIPPED with Docket #${row.outcourierdocketno} via ${row.outcouriername}!`
-          : `Shipment details saved successfully with Docket #${row.outcourierdocketno}.`,
+          ? `Shipment marked as SHIPPED with Docket #${row.outcourierdocketno} via ${row.outcouriername}!${notifFeedback}`
+          : `Shipment details saved successfully with Docket #${row.outcourierdocketno}.${notifFeedback}`,
         'success'
       );
 
@@ -1365,6 +1421,68 @@ export const CreateShipmentView: React.FC = () => {
                       className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Card 4: Customer WhatsApp Notification & Verification */}
+              <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-xl border border-emerald-200 dark:border-emerald-800/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black uppercase text-emerald-800 dark:text-emerald-300 tracking-wider flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                    Customer WhatsApp Notification
+                  </h3>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/80 text-emerald-800 dark:text-emerald-200 font-mono border border-emerald-300 dark:border-emerald-700">
+                    {editingRow.customerMobile || 'No Phone on File'}
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Send transactional WhatsApp template notification to customer with shipment status, tracking number, and courier partner via Meta WhatsApp Cloud API.
+                </p>
+
+                {waStatusMsg && (
+                  <div
+                    className={`p-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 ${
+                      waStatusMsg.type === 'success'
+                        ? 'bg-emerald-100/90 border-emerald-300 text-emerald-900 dark:bg-emerald-950 dark:border-emerald-700 dark:text-emerald-200'
+                        : 'bg-rose-100/90 border-rose-300 text-rose-900 dark:bg-rose-950 dark:border-rose-700 dark:text-rose-200'
+                    }`}
+                  >
+                    {waStatusMsg.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>{waStatusMsg.text}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    disabled={waSending || !editingRow.customerMobile || editingRow.customerMobile === 'N/A'}
+                    onClick={() => handleSendWhatsAppNotification(editingRow)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Send official WhatsApp template notification via Meta Cloud API"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{waSending ? 'Sending WhatsApp...' : 'Send WhatsApp Notification'}</span>
+                  </button>
+
+                  {editingRow.customerMobile && editingRow.customerMobile !== 'N/A' && (
+                    <a
+                      href={`https://wa.me/${editingRow.customerMobile.replace(/\D/g, '')}?text=${encodeURIComponent(
+                        `Hello ${editingRow.customerName}, your order #${editingRow.orderNo} for ${editingRow.productName} status has been updated to ${editingRow.outstatus}. Courier: ${editingRow.outcouriername}${editingRow.outcourierdocketno ? `, Docket: ${editingRow.outcourierdocketno}` : ''}. Thank you for choosing VioLeafy!`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition active:scale-95 cursor-pointer"
+                      title="Open chat in WhatsApp Web / Desktop app"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Chat on WhatsApp Web</span>
+                    </a>
+                  )}
                 </div>
               </div>
             </div>

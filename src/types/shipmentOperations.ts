@@ -53,6 +53,10 @@ export interface ShipmentBrandOwnerFulfilmentChildRecord {
   outdealyreasons?: string;
   outexpecteddateofdespatchdate?: string;
   outemailssenddetails?: string | Record<string, any> | any[];
+  outdeliverydate?: string;
+  outdeliverycondition?: string;
+  deliverydate?: string;
+  deliverycondition?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -70,6 +74,7 @@ export interface ShipmentBrandOwnerAssignment extends ShipmentOperationalCommon 
   courierdocketno?: string;
   fulfillmentstatus?: string;
   deliverydate?: string;
+  deliverycondition?: string;
   deliverystatus?: string;
   deliverynote?: string;
   emailssenddetails?: string | Record<string, any> | any[];

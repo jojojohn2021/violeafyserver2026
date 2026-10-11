@@ -25,7 +25,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useCRM } from '../store';
-import { shipmentBrandOwnerAssignmentRepository, productRepository } from '../repositories/repositories';
+import { shipmentBrandOwnerAssignmentRepository, productRepository, orderRepository } from '../repositories/repositories';
 import { apiFetch } from '../utils/apiFetch';
 import { ProductPerformance } from '../types';
 
@@ -155,7 +155,7 @@ export const CompletePackingView: React.FC = () => {
   };
 
   // 2. Fetch records from Firestore table shipment_brand_owner_fulfilment
-  const fetchFulfilmentRecords = async () => {
+  const fetchFulfilmentRecords = async (skipAutoSync = false) => {
     setLoading(true);
     const systemDate = getSystemDate();
 
@@ -182,6 +182,12 @@ export const CompletePackingView: React.FC = () => {
         } catch (repoErr) {
           console.warn('Repository fetch error, checking proxy:', repoErr);
         }
+      }
+
+      // Auto-sync from assigned sales orders if database table has 0 records
+      if (rawDocs.length === 0 && !skipAutoSync) {
+        await handleSyncFromOrders(true);
+        return;
       }
 
       // Map raw Firestore documents to grid rows according to exact specification
@@ -300,22 +306,106 @@ export const CompletePackingView: React.FC = () => {
     fetchFulfilmentRecords();
   }, [productsMaster]);
 
-  // Sync from Sales Orders if database table is empty
-  const handleSyncFromOrders = async () => {
+  // Sync from Sales Orders if database table is empty or upon user request
+  const handleSyncFromOrders = async (silent = false) => {
     setLoading(true);
     try {
-      const res = await apiFetch('/api/operations/shipment-brand-owner-fulfilment/sync-from-orders', {
-        method: 'POST',
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showStatus(`Synchronized ${data.addedCount || 0} assigned items from sales orders into packing pipeline.`);
-        await fetchFulfilmentRecords();
-      } else {
-        showStatus(data.error || 'Failed to sync orders.', 'error');
+      let syncDone = false;
+      let addedCount = 0;
+
+      // 1. Try backend API first
+      try {
+        const res = await apiFetch('/api/operations/shipment-brand-owner-fulfilment/sync-from-orders', {
+          method: 'POST',
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          addedCount = data.addedCount || 0;
+          syncDone = true;
+        }
+      } catch (apiErr) {
+        console.warn('API sync failed, falling back to direct database:', apiErr);
       }
+
+      // 2. Fallback to direct Firestore sync if API endpoint is not hosted on static deployment
+      if (!syncDone) {
+        const [salesOrders, existingDocs] = await Promise.all([
+          orderRepository.getAll(),
+          shipmentBrandOwnerAssignmentRepository.getAll(),
+        ]);
+
+        const existingMap = new Set(
+          (existingDocs || []).map((d: any) => `${d.salesOrderId}_${d.orderItemId || d.itemId || d.productId}`)
+        );
+
+        for (const order of salesOrders || []) {
+          const prods = Array.isArray(order.products) ? order.products : [];
+          const assignments = Array.isArray((order as any).brandAssignments) ? (order as any).brandAssignments : [];
+
+          for (let idx = 0; idx < prods.length; idx++) {
+            const prod: any = prods[idx];
+            const pId = String(prod.productId || prod.id || `p_${idx}`);
+            const iId = String(prod.itemId || prod.orderItemId || `item_${pId}`);
+            const key = `${order.id}_${iId}`;
+
+            if (!existingMap.has(key)) {
+              const matchAssignment = assignments.find(
+                (a: any) => String(a.productId) === pId || String(a.orderItemId) === iId
+              );
+              const brandOwnerName = matchAssignment?.brandOwnerName || prod.brandOwnerName || prod.brandOwner || 'Vio Nature Science';
+              const brandOwnerId = matchAssignment?.brandOwnerId || prod.brandOwnerId || 'bo_default';
+              const qty = Number(prod.quantity ?? prod.qty ?? prod.orderqty ?? 1);
+              const unit = String(prod.unit ?? prod.orderunit ?? 'PCS');
+              const packingSize = String(prod.packingSize ?? prod.packingsize ?? prod.orderpackingsize ?? 'Standard');
+              const today = getSystemDate();
+              const newId = `boa_${order.id}_${pId}`;
+
+              const newDoc = {
+                id: newId,
+                brandOwnerAssignid: newId,
+                salesOrderId: String(order.id),
+                orderItemId: iId,
+                itemId: iId,
+                productId: pId,
+                productName: prod.productName || prod.name || `Product ${idx + 1}`,
+                brandOwnerId,
+                brandOwnerName,
+                orderpackingsize: packingSize,
+                orderunit: unit,
+                orderqty: qty,
+                outpackdate: today,
+                outpackingsize: packingSize,
+                outunit: unit,
+                outquantity: qty,
+                outstatus: 'PACKING',
+                outbalanceqty: 0,
+                outexpecteddateofdespatchdate: today,
+                outdealyreasons: '',
+                fulfillmentstatus: 'PACKING',
+                status: 'ASSIGNED',
+                orderfulfilment: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              };
+
+              await shipmentBrandOwnerAssignmentRepository.create(newDoc);
+              existingMap.add(key);
+              addedCount++;
+            }
+          }
+        }
+        syncDone = true;
+      }
+
+      if (!silent || addedCount > 0) {
+        showStatus(`Synchronized ${addedCount} assigned items from sales orders into packing pipeline.`);
+      }
+      await fetchFulfilmentRecords(true);
     } catch (err: any) {
-      showStatus(err.message || 'Sync failed.', 'error');
+      console.error('Failed to sync orders:', err);
+      if (!silent) {
+        showStatus(err?.message || 'Sync failed.', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -626,7 +716,7 @@ export const CompletePackingView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2.5">
           {rows.length === 0 && !loading && (
             <button
-              onClick={handleSyncFromOrders}
+              onClick={() => handleSyncFromOrders(false)}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 border border-emerald-500/40 rounded-xl text-xs font-bold text-white transition cursor-pointer shadow-sm active:scale-95"
               title="Populate assigned items from sales orders"
             >
@@ -636,7 +726,7 @@ export const CompletePackingView: React.FC = () => {
           )}
 
           <button
-            onClick={fetchFulfilmentRecords}
+            onClick={() => fetchFulfilmentRecords(false)}
             disabled={loading}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-white/15 hover:bg-white/25 border border-white/20 rounded-xl text-xs font-bold text-white transition cursor-pointer shadow-sm active:scale-95"
             title="Refresh database records"
@@ -844,7 +934,7 @@ export const CompletePackingView: React.FC = () => {
                       Assigned items from sales orders automatically appear here, or you can synchronize existing orders.
                     </p>
                     <button
-                      onClick={handleSyncFromOrders}
+                      onClick={() => handleSyncFromOrders(false)}
                       className="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
                     >
                       Sync Assigned Orders Now

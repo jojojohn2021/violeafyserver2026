@@ -20,6 +20,7 @@ import {
 } from "./src/services/referralChainService";
 import { OperationsService } from "./src/services/operationsService";
 import { ShipmentOperationsService } from "./src/services/shipmentOperationsService";
+import { sendOrderStageWhatsAppNotification } from "./src/services/whatsappService";
 
 dotenv.config();
 
@@ -479,6 +480,7 @@ app.post("/api/db/:col", async (req, res) => {
     if (req.params.col === "sales_orders" && req.body?.id) {
       try {
         await operationsService.syncPaymentRecordForOrder(String(req.body.id));
+        await operationsService.triggerStageNotifications('Order Placed', String(req.body.id));
       } catch (syncError: any) {
         console.error("[VIO-PAYMENTS] Failed to sync payments record:", syncError?.message || syncError);
       }
@@ -1835,11 +1837,94 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
       }
     }
 
+    // Trigger stage notifications for order stage updates (e.g. SHIPPED, READY_FOR_DISPATCH, PACKING, IN_TRANSIT, DELIVERED)
+    const orderId = String(record.salesOrderId || record.orderId || record.orderNo || '').trim();
+    let notificationResult: any = null;
+    if (orderId) {
+      const statusVal = String(record.outstatus || record.fulfillmentstatus || record.status || '').toUpperCase().trim();
+      let stageName = '';
+      if (statusVal === 'SHIPPED') {
+        stageName = 'Shipped';
+      } else if (statusVal === 'READY_FOR_DISPATCH') {
+        stageName = 'Create Shipment';
+      } else if (statusVal === 'PACKING' || statusVal === 'PACKED' || statusVal === 'COMPLETED') {
+        stageName = 'Packing';
+      } else if (statusVal === 'IN_TRANSIT' || statusVal === 'DISPATCHED') {
+        stageName = 'In Transit';
+      } else if (statusVal === 'DELIVERED') {
+        stageName = 'Delivered';
+      }
+
+      if (stageName) {
+        try {
+          // Sync sales_orders deliveryStatus and tracking/courier details
+          const salesOrders = await getCollectionDocs('sales_orders');
+          const salesOrder = salesOrders.find((so: any) => String(so.id) === orderId || String(so.orderNumber) === orderId);
+          const targetOrderId = salesOrder ? String(salesOrder.id) : orderId;
+          const courierAgency = String(record.outcouriername || record.couriername || record.courierAgency || '').trim();
+          const docketNo = String(record.outcourierdocketno || record.courierdocketno || record.trackingNumber || '').trim();
+
+          if (salesOrder) {
+            salesOrder.deliveryStatus = statusVal;
+            salesOrder.updatedAt = new Date().toISOString();
+            if (courierAgency) salesOrder.courierName = courierAgency;
+            if (docketNo) salesOrder.trackingNumber = docketNo;
+            await saveCollectionDoc('sales_orders', salesOrder);
+          }
+
+          // Sync order_shipments record if courier details are present
+          if (courierAgency || docketNo) {
+            const allShipments = await getCollectionDocs('order_shipments').catch(() => []);
+            let existingShp = allShipments.find(
+              (s: any) => String(s.orderId) === String(targetOrderId) || String(s.orderId) === String(orderId)
+            );
+            const now = new Date().toISOString();
+            if (existingShp) {
+              if (courierAgency) existingShp.courierAgency = courierAgency;
+              if (docketNo) existingShp.trackingNumber = docketNo;
+              existingShp.status = statusVal === 'SHIPPED' ? 'DISPATCHED' : (existingShp.status || 'CREATED');
+              existingShp.updatedAt = now;
+              await saveCollectionDoc('order_shipments', existingShp);
+            } else if (docketNo) {
+              const newShp = {
+                id: `shp_${targetOrderId}`,
+                shipmentId: `SHP_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+                orderId: targetOrderId,
+                courierAgency: courierAgency || 'Delhivery',
+                trackingNumber: docketNo,
+                shipmentDate: now,
+                packageCount: 1,
+                weightKg: 0.5,
+                charges: { baseCharge: 0, handlingCharge: 0, additionalCharge: 0, otherCharge: 0, totalCharge: 0 },
+                status: statusVal === 'SHIPPED' ? 'DISPATCHED' : 'CREATED',
+                createdAt: now,
+                updatedAt: now,
+              };
+              await saveCollectionDoc('order_shipments', newShp);
+            }
+          }
+
+          await operationsService.triggerStageNotifications(stageName, targetOrderId, {
+            courierName: courierAgency,
+            courierAgency,
+            trackingNumber: docketNo,
+            invoiceNumber: record.invoiceNumber || record.invoiceId,
+            status: statusVal,
+          });
+          notificationResult = { stage: stageName, orderId: targetOrderId, status: 'dispatched' };
+        } catch (notifErr: any) {
+          console.warn(`[VIO-NOTIF] Warning triggering stage notification '${stageName}' on fulfilment save:`, notifErr);
+          notificationResult = { stage: stageName, status: 'warning', error: notifErr?.message || String(notifErr) };
+        }
+      }
+    }
+
     return res.json({
       success: true,
       message: "Packing record and fulfillment details saved successfully.",
       record,
       newRecord: newRecord || null,
+      notification: notificationResult,
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error?.message || "Failed to save packing record into database." });
@@ -1901,6 +1986,10 @@ const handleSyncShipmentBrandOwnerFulfilmentFromOrders = async (req: express.Req
             outdealyreasons: '',
             fulfillmentstatus: 'PACKING',
             status: 'ASSIGNED',
+            deliverydate: '',
+            deliverycondition: '',
+            outdeliverydate: '',
+            outdeliverycondition: '',
             orderfulfilment: [],
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -1999,6 +2088,50 @@ const handleDispatchShipment = async (req: express.Request, res: express.Respons
 };
 app.post("/api/operations/shipments/:shipmentId/dispatch", handleDispatchShipment);
 app.post("/api/v1/operations/shipments/:shipmentId/dispatch", handleDispatchShipment);
+
+// 12b. POST & PATCH /api/operations/shipments/:shipmentId/status & /api/operations/orders/:orderId/shipment-status
+const handleUpdateShipmentStatus = async (req: express.Request, res: express.Response) => {
+  try {
+    const targetId = req.params.shipmentId || req.params.orderId;
+    const { status, courierAgency, courierName, trackingNumber, expectedDeliveryDate, remarks, updatedBy } = req.body || {};
+    if (!status) {
+      return res.status(400).json({ error: "Shipment status is required" });
+    }
+    const result = await operationsService.updateShipmentStatus(
+      targetId,
+      status,
+      { courierAgency: courierAgency || courierName, courierName, trackingNumber, expectedDeliveryDate, remarks, updatedBy },
+      getIdempotencyKey(req)
+    );
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    return res.status(400).json({ error: error?.message || "Failed to update shipment status" });
+  }
+};
+app.post("/api/operations/shipments/:shipmentId/status", handleUpdateShipmentStatus);
+app.post("/api/v1/operations/shipments/:shipmentId/status", handleUpdateShipmentStatus);
+app.patch("/api/operations/shipments/:shipmentId/status", handleUpdateShipmentStatus);
+app.patch("/api/v1/operations/shipments/:shipmentId/status", handleUpdateShipmentStatus);
+app.post("/api/operations/orders/:orderId/shipment-status", handleUpdateShipmentStatus);
+app.post("/api/v1/operations/orders/:orderId/shipment-status", handleUpdateShipmentStatus);
+
+// 12c. POST /api/operations/orders/:orderId/send-whatsapp & /api/v1/... (Send & Verify Order Stage WhatsApp Notification)
+const handleSendOrderWhatsApp = async (req: express.Request, res: express.Response) => {
+  try {
+    const { stage, metadata } = req.body || {};
+    const result = await sendOrderStageWhatsAppNotification(
+      (operationsService as any).db,
+      stage || 'Shipped',
+      req.params.orderId,
+      metadata
+    );
+    return res.json({ success: result.success, ...result });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || "Failed to send WhatsApp message" });
+  }
+};
+app.post("/api/operations/orders/:orderId/send-whatsapp", handleSendOrderWhatsApp);
+app.post("/api/v1/operations/orders/:orderId/send-whatsapp", handleSendOrderWhatsApp);
 
 // 13. POST /api/operations/shipments/:shipmentId/delivery & /api/v1/...
 const handleRecordDelivery = async (req: express.Request, res: express.Response) => {

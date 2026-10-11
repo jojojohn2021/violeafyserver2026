@@ -18,6 +18,8 @@ import {
   GlobalNotificationConfig,
   StageNotificationSetting,
 } from '../types/operations';
+import { sendOrderStageEmailNotification } from './emailService';
+import { sendOrderStageWhatsAppNotification } from './whatsappService';
 
 export interface DataAccessor {
   getCollectionDocs: (collection: string) => Promise<any[]>;
@@ -488,89 +490,46 @@ export class OperationsService {
 
   // TRIGGER STAGE NOTIFICATIONS (Sections 64-80)
   async triggerStageNotifications(
-    stage: 'Brand Owner Assignment' | 'Complete Packing' | 'Create Shipment' | 'Confirm Delivery' | 'Process Return',
+    stage: 'Order Placed' | 'Order Item / Order Placed' | 'Brand Owner Assignment' | 'Complete Packing' | 'Packing' | 'Create Shipment' | 'Shipped' | 'In Transit' | 'Confirm Delivery' | 'Delivered' | 'Process Return' | string,
     orderId: string,
     metadata?: Record<string, any>
   ): Promise<void> {
     try {
-      const config = await this.getGlobalNotificationConfig();
-      const stageConfig = config[stage];
-      if (!stageConfig) return;
+      // 1. Dynamic Email Notification Engine (SMTP from Firestore)
+      await sendOrderStageEmailNotification(this.db, stage, orderId, metadata);
 
-      const details = await this.getOrderDetails(orderId);
-      const customers = await this.db.getCollectionDocs('customers');
-      const customer = customers.find((c) => String(c.id) === String(details.order?.customerId));
+      // 2. Dynamic WhatsApp Notification Engine (Meta Cloud API from Firestore)
+      await sendOrderStageWhatsAppNotification(this.db, stage, orderId, metadata);
 
-      const customerEmail = customer?.email || details.order?.customerEmail;
-      const customerMobile = details.order?.contactNo || details.order?.customerMobile || customer?.mobileNumber || customer?.phone;
+      // 3. Legacy / Global Config Audit & WhatsApp Notifications
+      const config = await this.getGlobalNotificationConfig().catch(() => null);
+      const stageMapKey = (stage === 'Shipped' || stage === 'In Transit')
+        ? 'Create Shipment'
+        : stage === 'Packing'
+        ? 'Complete Packing'
+        : stage === 'Delivered'
+        ? 'Confirm Delivery'
+        : stage;
+      const stageConfig = config ? (
+        (config[stage as keyof GlobalNotificationConfig] as StageNotificationSetting) ||
+        (config[stageMapKey as keyof GlobalNotificationConfig] as StageNotificationSetting)
+      ) : null;
 
-      const brandOwners = await this.db.getCollectionDocs('product_brand_owners');
-      const assignedOwners: any[] = [];
-      if (details.brandAssignments && details.brandAssignments.length > 0) {
-        for (const ba of details.brandAssignments) {
-          const owner = brandOwners.find((bo) => String(bo.id) === String(ba.brandOwnerId));
-          if (owner) assignedOwners.push(owner);
-        }
-      }
+      const details = await this.getOrderDetails(orderId).catch(() => null);
+      const customers = details?.order ? await this.db.getCollectionDocs('customers').catch(() => []) : [];
+      const customer = customers.find((c) => String(c.id) === String(details?.order?.customerId));
+      const customerMobile = details?.order?.mobilenumberwithcountrycode || details?.order?.contactNo || details?.order?.customerMobile || customer?.mobilenumberwithcountrycode || customer?.mobileNumber || customer?.phone;
 
-      const now = new Date().toISOString();
-
-      if (stageConfig.emailtocustomer === 'yes' && stageConfig.emailtemplateid && customerEmail) {
-        await this.db.saveCollectionDoc('audit_logs', {
-          id: this.generateId('notif_email_cust'),
-          timestamp: now,
-          user: 'System Notification Engine',
-          role: 'Admin',
-          action: `NOTIFICATION_EMAIL_CUSTOMER_${stage.replace(/\s+/g, '_').toUpperCase()}`,
-          details: `Sent email notification to customer ${customerEmail} using template ${stageConfig.emailtemplateid} for Order #${details.order.orderNumber}`,
-          status: 'success',
-        });
-      }
-
-      if (stageConfig.WhatsApptocustomer === 'yes' && stageConfig.WhatsApptemplateid && customerMobile) {
+      if (stageConfig && stageConfig.WhatsApptocustomer === 'yes' && stageConfig.WhatsApptemplateid && customerMobile) {
         await this.db.saveCollectionDoc('whatsapp_messages', {
           id: this.generateId('msg'),
           phone: customerMobile,
           direction: 'Outgoing',
-          content: `Notification for Order #${details.order.orderNumber} (${stage})`,
-          timestamp: now,
+          content: `Notification for Order #${details?.order?.orderNumber || orderId} (${stage})`,
+          timestamp: new Date().toISOString(),
           status: 'sent',
           templateName: stageConfig.WhatsApptemplateid,
         });
-      }
-
-      if ('emailtobrandowner' in stageConfig && stageConfig.emailtobrandowner === 'yes' && stageConfig.emailtemplateid) {
-        for (const bo of assignedOwners) {
-          const boEmail = bo.contactEmail || bo.email;
-          if (boEmail) {
-            await this.db.saveCollectionDoc('audit_logs', {
-              id: this.generateId('notif_email_bo'),
-              timestamp: now,
-              user: 'System Notification Engine',
-              role: 'Admin',
-              action: `NOTIFICATION_EMAIL_BRAND_OWNER_${stage.replace(/\s+/g, '_').toUpperCase()}`,
-              details: `Sent email notification to brand owner ${bo.name} (${boEmail}) using template ${stageConfig.emailtemplateid} for Order #${details.order.orderNumber}`,
-              status: 'success',
-            });
-          }
-        }
-      }
-
-      if ('WhatsApptobrandowner' in stageConfig && stageConfig.WhatsApptobrandowner === 'yes' && stageConfig.WhatsApptemplateid) {
-        for (const bo of assignedOwners) {
-          const boMobile = bo.contactMobile || bo.whatsappNo || bo.contactPhone;
-          if (boMobile) {
-            await this.db.saveCollectionDoc('whatsapp_messages', {
-              id: this.generateId('msg_bo'),
-              phone: boMobile,
-              direction: 'Outgoing',
-              content: `Operational Notification for Brand Owner ${bo.name} - Order #${details.order.orderNumber} (${stage})`,
-              timestamp: now,
-              status: 'sent',
-              templateName: stageConfig.WhatsApptemplateid,
-            });
-          }
-        }
       }
     } catch (err: any) {
       console.warn(`[NOTIFICATION] Non-fatal notification trigger warning for stage '${stage}' on order '${orderId}':`, err);
@@ -580,37 +539,44 @@ export class OperationsService {
   // 2. GET SINGLE ORDER DETAILS (Unified response)
   async getOrderDetails(orderId: string): Promise<OperationsOrderDetailsResponse> {
     const orders = await this.db.getCollectionDocs('sales_orders');
-    const order = orders.find((o) => String(o.id) === String(orderId));
+    const order = orders.find((o) => String(o.id) === String(orderId) || String(o.orderNumber) === String(orderId));
     if (!order) {
       throw new Error(`Sales Order '${orderId}' not found.`);
     }
+    const resolvedId = String(order.id);
+    const orderNo = String(order.orderNumber || '');
 
-    const fulfilment = (await this.db.getCollectionDocs('order_fulfilment')).find((record) => String(record.orderId) === String(orderId)) || {
-      id: `ful_${orderId}`,
-      orderId,
+    const isMatch = (val: any) => {
+      const s = String(val || '');
+      return s === resolvedId || s === String(orderId) || (orderNo && s === orderNo);
+    };
+
+    const fulfilment = (await this.db.getCollectionDocs('order_fulfilment')).find((record) => isMatch(record.orderId)) || {
+      id: `ful_${resolvedId}`,
+      orderId: resolvedId,
       status: 'NOT_STARTED' as FulfilmentStatus,
       createdAt: order.createdAt || new Date().toISOString(),
       updatedAt: order.updatedAt || order.createdAt || new Date().toISOString(),
     };
 
     const packings = await this.db.getCollectionDocs('order_packing');
-    const packing = packings.find((p) => String(p.orderId) === String(orderId));
+    const packing = packings.find((p) => isMatch(p.orderId));
 
     const brandDocs = await this.db.getCollectionDocs('order_brand_assignments');
-    const brandDoc = brandDocs.find((b) => String(b.orderId) === String(orderId));
+    const brandDoc = brandDocs.find((b) => isMatch(b.orderId));
 
     const allShipments = await this.db.getCollectionDocs('order_shipments');
-    const orderShipments = allShipments.filter((s) => String(s.orderId) === String(orderId));
+    const orderShipments = allShipments.filter((s) => isMatch(s.orderId));
 
     const allDeliveries = await this.db.getCollectionDocs('order_delivery');
-    const delivery = allDeliveries.find((d) => String(d.orderId) === String(orderId));
+    const delivery = allDeliveries.find((d) => isMatch(d.orderId));
 
     const allReturns = await this.db.getCollectionDocs('order_returns');
-    const orderReturns = allReturns.filter((r) => String(r.orderId) === String(orderId));
+    const orderReturns = allReturns.filter((r) => isMatch(r.orderId));
 
     const allTimeline = await this.db.getCollectionDocs('order_operation_history');
     const timeline = allTimeline
-      .filter((t) => String(t.orderId) === String(orderId))
+      .filter((t) => isMatch(t.orderId))
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
     return {
@@ -886,6 +852,10 @@ export class OperationsService {
         outdealyreasons: child?.outdealyreasons || (assignment as any).outdealyreasons || '',
         outexpecteddateofdespatchdate: child?.outexpecteddateofdespatchdate || (assignment as any).outexpecteddateofdespatchdate || '',
         outemailssenddetails: child?.outemailssenddetails || (assignment as any).emailssenddetails || null,
+        outdeliverydate: child?.outdeliverydate || child?.deliverydate || (assignment as any).outdeliverydate || (assignment as any).deliverydate || '',
+        outdeliverycondition: child?.outdeliverycondition || child?.deliverycondition || (assignment as any).outdeliverycondition || (assignment as any).deliverycondition || '',
+        deliverydate: child?.deliverydate || child?.outdeliverydate || (assignment as any).deliverydate || '',
+        deliverycondition: child?.deliverycondition || child?.outdeliverycondition || (assignment as any).deliverycondition || '',
       });
 
       const rawChildren = Array.isArray((assignment as any).orderfulfilment) && (assignment as any).orderfulfilment.length > 0
@@ -915,7 +885,8 @@ export class OperationsService {
         couriername: (assignment as any).couriername || (assignment as any).courier || '',
         courierdocketno: (assignment as any).courierdocketno || (assignment as any).docketno || '',
         fulfillmentstatus: (assignment as any).fulfillmentstatus || 'ASSIGNED',
-        deliverydate: (assignment as any).deliverydate || '',
+        deliverydate: (assignment as any).deliverydate || (assignment as any).outdeliverydate || '',
+        deliverycondition: (assignment as any).deliverycondition || (assignment as any).outdeliverycondition || '',
         deliverystatus: (assignment as any).deliverystatus || '',
         deliverynote: (assignment as any).deliverynote || '',
         emailssenddetails: (assignment as any).emailssenddetails || null,
@@ -1050,8 +1021,146 @@ export class OperationsService {
       { shipmentId: shipment.id, trackingNumber: shipment.trackingNumber }
     );
     await this.syncPaymentRecord(shipment.orderId);
+    await this.triggerStageNotifications('In Transit', shipment.orderId, { shipmentId: shipment.id, trackingNumber: shipment.trackingNumber, courierAgency: shipment.courierAgency });
 
     return shipment;
+  }
+
+  // 8b. UPDATE SHIPMENT STATUS (Comprehensive Shipment Status Updation)
+  async updateShipmentStatus(
+    shipmentIdOrOrderId: string,
+    newStatus: string,
+    details?: {
+      courierAgency?: string;
+      courierName?: string;
+      trackingNumber?: string;
+      expectedDeliveryDate?: string;
+      remarks?: string;
+      updatedBy?: string;
+    },
+    idempotencyKey?: string
+  ): Promise<{ shipment: ShipmentRecord; notificationSent: boolean; message?: string }> {
+    const shipments = await this.db.getCollectionDocs('order_shipments');
+    let shipment = shipments.find(
+      (s) =>
+        String(s.id) === String(shipmentIdOrOrderId) ||
+        String(s.shipmentId) === String(shipmentIdOrOrderId) ||
+        String(s.orderId) === String(shipmentIdOrOrderId)
+    );
+
+    const now = new Date().toISOString();
+    const cleanStatus = String(newStatus || 'CREATED').toUpperCase().trim();
+    const courierAgency = details?.courierAgency || details?.courierName;
+
+    if (!shipment) {
+      // Find order to associate new shipment
+      const orders = await this.db.getCollectionDocs('sales_orders').catch(() => []);
+      const order = orders.find(
+        (o) => String(o.id) === String(shipmentIdOrOrderId) || String(o.orderNumber) === String(shipmentIdOrOrderId)
+      );
+      const orderId = order ? String(order.id) : String(shipmentIdOrOrderId);
+
+      shipment = {
+        id: `shp_${orderId}`,
+        shipmentId: `SHP_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+        orderId,
+        courierAgency: courierAgency || 'Delhivery',
+        trackingNumber: details?.trackingNumber || `TRK_${Date.now()}`,
+        shipmentDate: now,
+        expectedDeliveryDate: details?.expectedDeliveryDate,
+        packageCount: 1,
+        weightKg: 0.5,
+        charges: { baseCharge: 0, handlingCharge: 0, additionalCharge: 0, otherCharge: 0, totalCharge: 0 },
+        status: cleanStatus as any,
+        createdAt: now,
+        updatedAt: now,
+      };
+    } else {
+      shipment.status = cleanStatus as any;
+      if (courierAgency) shipment.courierAgency = courierAgency;
+      if (details?.trackingNumber) shipment.trackingNumber = details.trackingNumber;
+      if (details?.expectedDeliveryDate) shipment.expectedDeliveryDate = details.expectedDeliveryDate;
+      shipment.updatedAt = now;
+      if (['DISPATCHED', 'IN_TRANSIT', 'SHIPPED'].includes(cleanStatus) && !shipment.dispatchedAt) {
+        shipment.dispatchedAt = now;
+        shipment.dispatchedBy = details?.updatedBy || 'Operations Staff';
+      }
+    }
+
+    await this.db.saveCollectionDoc('order_shipments', shipment);
+
+    // Sync fulfilment status
+    if (cleanStatus === 'SHIPPED' || cleanStatus === 'IN_TRANSIT' || cleanStatus === 'DISPATCHED') {
+      await this.updateFulfilmentStatus(shipment.orderId, 'DISPATCHED', { latestShipmentId: shipment.id });
+    } else if (cleanStatus === 'DELIVERED') {
+      await this.updateFulfilmentStatus(shipment.orderId, 'DELIVERED', { latestShipmentId: shipment.id });
+    } else if (cleanStatus === 'READY_FOR_DISPATCH') {
+      await this.updateFulfilmentStatus(shipment.orderId, 'READY_FOR_DISPATCH', { latestShipmentId: shipment.id });
+    }
+
+    // Sync sales_orders deliveryStatus and courier/tracking details
+    const salesOrders = await this.db.getCollectionDocs('sales_orders').catch(() => []);
+    const salesOrder = salesOrders.find(
+      (so: any) => String(so.id) === String(shipment.orderId) || String(so.orderNumber) === String(shipment.orderId)
+    );
+    if (salesOrder) {
+      salesOrder.deliveryStatus = cleanStatus;
+      if (shipment.courierAgency) salesOrder.courierName = shipment.courierAgency;
+      if (shipment.trackingNumber) salesOrder.trackingNumber = shipment.trackingNumber;
+      salesOrder.updatedAt = now;
+      await this.db.saveCollectionDoc('sales_orders', salesOrder);
+    }
+
+    // Sync shipment_brand_owner_fulfilment if present
+    const fulfilments = await this.db.getCollectionDocs('shipment_brand_owner_fulfilment').catch(() => []);
+    const matchFul = fulfilments.find(
+      (f: any) =>
+        String(f.salesOrderId) === String(shipment.orderId) ||
+        String(f.salesOrderId) === String(salesOrder?.orderNumber) ||
+        String(f.orderNo) === String(shipment.orderId) ||
+        String(f.orderNo) === String(salesOrder?.orderNumber)
+    );
+    if (matchFul) {
+      matchFul.outstatus = cleanStatus === 'SHIPPED' ? 'SHIPPED' : 'READY_FOR_DISPATCH';
+      matchFul.fulfillmentstatus = matchFul.outstatus;
+      if (shipment.courierAgency) matchFul.outcouriername = shipment.courierAgency;
+      if (shipment.trackingNumber) matchFul.outcourierdocketno = shipment.trackingNumber;
+      matchFul.updatedAt = now;
+      await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', matchFul);
+    }
+
+    // Record audit event
+    await this.recordTimelineEvent(
+      shipment.orderId,
+      `SHIPMENT_STATUS_${cleanStatus}`,
+      `Shipment status updated to ${cleanStatus} via ${shipment.courierAgency} (Docket: ${shipment.trackingNumber})`,
+      details?.updatedBy,
+      { shipmentId: shipment.id, trackingNumber: shipment.trackingNumber, status: cleanStatus }
+    );
+
+    // Sync payment
+    await this.syncPaymentRecord(shipment.orderId);
+
+    // Determine notification stage
+    let stageName = 'Create Shipment';
+    if (cleanStatus === 'SHIPPED') stageName = 'Shipped';
+    else if (cleanStatus === 'IN_TRANSIT' || cleanStatus === 'DISPATCHED') stageName = 'In Transit';
+    else if (cleanStatus === 'DELIVERED') stageName = 'Confirm Delivery';
+
+    // Trigger stage notifications (WhatsApp & Email)
+    await this.triggerStageNotifications(stageName, shipment.orderId, {
+      shipmentId: shipment.id,
+      courierAgency: shipment.courierAgency,
+      courierName: shipment.courierAgency,
+      trackingNumber: shipment.trackingNumber,
+      status: cleanStatus,
+    });
+
+    return {
+      shipment,
+      notificationSent: true,
+      message: `Shipment status updated to ${cleanStatus} and stage notifications dispatched.`,
+    };
   }
 
   // 9. RECORD DELIVERY

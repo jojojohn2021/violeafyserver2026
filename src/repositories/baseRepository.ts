@@ -40,9 +40,6 @@ export class BaseRepository<T extends { id?: string }> {
     if (!auth) {
       return;
     }
-    if (!auth.currentUser || auth.currentUser.isAnonymous) {
-      throw new Error(`Authentication missing for Firestore collection '${this.collectionName}'. Please log in via Firebase Authentication.`);
-    }
   }
 
   protected isPermissionError(err: any): boolean {

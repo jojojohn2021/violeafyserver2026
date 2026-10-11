@@ -331,6 +331,7 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
       courierdocketno: 'BD12345678',
       fulfillmentstatus: 'PACKED',
       deliverydate: '2026-10-12',
+      deliverycondition: 'Good Condition',
       deliverystatus: 'IN_TRANSIT',
       deliverynote: 'Handle with care',
       emailssenddetails: 'Dispatch notification email sent to customer',
@@ -342,6 +343,7 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
     assert.equal(record.courierdocketno, 'BD12345678');
     assert.equal(record.fulfillmentstatus, 'PACKED');
     assert.equal(record.deliverydate, '2026-10-12');
+    assert.equal(record.deliverycondition, 'Good Condition');
     assert.equal(record.deliverystatus, 'IN_TRANSIT');
     assert.equal(record.deliverynote, 'Handle with care');
 
@@ -361,11 +363,15 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
       outdealyreasons: 'None',
       outexpecteddateofdespatchdate: '2026-10-10',
       outemailssenddetails: 'Child packing update logged',
+      outdeliverydate: '2026-10-12',
+      outdeliverycondition: 'Good Condition',
     });
 
     assert.equal(updated.orderfulfilment.length, 1);
     assert.equal(updated.orderfulfilment[0].orderItemId, 'item_prod_cleaner');
     assert.equal(updated.orderfulfilment[0].outpackingsize, 'Box 500ml x 6');
     assert.equal(updated.orderfulfilment[0].outcourierdocketno, 'BD12345678');
+    assert.equal(updated.orderfulfilment[0].outdeliverydate, '2026-10-12');
+    assert.equal(updated.orderfulfilment[0].outdeliverycondition, 'Good Condition');
   });
 });

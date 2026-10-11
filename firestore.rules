@@ -137,28 +137,28 @@ service cloud.firestore {
 
     // Order fulfilment and shipment operations
     match /order_fulfilment/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
     match /order_brand_assignments/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
     match /order_operation_history/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
     match /shipment_brand_owner_fulfilment/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
     match /shipment_packing/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
     match /shipment_shipments/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
     match /shipment_deliveries/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
     match /shipment_returns/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // Influencers

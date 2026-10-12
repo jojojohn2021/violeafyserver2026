@@ -220,6 +220,12 @@ export class OperationsService {
       hasPrevious: boolean;
       hasNext: boolean;
     };
+    summary?: {
+      total: number;
+      assigned: number;
+      pending: number;
+      restricted: number;
+    };
   }> {
     const [salesOrders, fulfilments, packings, brandAssignments, shipments, deliveries, returns, customers] = await Promise.all([
       this.db.getCollectionDocs('sales_orders'),
@@ -338,7 +344,7 @@ export class OperationsService {
     const stageEligible = combined.filter((rec) => {
       if (targetStage === 'assignment') {
         const delStatus = String(rec.deliveryStatus || '').toUpperCase().trim();
-        return delStatus !== 'COMPLETED' && delStatus !== 'RETURNED';
+        return delStatus === 'NOT_STARTED' || delStatus === 'PENDING' || delStatus === 'PACKING';
       }
       if (targetStage === 'packing') {
         const allAssigned = rec.products.length > 0 && rec.products.every((product: any, index: number) => {
@@ -396,7 +402,18 @@ export class OperationsService {
       return true;
     });
 
-    searchFiltered.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+    if (targetStage === 'assignment') {
+      searchFiltered.sort((a, b) => {
+        const normA = String(a.deliveryStatus || '').toUpperCase().trim();
+        const normB = String(b.deliveryStatus || '').toUpperCase().trim();
+        const rankA = (normA === 'NOT_STARTED' || normA === 'PENDING') ? 1 : (normA === 'PACKING' ? 2 : 3);
+        const rankB = (normB === 'NOT_STARTED' || normB === 'PENDING') ? 1 : (normB === 'PACKING' ? 2 : 3);
+        if (rankA !== rankB) return rankA - rankB;
+        return new Date(b.createdAt || b.lastUpdated || 0).getTime() - new Date(a.createdAt || a.lastUpdated || 0).getTime();
+      });
+    } else {
+      searchFiltered.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+    }
 
     const requestedLimit = Number(filters.limit ?? 10);
     const requestedPage = Number(filters.page ?? 1);
@@ -408,6 +425,12 @@ export class OperationsService {
     const startIndex = (page - 1) * limit;
     const records = searchFiltered.slice(startIndex, startIndex + limit);
 
+    const assignedOrdersCount = searchFiltered.filter((r) => String(r.deliveryStatus || '').toUpperCase().trim() === 'PACKING').length;
+    const pendingOrdersCount = searchFiltered.filter((r) => {
+      const s = String(r.deliveryStatus || '').toUpperCase().trim();
+      return s === 'NOT_STARTED' || s === 'PENDING';
+    }).length;
+
     return {
       records,
       pagination: {
@@ -417,6 +440,12 @@ export class OperationsService {
         totalPages,
         hasPrevious: page > 1,
         hasNext: page < totalPages,
+      },
+      summary: {
+        total: totalRecords,
+        assigned: assignedOrdersCount,
+        pending: pendingOrdersCount,
+        restricted: 0,
       },
     };
   }

@@ -713,7 +713,7 @@ export default function SalesOrdersView() {
   const activeOrders = userSalesOrders.filter(o => {
     const d = (o.deliveryStatus || '').toLowerCase();
     const p = (o.paymentStatus || '').toLowerCase();
-    return d !== 'cancelled' && d !== 'canceled' && p !== 'refunded';
+    return d !== 'cancelled' && d !== 'cancelled' && p !== 'refunded';
   });
 
   const totalRevenue = activeOrders.reduce((sum, o) => sum + (o.totalValue || 0), 0);

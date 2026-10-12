@@ -30,7 +30,25 @@ import { auth } from '../firebase';
 import { apiFetch } from '../utils/apiFetch';
 import { ProductPerformance } from '../types';
 
-export type ShipmentStatusOption = 'READY_FOR_DISPATCH' | 'SHIPPED';
+export type ShipmentStatusOption = 'PACKING' | 'READY_FOR_DISPATCH' | 'SHIPPED' | 'CANCELLED';
+
+// Helper validation: Scope of documents listed in grid is restricted to Delivery Status = 'PACKING', 'READY_FOR_DISPATCH', or 'CANCELLED'
+export const isEligibleShipmentDeliveryStatus = (status?: string): boolean => {
+  if (!status) return false;
+  const s = status.toUpperCase().trim().replace(/[-_ ]/g, '_');
+  return s === 'PACKING' || s === 'READY_FOR_DISPATCH' || s === 'CANCELLED' || s === 'CANCELED';
+};
+
+// Helper: Grid row header value should be shipment_brand_owner_fulfilment->orderNumber
+export const resolveShipmentOrderNo = (doc: any, matchedOrder?: any, fallbackSalesOrderId?: string): string => {
+  return String(
+    doc?.orderNumber ||
+    doc?.orderNo ||
+    matchedOrder?.orderNumber ||
+    fallbackSalesOrderId ||
+    ''
+  );
+};
 
 export const COURIER_PARTNERS = [
   'Amazon',
@@ -64,7 +82,7 @@ export interface CreateShipmentGridRow {
   Outpackingsize: string; // Outpackingsize = disable
   outunit: string; // outunit = disable
   outquantity: number; // outquantity = disable
-  outstatus: ShipmentStatusOption; // outstatus = selection combo box (READY_FOR_DISPATCH | SHIPPED)
+  outstatus: ShipmentStatusOption; // outstatus = selection combo box (READY_FOR_DISPATCH | SHIPPED | PACKING | CANCELLED)
   fulfillmentstatus: string; // fulfillmentstatus = outstatus
   outpickupdate: string; // outpickupdate = systemdate by default (option to select date)
   outcouriername: string; // outcouriername = selection combo box
@@ -84,6 +102,7 @@ export interface GroupedShipmentOrder {
   customerName: string;
   customerMobile: string;
   fulfilmentStatus: string;
+  deliveryStatus?: string;
   items: CreateShipmentGridRow[];
 }
 
@@ -98,7 +117,7 @@ export const CreateShipmentView: React.FC = () => {
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'READY_FOR_DISPATCH' | 'SHIPPED' | 'ALL'>('READY_FOR_DISPATCH');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PACKING' | 'READY_FOR_DISPATCH' | 'CANCELLED'>('ALL');
   const [courierFilter, setCourierFilter] = useState<string>('ALL');
 
   // Track recently updated item IDs so they remain visible after status change
@@ -293,7 +312,32 @@ export const CreateShipmentView: React.FC = () => {
         if (!salesOrderId) continue;
 
         const matchedOrder = resolveSalesOrder(salesOrderId);
-        const orderNo = String(matchedOrder?.orderNumber || doc.orderNumber || doc.orderNo || salesOrderId);
+
+        // Scope validation: Only orders with shipment_brand_owner_fulfilment->deliveryStatus equal to 'PACKING', 'READY_FOR_DISPATCH', or 'CANCELLED'
+        const docDeliveryStatusRaw = String(
+          doc.deliveryStatus ||
+          doc.deliverystatus ||
+          matchedOrder?.deliveryStatus ||
+          (Array.isArray(doc.items) && doc.items.length > 0
+            ? (doc.items[0]?.deliveryStatus || doc.items[0]?.deliverystatus || doc.items[0]?.outstatus)
+            : '') ||
+          ''
+        ).trim();
+
+        if (!isEligibleShipmentDeliveryStatus(docDeliveryStatusRaw)) {
+          continue;
+        }
+
+        const normalizedDocStatus = docDeliveryStatusRaw.toUpperCase().replace(/[\s_-]+/g, '_');
+        const docDeliveryStatus: 'PACKING' | 'READY_FOR_DISPATCH' | 'CANCELLED' =
+          normalizedDocStatus === 'CANCELLED' || normalizedDocStatus === 'CANCELED'
+            ? 'CANCELLED'
+            : normalizedDocStatus === 'PACKING'
+            ? 'PACKING'
+            : 'READY_FOR_DISPATCH';
+
+        // Display ORDER NO: grid row header value should be shipment_brand_owner_fulfilment->orderNumber
+        const orderNo = resolveShipmentOrderNo(doc, matchedOrder, salesOrderId);
         const customerName = String(
           matchedOrder?.customerName ||
           doc.customerName ||
@@ -317,7 +361,8 @@ export const CreateShipmentView: React.FC = () => {
             orderDate,
             customerName,
             customerMobile,
-            fulfilmentStatus: String(doc.fulfilmentStatus || doc.fulfillmentstatus || doc.outstatus || 'READY_FOR_DISPATCH'),
+            fulfilmentStatus: String(doc.fulfilmentStatus || doc.fulfillmentstatus || doc.outstatus || docDeliveryStatus),
+            deliveryStatus: docDeliveryStatus,
             items: [],
           });
         }
@@ -333,6 +378,20 @@ export const CreateShipmentView: React.FC = () => {
           const productId = String(item.productId || '');
           const brandOwnerAssignid = String(item.brandOwnerAssignid || doc.brandOwnerAssignid || doc.id || `boa_${idx}`);
           const brandOwnerName = String(item.brandOwnerName || doc.brandOwnerName || 'Not Assigned');
+
+          // Item delivery status inherits docDeliveryStatus unless item has an explicit eligible status or SHIPPED
+          const explicitItemStatus = String(
+            item.deliveryStatus ||
+            item.deliverystatus ||
+            item.outstatus ||
+            ''
+          ).trim().toUpperCase().replace(/[\s_-]+/g, '_');
+
+          const itemDeliveryStatus = (
+            explicitItemStatus && (isEligibleShipmentDeliveryStatus(explicitItemStatus) || explicitItemStatus === 'SHIPPED')
+              ? explicitItemStatus
+              : docDeliveryStatus
+          );
 
           const orderpackingsize = String(
             item.orderpackingsize ??
@@ -358,9 +417,18 @@ export const CreateShipmentView: React.FC = () => {
             ? Number(item.outquantity)
             : orderqty;
 
-          const currentRawStatus = String(item.outstatus || item.fulfillmentstatus || 'READY_FOR_DISPATCH').toUpperCase().trim();
-          const outstatus: ShipmentStatusOption = currentRawStatus === 'SHIPPED' ? 'SHIPPED' : 'READY_FOR_DISPATCH';
-          const fulfillmentstatus = outstatus;
+          let outstatus: ShipmentStatusOption = docDeliveryStatus;
+          if (itemDeliveryStatus === 'SHIPPED') outstatus = 'SHIPPED';
+          else if (itemDeliveryStatus === 'PACKING') outstatus = 'PACKING';
+          else if (itemDeliveryStatus === 'CANCELLED' || itemDeliveryStatus === 'CANCELED') outstatus = 'CANCELLED';
+          else if (itemDeliveryStatus === 'READY_FOR_DISPATCH') outstatus = 'READY_FOR_DISPATCH';
+
+          const explicitFulfillment = String(item.fulfillmentstatus || '').trim().toUpperCase().replace(/[\s_-]+/g, '_');
+          const fulfillmentstatus = (
+            explicitFulfillment && (isEligibleShipmentDeliveryStatus(explicitFulfillment) || explicitFulfillment === 'SHIPPED')
+              ? explicitFulfillment
+              : outstatus
+          );
           const outpickupdate = item.outpickupdate ? String(item.outpickupdate) : systemDate;
           const outcouriername = String(item.outcouriername || item.couriername || 'Delhivery');
           const outcourierdocketno = String(item.outcourierdocketno || item.courierdocketno || '');
@@ -655,14 +723,25 @@ export const CreateShipmentView: React.FC = () => {
         const filteredItems = order.items.filter((item) => {
           const itemKey = `${order.orderId}_${item.orderItemId}`;
 
-          // Status filter
-          if (statusFilter === 'READY_FOR_DISPATCH') {
-            const isReady = item.outstatus === 'READY_FOR_DISPATCH' || item.fulfillmentstatus === 'READY_FOR_DISPATCH';
+          // Status filter: PACKING | READY_FOR_DISPATCH | CANCELLED | ALL
+          if (statusFilter !== 'ALL') {
+            const normalizedFilter = statusFilter.toUpperCase().trim().replace(/[\s_-]+/g, '_');
+            const itemOutStatus = String(item.outstatus || '').toUpperCase().trim().replace(/[\s_-]+/g, '_');
+            const itemFulfillment = String(item.fulfillmentstatus || '').toUpperCase().trim().replace(/[\s_-]+/g, '_');
+            const orderDeliveryStatus = String(order.deliveryStatus || '').toUpperCase().trim().replace(/[\s_-]+/g, '_');
+
+            const matchesStatus =
+              itemOutStatus === normalizedFilter ||
+              itemFulfillment === normalizedFilter ||
+              orderDeliveryStatus === normalizedFilter ||
+              (normalizedFilter === 'CANCELLED' && (
+                itemOutStatus === 'CANCELED' ||
+                itemFulfillment === 'CANCELED' ||
+                orderDeliveryStatus === 'CANCELED'
+              ));
+
             const isRecentlyUpdated = recentlyUpdatedItemKeys.has(itemKey);
-            if (!isReady && !isRecentlyUpdated) return false;
-          } else if (statusFilter === 'SHIPPED') {
-            const isShipped = item.outstatus === 'SHIPPED' || item.fulfillmentstatus === 'SHIPPED';
-            if (!isShipped) return false;
+            if (!matchesStatus && !isRecentlyUpdated) return false;
           }
 
           // Courier filter
@@ -852,7 +931,7 @@ export const CreateShipmentView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
           <div className="flex items-center gap-1.5 text-xs text-slate-500 font-bold">
             <Filter className="w-3.5 h-3.5" />
-            <span>Fulfillment Status:</span>
+            <span>Delivery Status:</span>
           </div>
           <select
             value={statusFilter}
@@ -862,9 +941,10 @@ export const CreateShipmentView: React.FC = () => {
             }}
             className="text-xs bg-emerald-50 dark:bg-slate-800 border border-emerald-300 dark:border-slate-700 rounded-xl px-3 py-2 font-extrabold text-emerald-900 dark:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
           >
-            <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH (Default)</option>
-            <option value="SHIPPED">SHIPPED</option>
-            <option value="ALL">All Statuses</option>
+            <option value="ALL">All Eligible (PACKING / READY_FOR_DISPATCH / CANCELLED)</option>
+            <option value="PACKING">PACKING</option>
+            <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
+            <option value="CANCELLED">CANCELLED</option>
           </select>
 
           <select
@@ -941,7 +1021,7 @@ export const CreateShipmentView: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs font-bold text-emerald-900 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/40 px-2 py-0.5 rounded-md">
-                          Order #{order.orderNo}
+                          ORDER NO : {order.orderNo}
                         </span>
                         <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5" />
@@ -1059,11 +1139,17 @@ export const CreateShipmentView: React.FC = () => {
                                   className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border outline-none cursor-pointer focus:ring-2 focus:ring-emerald-500 ${
                                     item.outstatus === 'SHIPPED'
                                       ? 'bg-emerald-50 text-emerald-900 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-700'
+                                      : item.outstatus === 'CANCELLED'
+                                      ? 'bg-rose-50 text-rose-900 border-rose-300 dark:bg-rose-950/60 dark:text-rose-200 dark:border-rose-700'
+                                      : item.outstatus === 'READY_FOR_DISPATCH'
+                                      ? 'bg-lime-50 text-lime-900 border-lime-300 dark:bg-lime-950/60 dark:text-lime-200 dark:border-lime-700'
                                       : 'bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-700'
                                   }`}
                                 >
+                                  <option value="PACKING">PACKING</option>
                                   <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
                                   <option value="SHIPPED">SHIPPED</option>
+                                  <option value="CANCELLED">CANCELLED</option>
                                 </select>
                               </td>
 
@@ -1073,6 +1159,10 @@ export const CreateShipmentView: React.FC = () => {
                                   className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black border ${
                                     item.fulfillmentstatus === 'SHIPPED'
                                       ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                      : item.fulfillmentstatus === 'CANCELLED'
+                                      ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                                      : item.fulfillmentstatus === 'READY_FOR_DISPATCH'
+                                      ? 'bg-lime-100 text-lime-800 border-lime-300 dark:bg-lime-950/60 dark:text-lime-300'
                                       : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300'
                                   }`}
                                 >

@@ -1,6 +1,10 @@
 import test, { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { COURIER_PARTNERS } from '../src/components/CreateShipmentView';
+import {
+  COURIER_PARTNERS,
+  isEligibleShipmentDeliveryStatus,
+  resolveShipmentOrderNo,
+} from '../src/components/CreateShipmentView';
 
 describe('Complete Create Shipment Component Logic & Database Verification Tests', () => {
   interface MockDatabase {
@@ -350,5 +354,152 @@ describe('Complete Create Shipment Component Logic & Database Verification Tests
     assert.equal(visibleRows.length, 2);
     assert.equal(visibleRows[0].outstatus, 'SHIPPED');
     assert.equal(visibleRows[0].fulfillmentstatus, 'SHIPPED');
+  });
+
+  it('15. Scope restriction: documents listed in grid are restricted to deliveryStatus in PACKING, READY_FOR_DISPATCH, CANCELLED', () => {
+    const testStatuses = [
+      { status: 'PACKING', expected: true },
+      { status: 'READY_FOR_DISPATCH', expected: true },
+      { status: 'CANCELLED', expected: true },
+      { status: 'CANCELED', expected: true },
+      { status: 'COMPLETED', expected: false },
+      { status: 'DELIVERED', expected: false },
+      { status: 'SHIPPED', expected: false },
+      { status: 'NOT_STARTED', expected: false },
+      { status: 'RETURNED', expected: false },
+    ];
+
+    for (const { status, expected } of testStatuses) {
+      assert.equal(
+        isEligibleShipmentDeliveryStatus(status),
+        expected,
+        `Status '${status}' eligibility should be ${expected}`
+      );
+    }
+  });
+
+  it('16. Display ORDER NO next to date: header value must be shipment_brand_owner_fulfilment->orderNumber', () => {
+    const docWithOrderNumber = {
+      id: 'fulfil_ORD-1790990254084',
+      salesOrderId: 'ORD-1790990254084',
+      orderNumber: 'SO-2026-0060',
+    };
+    const matchedOrder = {
+      id: 'ORD-1790990254084',
+      orderNumber: 'ORD-1790990254084',
+    };
+
+    // Must prioritize shipment_brand_owner_fulfilment->orderNumber over internal salesOrderId
+    const resolvedNo = resolveShipmentOrderNo(docWithOrderNumber, matchedOrder, docWithOrderNumber.salesOrderId);
+    assert.equal(resolvedNo, 'SO-2026-0060');
+
+    // If orderNumber is missing in doc, falls back to orderNo or matchedOrder
+    const fallbackDoc = { id: 'fulfil_123', salesOrderId: 'ORD-123' };
+    assert.equal(resolveShipmentOrderNo(fallbackDoc, { orderNumber: 'SO-999' }, 'ORD-123'), 'SO-999');
+  });
+
+  it('17. Only orders with shipment_brand_owner_fulfilment->deliveryStatus equal to PACKING, READY_FOR_DISPATCH, or CANCELLED are listed in grid', () => {
+    const mockFulfilmentDocs = [
+      {
+        id: 'fulfil_ORD-1790935036419',
+        orderNumber: 'SO-2026-0059',
+        salesOrderId: 'ORD-1790935036419',
+        deliveryStatus: 'READY_FOR_DISPATCH',
+        items: [
+          {
+            orderItemId: 'item_1',
+            deliverystatus: '',
+            fulfillmentstatus: 'ASSIGNED', // Child item has legacy ASSIGNED from brand owner assignment
+            productName: 'Tapioca Chips',
+          },
+        ],
+      },
+      {
+        id: 'fulfil_ORD-1790990254084',
+        orderNumber: 'SO-2026-0060',
+        salesOrderId: 'ORD-1790990254084',
+        deliveryStatus: 'PACKING',
+        items: [
+          {
+            orderItemId: 'item_2',
+            deliverystatus: '',
+            fulfillmentstatus: 'ASSIGNED',
+            productName: 'Hair Oil',
+          },
+        ],
+      },
+      {
+        id: 'fulfil_ORD-1791005543857',
+        orderNumber: 'SO-2026-0061',
+        salesOrderId: 'ORD-1791005543857',
+        deliveryStatus: 'READY_FOR_DISPATCH',
+        items: [
+          {
+            orderItemId: 'item_3',
+            outstatus: 'READY_FOR_DISPATCH',
+            fulfillmentstatus: 'READY_FOR_DISPATCH',
+            productName: 'Lizard Repellents',
+          },
+        ],
+      },
+      {
+        id: 'fulfil_ORD-1791005543999',
+        orderNumber: 'SO-2026-0099',
+        salesOrderId: 'ORD-1791005543999',
+        deliveryStatus: 'CANCELLED',
+        items: [
+          {
+            orderItemId: 'item_4',
+            outstatus: 'CANCELLED',
+            fulfillmentstatus: 'CANCELLED',
+            productName: 'Herbal Soap',
+          },
+        ],
+      },
+      {
+        id: 'fulfil_ORD-COMPLETED',
+        orderNumber: 'SO-2026-0010',
+        salesOrderId: 'ORD-COMPLETED',
+        deliveryStatus: 'COMPLETED',
+        items: [{ orderItemId: 'item_5', productName: 'Completed Order' }],
+      },
+      {
+        id: 'fulfil_ORD-NOT-STARTED',
+        orderNumber: 'SO-2026-0063',
+        salesOrderId: 'ORD-NOT-STARTED',
+        deliveryStatus: 'NOT_STARTED',
+        items: [{ orderItemId: 'item_6', productName: 'Not Started Order' }],
+      },
+      {
+        id: 'fulfil_ORD-SHIPPED',
+        orderNumber: 'SO-2026-0001',
+        salesOrderId: 'ORD-SHIPPED',
+        deliveryStatus: 'SHIPPED',
+        items: [{ orderItemId: 'item_7', productName: 'Shipped Order' }],
+      },
+    ];
+
+    // Filter documents by eligible deliveryStatus: only PACKING, READY_FOR_DISPATCH, CANCELLED
+    const eligibleDocs = mockFulfilmentDocs.filter((doc) =>
+      isEligibleShipmentDeliveryStatus(doc.deliveryStatus)
+    );
+
+    assert.equal(eligibleDocs.length, 4, 'Only 4 orders satisfy PACKING, READY_FOR_DISPATCH, or CANCELLED');
+    const eligibleOrderNumbers = eligibleDocs.map((d) => d.orderNumber);
+    assert.deepEqual(eligibleOrderNumbers, ['SO-2026-0059', 'SO-2026-0060', 'SO-2026-0061', 'SO-2026-0099']);
+
+    // Check that READY_FOR_DISPATCH documents with child items having fulfillmentstatus='ASSIGNED' are not dropped
+    const docWithAssignedItem = eligibleDocs.find((d) => d.orderNumber === 'SO-2026-0059')!;
+    assert.equal(docWithAssignedItem.deliveryStatus, 'READY_FOR_DISPATCH');
+    assert.equal(docWithAssignedItem.items.length, 1);
+
+    // Verify item delivery status resolution defaults to parent doc deliveryStatus
+    const item: any = docWithAssignedItem.items[0];
+    const explicitItemStatus = (item.deliverystatus || item.outstatus || '').trim();
+    const itemDeliveryStatus = explicitItemStatus && isEligibleShipmentDeliveryStatus(explicitItemStatus)
+      ? explicitItemStatus
+      : docWithAssignedItem.deliveryStatus;
+
+    assert.equal(itemDeliveryStatus, 'READY_FOR_DISPATCH', 'Item must inherit parent doc deliveryStatus READY_FOR_DISPATCH');
   });
 });

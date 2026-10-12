@@ -1,6 +1,10 @@
 import test, { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { OperationsService, DataAccessor } from '../src/services/operationsService';
+import {
+  isRowAssignOwnerDisabled,
+  getStatusPriority,
+} from '../src/components/BrandOwnerAssignmentView';
 
 function createMockDatabase() {
   const collections: Record<string, any[]> = {
@@ -168,4 +172,48 @@ describe('Brand Owner Assignment Module & Data Validation Tests', () => {
       }
     );
   });
+
+  it('5. Grid sorting order: NOT_STARTED orders first, PACKING orders second', async () => {
+    const { service } = createMockDatabase();
+    const result = await service.listStageRecords('brand-owner-assignment');
+
+    assert.equal(result.records.length, 2);
+    // 1st should be NOT_STARTED / Pending
+    assert.equal(result.records[0].deliveryStatus, 'Pending');
+    // 2nd should be PACKING
+    assert.equal(result.records[1].deliveryStatus, 'PACKING');
+  });
+
+  it('6. The Assign Owner button is disabled only for that particular saved/packing row, enabled for all other rows', () => {
+    const pendingOrder1 = { id: 'SO-0062', deliveryStatus: 'NOT_STARTED' };
+    const pendingOrder2 = { id: 'SO-0063', deliveryStatus: 'NOT_STARTED' };
+    const packingOrder = { id: 'SO-0050', deliveryStatus: 'PACKING' };
+    const completedOrder = { id: 'SO-0001', deliveryStatus: 'COMPLETED' };
+
+    const savedOrderIds = new Set<string>();
+
+    // Initial state:
+    // - Pending orders should be enabled (disabled: false)
+    assert.equal(isRowAssignOwnerDisabled(pendingOrder1, savedOrderIds), false);
+    assert.equal(isRowAssignOwnerDisabled(pendingOrder2, savedOrderIds), false);
+    // - PACKING orders should be disabled (disabled: true)
+    assert.equal(isRowAssignOwnerDisabled(packingOrder, savedOrderIds), true);
+    // - Completed/Restricted orders should be disabled (disabled: true)
+    assert.equal(isRowAssignOwnerDisabled(completedOrder, savedOrderIds), true);
+
+    // When pendingOrder1 is saved for that particular row:
+    savedOrderIds.add(pendingOrder1.id);
+
+    // That particular row becomes disabled:
+    assert.equal(isRowAssignOwnerDisabled(pendingOrder1, savedOrderIds), true);
+
+    // ALL OTHER pending rows strictly remain enabled!
+    assert.equal(isRowAssignOwnerDisabled(pendingOrder2, savedOrderIds), false);
+
+    // Check sorting priority: NOT_STARTED = 1, PACKING = 2
+    assert.equal(getStatusPriority('NOT_STARTED'), 1);
+    assert.equal(getStatusPriority('PENDING'), 1);
+    assert.equal(getStatusPriority('PACKING'), 2);
+  });
 });
+

@@ -283,7 +283,7 @@ export const CompletePackingView: React.FC = () => {
         if (!salesOrderId) continue;
 
         const matchedOrder = resolveSalesOrder(salesOrderId);
-        const orderNo = String(matchedOrder?.orderNumber || doc.orderNumber || doc.orderNo || salesOrderId);
+        const orderNo = String(doc.orderNumber || doc.orderNo || matchedOrder?.orderNumber || salesOrderId);
         const customerName = String(
           matchedOrder?.customerName ||
           doc.customerName ||
@@ -983,7 +983,7 @@ export const CompletePackingView: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs font-bold text-emerald-900 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/40 px-2 py-0.5 rounded-md">
-                          Order : {order.salesOrderId || order.orderNo}
+                          ORDER NO : {order.orderNo}
                         </span>
                         <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5" />

@@ -84,8 +84,62 @@ export interface ShipmentBrandOwnerAssignment extends ShipmentOperationalCommon 
   // Child records array (orderfulfilment) linked to orderItemId to insert PACKING DETAILS of MULTIPLE RECORDS EACH ORDERITEMID
   orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];
 
+  // Grouped child items array for shipment_brand_owner_fulfilment parent document structure
+  items?: ShipmentBrandOwnerFulfilmentChildItem[];
 
   status: BrandOwnerAssignmentStatus;
+}
+
+export interface ShipmentBrandOwnerFulfilmentChildItem {
+  id?: string;
+  orderItemId: string;
+  productId: string;
+  itemId?: string;
+  productName: string;
+  brandOwnerAssignid?: string;
+  brandOwnerId: string;
+  brandOwnerName: string;
+  contactEmail?: string;
+  contactMobile?: string;
+  whatsappNo?: string;
+  shipid?: string;
+  orderpackingsize?: string;
+  orderunit?: string;
+  orderqty?: number;
+  outpackdate?: string;
+  outpackingsize?: string;
+  outunit?: string;
+  outquantity?: number;
+  outstatus: string;
+  outbalanceqty?: number;
+  outexpecteddateofdespatchdate?: string;
+  outpickupdate?: string;
+  outcouriername?: string;
+  outcourierdocketno?: string;
+  outdealyreasons?: string;
+  deliverydate?: string;
+  deliverycondition?: string;
+  deliverystatus?: string;
+  fulfillmentstatus?: string;
+  status?: string;
+  orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ShipmentBrandOwnerFulfilmentParentDoc {
+  id: string;
+  salesOrderId: string;
+  orderNumber?: string;
+  customerId?: string;
+  customerName?: string;
+  customerMobile?: string;
+  orderDate?: string;
+  deliveryStatus?: string;
+  status?: string;
+  createdAt: string;
+  updatedAt: string;
+  items: ShipmentBrandOwnerFulfilmentChildItem[];
 }
 
 export interface ShipmentPacking extends ShipmentOperationalCommon {
@@ -189,4 +243,14 @@ export interface OrderLifecycleResponse {
     deliveries: ShipmentDelivery[];
     returns: ShipmentReturn[];
   };
+}
+
+export interface ShipmentTrackingRecord {
+  id?: string;
+  shipid: string;
+  salesOrderId?: string;
+  createdAt: any;
+  deliverystatus: any;
+  outpackingstatus: any;
+  updatedby: string;
 }

@@ -24,6 +24,18 @@ export class BaseRepository<T extends { id?: string }> {
   protected sanitizeForFirestore(obj: any): any {
     if (obj === undefined) return null;
     if (obj === null || typeof obj !== 'object') return obj;
+    if (
+      obj instanceof Date ||
+      obj?.constructor?.name === 'Timestamp' ||
+      obj?.constructor?.name === 'FieldValue' ||
+      obj?.constructor?.name?.includes('Timestamp') ||
+      obj?.constructor?.name?.includes('Transform') ||
+      obj?.constructor?.name?.includes('FieldValue') ||
+      typeof obj?.toDate === 'function' ||
+      typeof obj?.isEqual === 'function'
+    ) {
+      return obj;
+    }
     if (Array.isArray(obj)) {
       return obj.map(item => this.sanitizeForFirestore(item));
     }

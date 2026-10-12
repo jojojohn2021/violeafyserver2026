@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import { adminApp, adminAuth, adminDb, adminStorage } from "./firebase-admin";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import multer from 'multer';
 import crypto from "crypto";
 import {
@@ -57,7 +57,7 @@ async function requireAuthenticatedRequest(req: express.Request, res: express.Re
 const protectedOperationCollections = new Set([
   'order_fulfilment', 'order_packing', 'order_brand_assignments', 'order_shipments', 'order_delivery', 'order_returns',
   'order_operation_history', 'shipment_brand_owner_fulfilment', 'shipment_packing', 'shipment_shipments',
-  'shipment_deliveries', 'shipment_returns', 'payments',
+  'shipment_deliveries', 'shipment_returns', 'payments', 'shipment_tracking',
 ]);
 
 function requireOperationsAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -162,6 +162,20 @@ async function getCollectionDocs(collection: string): Promise<any[]> {
 
 function sanitizeFirestorePayload(obj: any): any {
   if (obj === null || obj === undefined) return null;
+  if (
+    obj instanceof Date ||
+    obj instanceof Timestamp ||
+    obj instanceof FieldValue ||
+    obj?.constructor?.name === 'Timestamp' ||
+    obj?.constructor?.name === 'FieldValue' ||
+    obj?.constructor?.name?.includes('Timestamp') ||
+    obj?.constructor?.name?.includes('Transform') ||
+    obj?.constructor?.name?.includes('FieldValue') ||
+    typeof obj?.toDate === 'function' ||
+    typeof obj?.isEqual === 'function'
+  ) {
+    return obj;
+  }
   if (Array.isArray(obj)) return obj.map(sanitizeFirestorePayload);
   if (typeof obj === 'object') {
     const clean: Record<string, any> = {};
@@ -208,6 +222,62 @@ async function saveCollectionDoc(collection: string, item: any): Promise<void> {
   }
 
   throw new Error(`Failed to save document to ${collection}: ${dbError || "Firestore connection unavailable"}`);
+}
+
+function didStatusChange(previousDoc: any, updatedDoc: any): boolean {
+  if (!previousDoc) return true;
+
+  const prevDelivery = previousDoc.deliverystatus ?? previousDoc.deliveryStatus ?? '';
+  const newDelivery = updatedDoc.deliverystatus ?? updatedDoc.deliveryStatus ?? '';
+
+  const prevPacking = previousDoc.outpackingstatus ?? previousDoc.orderfulfilment?.[0]?.outpackingstatus ?? previousDoc.outstatus ?? '';
+  const newPacking = updatedDoc.outpackingstatus ?? updatedDoc.orderfulfilment?.[0]?.outpackingstatus ?? updatedDoc.outstatus ?? '';
+
+  const prevOutStatus = previousDoc.outstatus ?? '';
+  const newOutStatus = updatedDoc.outstatus ?? '';
+
+  const prevFulfillment = previousDoc.fulfillmentstatus ?? '';
+  const newFulfillment = updatedDoc.fulfillmentstatus ?? '';
+
+  const prevStatus = previousDoc.status ?? '';
+  const newStatus = updatedDoc.status ?? '';
+
+  return (
+    prevDelivery !== newDelivery ||
+    prevPacking !== newPacking ||
+    prevOutStatus !== newOutStatus ||
+    prevFulfillment !== newFulfillment ||
+    prevStatus !== newStatus
+  );
+}
+
+async function recordShipmentTrackingAudit(
+  shipid: string,
+  deliverystatus: any,
+  outpackingstatus: any,
+  updatedby: string,
+  salesOrderId?: string
+): Promise<any> {
+  if (!shipid) {
+    throw new Error("shipid is required for shipment_tracking audit logging.");
+  }
+
+  const auditId = `st_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const createdAt = Timestamp.now();
+
+  const auditDoc = {
+    id: auditId,
+    shipid: String(shipid),
+    salesOrderId: salesOrderId !== undefined && salesOrderId !== null ? String(salesOrderId) : '',
+    createdAt,
+    deliverystatus: deliverystatus !== undefined && deliverystatus !== null ? deliverystatus : '',
+    outpackingstatus: outpackingstatus !== undefined && outpackingstatus !== null ? outpackingstatus : '',
+    updatedby: String(updatedby || 'Ops Admin'),
+  };
+
+  await saveCollectionDoc('shipment_tracking', auditDoc);
+  console.log(`[VIO-AUDIT] Created shipment_tracking audit record (ID: ${auditId}, shipid: ${shipid}, salesOrderId: ${auditDoc.salesOrderId}, deliverystatus: ${auditDoc.deliverystatus}, outpackingstatus: ${auditDoc.outpackingstatus}, updatedby: ${auditDoc.updatedby})`);
+  return auditDoc;
 }
 
 async function deleteCollectionDoc(collection: string, id: string): Promise<void> {
@@ -1769,7 +1839,9 @@ const handleAssignBrandOwner = async (req: express.Request, res: express.Respons
         table: "shipment_brand_owner_fulfilment"
       });
     }
-    const result = await operationsService.assignBrandOwners(req.params.orderId, assignments, assignedBy, getIdempotencyKey(req));
+    const user = (req as AuthenticatedRequest).user;
+    const userIdentifier = user?.email || user?.uid || assignedBy || 'Ops Admin';
+    const result = await operationsService.assignBrandOwners(req.params.orderId, assignments, userIdentifier, getIdempotencyKey(req));
     return res.json({
       success: true,
       message: "Brand owner assignments saved.",
@@ -1809,10 +1881,80 @@ const handleAddFulfilmentChildPacking = async (req: express.Request, res: expres
 app.post("/api/operations/shipment-fulfilment/:id/child-packing", handleAddFulfilmentChildPacking);
 app.post("/api/v1/operations/shipment-fulfilment/:id/child-packing", handleAddFulfilmentChildPacking);
 
+function normalizeGroupedFulfilmentDocs(rawDocs: any[]): any[] {
+  const groupedMap = new Map<string, any>();
+
+  // Pass 1: Register all parent documents that already hold an items array
+  for (const doc of rawDocs) {
+    if (!doc || !Array.isArray(doc.items)) continue;
+    const sId = String(doc.salesOrderId || doc.orderNo || doc.orderId || (doc.id && !String(doc.id).startsWith('boa_') ? doc.id : '') || '').trim();
+    if (!sId) continue;
+    groupedMap.set(sId, { ...doc, items: [...doc.items] });
+  }
+
+  // Pass 2: Merge any legacy flat documents into their parent document (never create separate boa_ orders)
+  for (const doc of rawDocs) {
+    if (!doc || Array.isArray(doc.items)) continue;
+    const sId = String(doc.salesOrderId || doc.orderNo || doc.orderId || '').trim();
+    if (!sId) continue; // Ignore standalone flat doc if it lacks a valid salesOrderId
+
+    if (!groupedMap.has(sId)) {
+      groupedMap.set(sId, {
+        id: `fulfil_${sId}`,
+        salesOrderId: sId,
+        orderNumber: doc.orderNumber || doc.orderNo || sId,
+        customerId: doc.customerId || '',
+        customerName: doc.customerName || '',
+        customerMobile: doc.customerMobile || doc.contactNo || '',
+        deliveryStatus: doc.deliveryStatus || doc.deliverystatus || doc.outstatus || 'PACKING',
+        status: doc.status || 'ASSIGNED',
+        createdAt: doc.createdAt || new Date().toISOString(),
+        updatedAt: doc.updatedAt || new Date().toISOString(),
+        items: [],
+      });
+    }
+
+    const parent = groupedMap.get(sId);
+    const existingItems = parent.items as any[];
+    const matchIdx = existingItems.findIndex(
+      (m: any) =>
+        (m.orderItemId && doc.orderItemId && String(m.orderItemId) === String(doc.orderItemId)) ||
+        (m.productId && doc.productId && String(m.productId) === String(doc.productId)) ||
+        (m.brandOwnerAssignid && doc.brandOwnerAssignid && String(m.brandOwnerAssignid) === String(doc.brandOwnerAssignid)) ||
+        (m.id && doc.id && String(m.id) === String(doc.id))
+    );
+    if (matchIdx >= 0) {
+      existingItems[matchIdx] = { ...existingItems[matchIdx], ...doc };
+    } else {
+      existingItems.push(doc);
+    }
+  }
+
+  return Array.from(groupedMap.values());
+}
+
 // 10c. GET & POST /api/operations/shipment-brand-owner-fulfilment (Complete Packing View)
 const handleGetShipmentBrandOwnerFulfilment = async (req: express.Request, res: express.Response) => {
   try {
-    const docs = await getCollectionDocs('shipment_brand_owner_fulfilment');
+    const rawDocs = await getCollectionDocs('shipment_brand_owner_fulfilment');
+
+    // Automatically clean up any duplicate standalone flat documents (e.g. boa_...)
+    for (const d of rawDocs) {
+      if (d.id && String(d.id).startsWith('boa_') && !Array.isArray(d.items)) {
+        const sId = String(d.salesOrderId || d.orderNo || d.orderId || '').trim();
+        const hasParent = rawDocs.some(
+          (p: any) =>
+            Array.isArray(p.items) &&
+            (String(p.salesOrderId) === sId || String(p.id) === `fulfil_${sId}` || String(p.orderNumber) === sId)
+        );
+        if (hasParent) {
+          deleteCollectionDoc('shipment_brand_owner_fulfilment', String(d.id)).catch(() => {});
+          console.log(`[VIO-FIRESTORE] Automatically cleaned duplicate document from shipment_brand_owner_fulfilment: ${d.id}`);
+        }
+      }
+    }
+
+    const docs = normalizeGroupedFulfilmentDocs(rawDocs);
     return res.json({ success: true, count: docs.length, docs });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error?.message || "Failed to retrieve shipment_brand_owner_fulfilment records" });
@@ -1824,28 +1966,185 @@ app.get("/api/v1/operations/shipment-brand-owner-fulfilment", handleGetShipmentB
 const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res: express.Response) => {
   try {
     const { record, newRecord } = req.body || {};
-    if (!record || !record.id) {
-      return res.status(400).json({ success: false, error: "Record with a valid ID is required for saving." });
+    if (!record || (!record.id && !record.orderItemId && !record.productId)) {
+      return res.status(400).json({ success: false, error: "Record with a valid ID or item identifier is required for saving." });
     }
 
-    // Save/update existing record in shipment_brand_owner_fulfilment
-    await saveCollectionDoc('shipment_brand_owner_fulfilment', record);
+    // 1. Server-side Validations
+    const deliveryConditionVal = String(record.deliverycondition || record.outdeliverycondition || '');
+    if (deliveryConditionVal.length > 50) {
+      return res.status(400).json({
+        success: false,
+        error: "Validation failed: Delivery Condition cannot exceed 50 characters."
+      });
+    }
+
+    const delayReasonsVal = String(record.outdealyreasons || record.delayReasons || '');
+    if (delayReasonsVal.length > 70) {
+      return res.status(400).json({
+        success: false,
+        error: "Validation failed: Delay Reasons cannot exceed 70 characters."
+      });
+    }
+
+    const statusVal = String(record.outstatus || record.fulfillmentstatus || record.status || '').toUpperCase().trim();
+    const courierNameVal = String(record.outcouriername || record.couriername || record.courierAgency || '').trim();
+    const docketNoVal = String(record.outcourierdocketno || record.courierdocketno || record.trackingNumber || '').trim();
+
+    if ((statusVal === 'SHIPPED' || !!courierNameVal) && !docketNoVal) {
+      return res.status(400).json({
+        success: false,
+        error: "Validation failed: Courier Docket No is mandatory before saving shipment record."
+      });
+    }
+
+    const targetSalesOrderId = String(record.salesOrderId || record.orderNo || record.orderId || req.body?.salesOrderId || '').trim();
+    const existingDocs = await getCollectionDocs('shipment_brand_owner_fulfilment').catch(() => []);
+    const now = new Date().toISOString();
+
+    // Look for existing parent doc
+    let parentDoc = existingDocs.find(
+      (d: any) =>
+        (String(d.salesOrderId) === targetSalesOrderId || String(d.id) === `fulfil_${targetSalesOrderId}`) &&
+        Array.isArray(d.items)
+    );
+
+    if (!parentDoc) {
+      // Find any existing docs for this sales order to bundle into items
+      const existingItemsForOrder = existingDocs.filter(
+        (d: any) =>
+          !Array.isArray(d.items) &&
+          (String(d.salesOrderId) === targetSalesOrderId || String(d.orderNo) === targetSalesOrderId)
+      );
+
+      parentDoc = {
+        id: `fulfil_${targetSalesOrderId || record.id}`,
+        salesOrderId: targetSalesOrderId || String(record.id),
+        orderNumber: String(record.orderNumber || record.orderNo || targetSalesOrderId),
+        customerId: String(record.customerId || ''),
+        customerName: String(record.customerName || ''),
+        customerMobile: String(record.customerMobile || ''),
+        deliveryStatus: statusVal || 'PACKING',
+        status: 'ASSIGNED',
+        createdAt: now,
+        updatedAt: now,
+        items: [...existingItemsForOrder],
+      };
+    }
+
+    // Locate target child item inside parent items
+    const childIdx = parentDoc.items.findIndex(
+      (it: any) =>
+        (record.orderItemId && it.orderItemId && String(it.orderItemId) === String(record.orderItemId)) ||
+        (record.productId && it.productId && String(it.productId) === String(record.productId)) ||
+        (record.brandOwnerAssignid && it.brandOwnerAssignid && String(it.brandOwnerAssignid) === String(record.brandOwnerAssignid)) ||
+        (record.id && it.id && String(it.id) === String(record.id))
+    );
+
+    const previousChild = childIdx >= 0 ? parentDoc.items[childIdx] : null;
+    const isStatusChanged = didStatusChange(previousChild, record);
+
+    const updatedChild = {
+      ...(previousChild || {}),
+      ...record,
+      salesOrderId: targetSalesOrderId || record.salesOrderId,
+      updatedAt: now,
+    };
+
+    if (childIdx >= 0) {
+      parentDoc.items[childIdx] = updatedChild;
+    } else {
+      parentDoc.items.push(updatedChild);
+    }
+
+    parentDoc.updatedAt = now;
+    if (statusVal) {
+      parentDoc.deliveryStatus = statusVal;
+    }
+
+    // Save parent doc into shipment_brand_owner_fulfilment
+    await saveCollectionDoc('shipment_brand_owner_fulfilment', parentDoc);
+
+    // Clean up any duplicate flat documents for this sales order from shipment_brand_owner_fulfilment
+    for (const d of existingDocs) {
+      if (d.id && String(d.id) !== String(parentDoc.id)) {
+        const matchesOrder =
+          String(d.salesOrderId || '') === targetSalesOrderId ||
+          String(d.orderId || '') === targetSalesOrderId ||
+          String(d.orderNo || '') === targetSalesOrderId;
+        if (matchesOrder && (String(d.id).startsWith('boa_') || !Array.isArray(d.items))) {
+          try {
+            await deleteCollectionDoc('shipment_brand_owner_fulfilment', String(d.id));
+            console.log(`[VIO-FIRESTORE] Removed duplicate flat document from shipment_brand_owner_fulfilment: ${d.id}`);
+          } catch (cleanErr) {
+            console.warn('[VIO-FIRESTORE] Warning deleting duplicate document:', cleanErr);
+          }
+        }
+      }
+    }
+
+    if (record.id && String(record.id) !== String(parentDoc.id) && String(record.id).startsWith('boa_')) {
+      try {
+        await deleteCollectionDoc('shipment_brand_owner_fulfilment', String(record.id));
+      } catch (cleanErr) {
+        // ignore
+      }
+    }
+
+    const user = (req as AuthenticatedRequest).user;
+    const updatedby = user?.email || user?.uid || (req.body?.updatedby || (req as any).user?.name || 'Ops Admin');
+
+    // Create audit record in shipment_tracking if status changed
+    let auditRecord: any = null;
+    if (isStatusChanged) {
+      const deliverystatus = record.deliverystatus !== undefined ? record.deliverystatus : (record.deliveryStatus || '');
+      const outpackingstatus = record.outpackingstatus !== undefined ? record.outpackingstatus : (record.orderfulfilment?.[0]?.outpackingstatus || record.outstatus || '');
+      auditRecord = await recordShipmentTrackingAudit(
+        record.shipid || updatedChild.shipid || `ship_${targetSalesOrderId}`,
+        deliverystatus,
+        outpackingstatus,
+        updatedby,
+        targetSalesOrderId
+      );
+    }
 
     // If outbalanceqty > 0, save the new split orderfulfilment record
+    let newRecordAudit: any = null;
     if (newRecord && newRecord.id) {
-      await saveCollectionDoc('shipment_brand_owner_fulfilment', newRecord);
+      const existingNewIdx = parentDoc.items.findIndex(
+        (it: any) => String(it.id) === String(newRecord.id) || (newRecord.orderItemId && String(it.orderItemId) === String(newRecord.orderItemId))
+      );
+      if (existingNewIdx >= 0) {
+        parentDoc.items[existingNewIdx] = { ...parentDoc.items[existingNewIdx], ...newRecord, updatedAt: now };
+      } else {
+        parentDoc.items.push({ ...newRecord, createdAt: now, updatedAt: now });
+      }
+      await saveCollectionDoc('shipment_brand_owner_fulfilment', parentDoc);
+
       try {
         await saveCollectionDoc('orderfulfilment', newRecord);
       } catch (err) {
         console.warn('[VIO-FIRESTORE] Warning syncing to orderfulfilment collection:', err);
       }
+
+      const existingNew = existingDocs.find((d: any) => String(d.id) === String(newRecord.id));
+      const isNewStatusChanged = didStatusChange(existingNew, newRecord);
+      if (isNewStatusChanged) {
+        const newDeliveryStatus = newRecord.deliverystatus !== undefined ? newRecord.deliverystatus : (newRecord.deliveryStatus || '');
+        const newOutpackingStatus = newRecord.outpackingstatus !== undefined ? newRecord.outpackingstatus : (newRecord.orderfulfilment?.[0]?.outpackingstatus || newRecord.outstatus || '');
+        newRecordAudit = await recordShipmentTrackingAudit(
+          newRecord.shipid,
+          newDeliveryStatus,
+          newOutpackingStatus,
+          updatedby,
+          targetSalesOrderId
+        );
+      }
     }
 
     // Trigger stage notifications for order stage updates (e.g. SHIPPED, READY_FOR_DISPATCH, PACKING, IN_TRANSIT, DELIVERED)
-    const orderId = String(record.salesOrderId || record.orderId || record.orderNo || '').trim();
     let notificationResult: any = null;
-    if (orderId) {
-      const statusVal = String(record.outstatus || record.fulfillmentstatus || record.status || '').toUpperCase().trim();
+    if (targetSalesOrderId) {
       let stageName = '';
       if (statusVal === 'SHIPPED') {
         stageName = 'Shipped';
@@ -1863,14 +2162,14 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
         try {
           // Sync sales_orders deliveryStatus and tracking/courier details
           const salesOrders = await getCollectionDocs('sales_orders');
-          const salesOrder = salesOrders.find((so: any) => String(so.id) === orderId || String(so.orderNumber) === orderId);
-          const targetOrderId = salesOrder ? String(salesOrder.id) : orderId;
-          const courierAgency = String(record.outcouriername || record.couriername || record.courierAgency || '').trim();
-          const docketNo = String(record.outcourierdocketno || record.courierdocketno || record.trackingNumber || '').trim();
+          const salesOrder = salesOrders.find((so: any) => String(so.id) === targetSalesOrderId || String(so.orderNumber) === targetSalesOrderId);
+          const targetOrderId = salesOrder ? String(salesOrder.id) : targetSalesOrderId;
+          const courierAgency = courierNameVal;
+          const docketNo = docketNoVal;
 
           if (salesOrder) {
             salesOrder.deliveryStatus = statusVal;
-            salesOrder.updatedAt = new Date().toISOString();
+            salesOrder.updatedAt = now;
             if (courierAgency) salesOrder.courierName = courierAgency;
             if (docketNo) salesOrder.trackingNumber = docketNo;
             await saveCollectionDoc('sales_orders', salesOrder);
@@ -1880,9 +2179,8 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
           if (courierAgency || docketNo) {
             const allShipments = await getCollectionDocs('order_shipments').catch(() => []);
             let existingShp = allShipments.find(
-              (s: any) => String(s.orderId) === String(targetOrderId) || String(s.orderId) === String(orderId)
+              (s: any) => String(s.orderId) === String(targetOrderId) || String(s.orderId) === String(targetSalesOrderId)
             );
-            const now = new Date().toISOString();
             if (existingShp) {
               if (courierAgency) existingShp.courierAgency = courierAgency;
               if (docketNo) existingShp.trackingNumber = docketNo;
@@ -1926,7 +2224,8 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
     return res.json({
       success: true,
       message: "Packing record and fulfillment details saved successfully.",
-      record,
+      record: updatedChild,
+      parentDoc,
       newRecord: newRecord || null,
       notification: notificationResult,
     });
@@ -1937,6 +2236,20 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
 app.post("/api/operations/shipment-brand-owner-fulfilment/save", handleSaveShipmentBrandOwnerFulfilment);
 app.post("/api/v1/operations/shipment-brand-owner-fulfilment/save", handleSaveShipmentBrandOwnerFulfilment);
 
+// GET /api/operations/shipment-tracking & /api/v1/...
+const handleGetShipmentTracking = async (req: express.Request, res: express.Response) => {
+  try {
+    const docs = await getCollectionDocs('shipment_tracking');
+    const { shipid } = req.query;
+    const filtered = shipid ? docs.filter((d: any) => String(d.shipid) === String(shipid)) : docs;
+    return res.json({ success: true, count: filtered.length, docs: filtered });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || "Failed to retrieve shipment_tracking records" });
+  }
+};
+app.get("/api/operations/shipment-tracking", handleGetShipmentTracking);
+app.get("/api/v1/operations/shipment-tracking", handleGetShipmentTracking);
+
 const handleSyncShipmentBrandOwnerFulfilmentFromOrders = async (req: express.Request, res: express.Response) => {
   try {
     const [salesOrders, existingDocs] = await Promise.all([
@@ -1944,10 +2257,33 @@ const handleSyncShipmentBrandOwnerFulfilmentFromOrders = async (req: express.Req
       getCollectionDocs('shipment_brand_owner_fulfilment'),
     ]);
 
-    const existingMap = new Set(existingDocs.map((d: any) => `${d.salesOrderId}_${d.orderItemId || d.itemId || d.productId}`));
     let addedCount = 0;
+    const now = new Date().toISOString();
+    const today = now.split('T')[0];
 
     for (const order of salesOrders) {
+      const orderId = String(order.id);
+      let parentDoc = existingDocs.find(
+        (d: any) => (String(d.salesOrderId) === orderId || String(d.id) === `fulfil_${orderId}`) && Array.isArray(d.items)
+      );
+
+      if (!parentDoc) {
+        parentDoc = {
+          id: `fulfil_${orderId}`,
+          salesOrderId: orderId,
+          orderNumber: String(order.orderNumber || orderId),
+          customerId: String(order.customerId || ''),
+          customerName: String(order.customerName || ''),
+          customerMobile: String(order.customerMobile || order.contactNo || ''),
+          deliveryStatus: String(order.deliveryStatus || 'PACKING'),
+          status: 'ASSIGNED',
+          createdAt: now,
+          updatedAt: now,
+          items: [],
+        };
+        existingDocs.push(parentDoc);
+      }
+
       const prods = Array.isArray(order.products) ? order.products : [];
       const assignments = Array.isArray(order.brandAssignments) ? order.brandAssignments : [];
 
@@ -1955,23 +2291,22 @@ const handleSyncShipmentBrandOwnerFulfilmentFromOrders = async (req: express.Req
         const prod = prods[idx];
         const pId = String(prod.productId || prod.id || `p_${idx}`);
         const iId = String(prod.itemId || prod.orderItemId || `item_${pId}`);
-        const key = `${order.id}_${iId}`;
 
-        if (!existingMap.has(key)) {
+        const existingItem = parentDoc.items.find((item: any) => String(item.orderItemId) === iId || String(item.productId) === pId);
+        if (!existingItem) {
           const matchAssignment = assignments.find((a: any) => String(a.productId) === pId || String(a.orderItemId) === iId);
           const brandOwnerName = matchAssignment?.brandOwnerName || prod.brandOwnerName || 'Vio Nature Science';
           const brandOwnerId = matchAssignment?.brandOwnerId || prod.brandOwnerId || 'bo_default';
           const qty = Number(prod.quantity ?? prod.qty ?? prod.orderqty ?? 1);
           const unit = String(prod.unit ?? prod.orderunit ?? 'PCS');
           const packingSize = String(prod.packingSize ?? prod.packingsize ?? prod.orderpackingsize ?? 'Standard');
-          const today = new Date().toISOString().split('T')[0];
           const newId = `boa_${order.id}_${pId}`;
 
-          const newDoc = {
+          const newItem = {
             id: newId,
             shipid: `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             brandOwnerAssignid: newId,
-            salesOrderId: String(order.id),
+            salesOrderId: orderId,
             orderItemId: iId,
             itemId: iId,
             productId: pId,
@@ -1996,19 +2331,20 @@ const handleSyncShipmentBrandOwnerFulfilmentFromOrders = async (req: express.Req
             outdeliverydate: '',
             outdeliverycondition: '',
             orderfulfilment: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+            createdAt: now,
+            updatedAt: now,
           };
-
-          await saveCollectionDoc('shipment_brand_owner_fulfilment', newDoc);
-          existingMap.add(key);
+          parentDoc.items.push(newItem);
           addedCount++;
         }
       }
+
+      await saveCollectionDoc('shipment_brand_owner_fulfilment', parentDoc);
     }
 
     const updatedDocs = await getCollectionDocs('shipment_brand_owner_fulfilment');
-    return res.json({ success: true, addedCount, totalDocs: updatedDocs.length, docs: updatedDocs });
+    const normalized = normalizeGroupedFulfilmentDocs(updatedDocs);
+    return res.json({ success: true, addedCount, totalDocs: normalized.length, docs: normalized });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error?.message || "Failed to sync orders." });
   }

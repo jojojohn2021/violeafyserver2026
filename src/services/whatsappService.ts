@@ -842,8 +842,12 @@ export async function sendOrderStageWhatsAppNotification(
           String(f.orderNo) === String(order.orderNumber)
       );
       if (matchFul) {
-        if (!trackingNumber) trackingNumber = matchFul.outcourierdocketno || matchFul.courierdocketno;
-        if (!courierName) courierName = matchFul.outcouriername || matchFul.couriername;
+        if (!trackingNumber) {
+          trackingNumber = matchFul.outcourierdocketno || matchFul.courierdocketno || matchFul.items?.find((i: any) => i.outcourierdocketno || i.courierdocketno)?.outcourierdocketno || matchFul.items?.[0]?.outcourierdocketno || matchFul.items?.[0]?.courierdocketno;
+        }
+        if (!courierName) {
+          courierName = matchFul.outcouriername || matchFul.couriername || matchFul.items?.find((i: any) => i.outcouriername || i.couriername)?.outcouriername || matchFul.items?.[0]?.outcouriername || matchFul.items?.[0]?.couriername;
+        }
       }
     }
 

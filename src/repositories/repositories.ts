@@ -367,6 +367,12 @@ export class ShipmentReturnRepository extends BaseRepository<any> {
   }
 }
 
+export class ShipmentTrackingRepository extends BaseRepository<any> {
+  constructor() {
+    super('shipment_tracking');
+  }
+}
+
 export const userRepository = new UserRepository();
 export const productRepository = new ProductRepository();
 export const shoppingRepository = new ShoppingRepository();
@@ -407,6 +413,7 @@ export const shipmentPackingRepository = new ShipmentPackingRepository();
 export const shipmentShipmentRepository = new ShipmentShipmentRepository();
 export const shipmentDeliveryRepository = new ShipmentDeliveryRepository();
 export const shipmentReturnRepository = new ShipmentReturnRepository();
+export const shipmentTrackingRepository = new ShipmentTrackingRepository();
 
 
 

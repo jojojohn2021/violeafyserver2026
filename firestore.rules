@@ -160,6 +160,9 @@ service cloud.firestore {
     match /shipment_returns/{recordId} {
       allow read, write: if true;
     }
+    match /shipment_tracking/{recordId} {
+      allow read, write: if true;
+    }
 
     // Influencers
     match /influencers/{influencerId} {

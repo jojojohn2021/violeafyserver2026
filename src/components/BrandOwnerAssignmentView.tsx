@@ -26,7 +26,9 @@ import {
   brandOwnerRepository,
   orderRepository,
   shipmentBrandOwnerAssignmentRepository,
+  shipmentTrackingRepository,
 } from '../repositories/repositories';
+import { auth } from '../firebase';
 import { apiFetch } from '../utils/apiFetch';
 import { BrandOwner } from '../types';
 
@@ -47,6 +49,25 @@ export interface SalesOrderRecord {
   lastUpdated?: string;
   salesChannel?: string;
 }
+
+export const STATUS_PRIORITY_ORDER: Record<string, number> = {
+  NOT_STARTED: 1,
+  PACKING: 2,
+  READY_FOR_DISPATCH: 3,
+  SHIPPED: 4,
+  COMPLETED: 5,
+};
+
+export const getStatusPriority = (status?: string): number => {
+  if (!status) return 99;
+  const normalized = status.toUpperCase().trim();
+  if (normalized === 'PENDING') return 1;
+  if (normalized === 'DELIVERED') return 5;
+  if (STATUS_PRIORITY_ORDER[normalized] !== undefined) {
+    return STATUS_PRIORITY_ORDER[normalized];
+  }
+  return 99;
+};
 
 export const BrandOwnerAssignmentView: React.FC = () => {
   const { products: globalProducts } = useCRM();
@@ -158,6 +179,13 @@ export const BrandOwnerAssignmentView: React.FC = () => {
         filtered = filtered.filter((o) => o.createdAt && o.createdAt.startsWith(dateFilter));
       }
 
+      // Priority sort by deliveryStatus / outstatus: NOT_STARTED (1) -> PACKING (2) -> READY_FOR_DISPATCH (3) -> SHIPPED (4) -> COMPLETED (5)
+      filtered.sort((a, b) => {
+        const pA = getStatusPriority(a.deliveryStatus || a.fulfilmentStatus);
+        const pB = getStatusPriority(b.deliveryStatus || b.fulfilmentStatus);
+        return pA - pB;
+      });
+
       setPaginationInfo({
         page,
         limit,
@@ -201,6 +229,11 @@ export const BrandOwnerAssignmentView: React.FC = () => {
           const data = await res.json();
           if (data && data.success) {
             const fetchedOrders: SalesOrderRecord[] = data.records || data.orders || [];
+            fetchedOrders.sort((a, b) => {
+              const pA = getStatusPriority(a.deliveryStatus || a.fulfilmentStatus);
+              const pB = getStatusPriority(b.deliveryStatus || b.fulfilmentStatus);
+              return pA - pB;
+            });
             setOrders(fetchedOrders);
             if (data.pagination) {
               setPaginationInfo(data.pagination);
@@ -392,7 +425,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
 
   // Save Brand Owner Assignments API
   const handleSaveAssignments = async () => {
-    if (!selectedOrder) return;
+    if (!selectedOrder || submitting) return;
 
     // DATA VALIDATION CONSTRAINT RE-CHECK
     if (isDeliveryStatusRestricted(selectedOrder.deliveryStatus)) {
@@ -454,8 +487,8 @@ export const BrandOwnerAssignmentView: React.FC = () => {
           lastUpdated: now,
         } as any);
 
-        // Also persist assignment records into shipment_brand_owner_fulfilment
-        for (const a of validAssignments) {
+        // Group into parent fulfilment document with items child array
+        const boaItems = validAssignments.map((a) => {
           const prodMatch = (selectedOrder.products || []).find(
             (p: any, idx: number) => getProdKey(p, idx) === a.productId || getItemIdKey(p, idx) === a.orderItemId
           );
@@ -464,7 +497,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
           const qty = Number(prodMatch?.quantity ?? prodMatch?.qty ?? 1);
           const today = now.split('T')[0];
 
-          const boaDoc = {
+          return {
             id: a.brandOwnerAssignid,
             shipid: a.shipid || `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             brandOwnerAssignid: a.brandOwnerAssignid,
@@ -492,11 +525,41 @@ export const BrandOwnerAssignmentView: React.FC = () => {
             createdAt: now,
             updatedAt: now,
           };
+        });
 
+        const parentFulfilDoc = {
+          id: `fulfil_${selectedOrder.id}`,
+          salesOrderId: String(selectedOrder.id),
+          orderNumber: String(selectedOrder.orderNumber || selectedOrder.id),
+          customerId: String(selectedOrder.customerId || ''),
+          customerName: String(selectedOrder.customerName || ''),
+          customerMobile: String(selectedOrder.customerMobile || ''),
+          deliveryStatus: updatedDeliveryStatus,
+          status: 'ASSIGNED',
+          items: boaItems,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        try {
+          await shipmentBrandOwnerAssignmentRepository.update(parentFulfilDoc.id, parentFulfilDoc as any);
+        } catch {
+          await shipmentBrandOwnerAssignmentRepository.create(parentFulfilDoc as any);
+        }
+
+        for (const item of boaItems) {
           try {
-            await shipmentBrandOwnerAssignmentRepository.update(a.brandOwnerAssignid, boaDoc);
-          } catch {
-            await shipmentBrandOwnerAssignmentRepository.create(boaDoc);
+            await shipmentTrackingRepository.create({
+              id: `st_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+              shipid: item.shipid,
+              salesOrderId: String(selectedOrder.id || item.salesOrderId || ''),
+              createdAt: new Date(),
+              deliverystatus: updatedDeliveryStatus,
+              outpackingstatus: 'PACKING',
+              updatedby: auth?.currentUser?.email || auth?.currentUser?.uid || 'Ops Admin',
+            });
+          } catch (auditErr) {
+            console.warn('[BrandOwnerAssignmentView] Warning creating shipment_tracking audit log:', auditErr);
           }
         }
 
@@ -512,6 +575,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
     if (saved) {
       if (selectedOrder) {
         selectedOrder.deliveryStatus = 'PACKING';
+        selectedOrder.brandAssignments = validAssignments;
       }
       showStatus('Brand Owner Assignments saved successfully! Delivery status updated to PACKING.');
       setIsModalOpen(false);
@@ -520,14 +584,20 @@ export const BrandOwnerAssignmentView: React.FC = () => {
     setSubmitting(false);
   };
 
-  // Filter orders locally if needed
-  const filteredOrders = orders.filter((order) => {
-    const status = getOrderAssignmentStatus(order);
-    if (assignmentStatusFilter === 'ASSIGNED' && status !== 'ASSIGNED') return false;
-    if (assignmentStatusFilter === 'UNASSIGNED' && status !== 'UNASSIGNED' && status !== 'PARTIAL') return false;
-    if (assignmentStatusFilter === 'RESTRICTED' && status !== 'RESTRICTED') return false;
-    return true;
-  });
+  // Filter orders locally if needed and sort by status priority
+  const filteredOrders = orders
+    .filter((order) => {
+      const status = getOrderAssignmentStatus(order);
+      if (assignmentStatusFilter === 'ASSIGNED' && status !== 'ASSIGNED') return false;
+      if (assignmentStatusFilter === 'UNASSIGNED' && status !== 'UNASSIGNED' && status !== 'PARTIAL') return false;
+      if (assignmentStatusFilter === 'RESTRICTED' && status !== 'RESTRICTED') return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const pA = getStatusPriority(a.deliveryStatus || a.fulfilmentStatus);
+      const pB = getStatusPriority(b.deliveryStatus || b.fulfilmentStatus);
+      return pA - pB;
+    });
 
   // Calculate metrics
   const totalCount = paginationInfo.totalRecords || orders.length;
@@ -814,11 +884,17 @@ export const BrandOwnerAssignmentView: React.FC = () => {
                   const stateName = (order as any).customerState || (order as any).shippingState || (order as any).state || (order as any).customerAddress?.state || 'N/A';
                   const mobileNum = order.customerMobile || (order as any).customerPhone || (order as any).mobile || 'N/A';
 
+                  const isAssigned = assignmentStatus === 'ASSIGNED';
+
                   return (
                     <tr
                       key={order.id}
                       className={`hover:bg-green-50/40 dark:hover:bg-slate-800/50 transition-colors ${
-                        isRestricted ? 'bg-slate-50/40 dark:bg-slate-900/40' : ''
+                        isRestricted
+                          ? 'bg-slate-50/40 dark:bg-slate-900/40'
+                          : isAssigned
+                          ? 'bg-sky-50 dark:bg-sky-950/40'
+                          : ''
                       }`}
                     >
                       {/* 1. Sales Order # */}
@@ -884,7 +960,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
                           className={`px-3 py-1.5 rounded-xl text-xs font-normal transition-all duration-200 inline-flex items-center space-x-1.5 shadow-xs ${
                             isRestricted
                               ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed dark:bg-slate-800 dark:text-slate-600 dark:border-slate-700'
-                              : 'bg-green-600 hover:bg-green-700 text-white shadow-green-600/20 active:scale-95'
+                              : 'bg-green-600 hover:bg-green-700 text-white shadow-green-600/20 active:scale-95 cursor-pointer'
                           }`}
                         >
                           <Building2 className="w-3.5 h-3.5" />
@@ -1106,7 +1182,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
               <div className="p-5 bg-green-50/60 dark:bg-slate-800/80 border-t border-green-200 dark:border-slate-700 flex items-center justify-end space-x-3">
                 <button
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+                  className="px-4 py-2.5 bg-[#fafafa] text-slate-700 border border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold transition-colors"
                 >
                   Cancel
                 </button>

@@ -30,6 +30,18 @@ export interface DataAccessor {
 // Helper to strip undefined properties for Firestore compatibility
 function sanitizeFirestorePayload(obj: any): any {
   if (obj === null || obj === undefined) return null;
+  if (
+    obj instanceof Date ||
+    obj?.constructor?.name === 'Timestamp' ||
+    obj?.constructor?.name === 'FieldValue' ||
+    obj?.constructor?.name?.includes('Timestamp') ||
+    obj?.constructor?.name?.includes('Transform') ||
+    obj?.constructor?.name?.includes('FieldValue') ||
+    typeof obj?.toDate === 'function' ||
+    typeof obj?.isEqual === 'function'
+  ) {
+    return obj;
+  }
   if (Array.isArray(obj)) return obj.map(sanitizeFirestorePayload);
   if (typeof obj === 'object') {
     const clean: Record<string, any> = {};
@@ -814,6 +826,7 @@ export class OperationsService {
 
     await this.db.saveCollectionDoc('order_brand_assignments', record);
 
+    const newAssignmentItems: any[] = [];
     for (const assignment of formattedAssignments) {
       const brandOwnerAssignid = assignment.brandOwnerAssignid || assignment.id || this.generateId('boa');
       const matchingProduct = orderProducts.find((p: any, idx: number) => {
@@ -897,8 +910,67 @@ export class OperationsService {
         createdAt: now,
         updatedAt: now,
       };
-      await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', sanitizeFirestorePayload(shipmentAssignmentItem));
+      newAssignmentItems.push(shipmentAssignmentItem);
+
+      const trackingDoc = {
+        id: this.generateId('st'),
+        shipid: shipmentAssignmentItem.shipid,
+        salesOrderId: String(orderId || shipmentAssignmentItem.salesOrderId || ''),
+        createdAt: new Date(),
+        deliverystatus: shipmentAssignmentItem.deliverystatus || details.order?.deliveryStatus || 'PACKING',
+        outpackingstatus: (shipmentAssignmentItem as any).outpackingstatus || shipmentAssignmentItem.orderfulfilment?.[0]?.outpackingstatus || 'PACKING',
+        updatedby: assignedBy || 'Operations Admin',
+      };
+      await this.db.saveCollectionDoc('shipment_tracking', sanitizeFirestorePayload(trackingDoc));
     }
+
+    // Persist to shipment_brand_owner_fulfilment as parent document with items child array
+    const existingFulfilments = await this.db.getCollectionDocs('shipment_brand_owner_fulfilment').catch(() => []);
+    let parentDoc = existingFulfilments.find(
+      (d: any) =>
+        (String(d.salesOrderId) === String(orderId) || String(d.id) === `fulfil_${orderId}`) &&
+        Array.isArray(d.items)
+    );
+
+    const parentShipId = newAssignmentItems[0]?.shipid || this.generateId('ship');
+
+    if (!parentDoc) {
+      parentDoc = {
+        id: `fulfil_${orderId}`,
+        shipid: parentShipId,
+        salesOrderId: String(orderId),
+        orderNumber: String(details.order?.orderNumber || orderId),
+        customerId: String(details.order?.customerId || ''),
+        customerName: String(details.order?.customerName || ''),
+        customerMobile: String(details.order?.customerMobile || (details.order as any)?.contactNo || ''),
+        deliveryStatus: computedStatus || 'PACKING',
+        status: 'ASSIGNED',
+        createdAt: now,
+        updatedAt: now,
+        items: newAssignmentItems,
+      };
+    } else {
+      parentDoc.shipid = parentDoc.shipid || parentShipId;
+      const mergedItems = [...(parentDoc.items || [])];
+      for (const item of newAssignmentItems) {
+        const existingIdx = mergedItems.findIndex(
+          (m: any) =>
+            (m.orderItemId && item.orderItemId && String(m.orderItemId) === String(item.orderItemId)) ||
+            (m.productId && item.productId && String(m.productId) === String(item.productId)) ||
+            (m.brandOwnerAssignid && item.brandOwnerAssignid && String(m.brandOwnerAssignid) === String(item.brandOwnerAssignid)) ||
+            (m.id && item.id && String(m.id) === String(item.id))
+        );
+        if (existingIdx >= 0) {
+          mergedItems[existingIdx] = { ...mergedItems[existingIdx], ...item, updatedAt: now };
+        } else {
+          mergedItems.push(item);
+        }
+      }
+      parentDoc.items = mergedItems;
+      parentDoc.deliveryStatus = computedStatus || parentDoc.deliveryStatus || 'PACKING';
+      parentDoc.updatedAt = now;
+    }
+    await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', sanitizeFirestorePayload(parentDoc));
 
     await this.updateFulfilmentStatus(orderId, computedStatus, { brandAssignmentId: record.id });
     await this.recordTimelineEvent(
@@ -1131,6 +1203,16 @@ export class OperationsService {
       matchFul.fulfillmentstatus = matchFul.outstatus;
       if (shipment.courierAgency) matchFul.outcouriername = shipment.courierAgency;
       if (shipment.trackingNumber) matchFul.outcourierdocketno = shipment.trackingNumber;
+      if (Array.isArray(matchFul.items)) {
+        matchFul.items = matchFul.items.map((it: any) => ({
+          ...it,
+          outstatus: matchFul.outstatus,
+          fulfillmentstatus: matchFul.fulfillmentstatus,
+          outcouriername: matchFul.outcouriername || it.outcouriername,
+          outcourierdocketno: matchFul.outcourierdocketno || it.outcourierdocketno,
+          updatedAt: now,
+        }));
+      }
       matchFul.updatedAt = now;
       await this.db.saveCollectionDoc('shipment_brand_owner_fulfilment', matchFul);
     }

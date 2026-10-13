@@ -27,6 +27,7 @@ import {
 } from '../repositories/repositories';
 import { auth } from '../firebase';
 import { apiFetch } from '../utils/apiFetch';
+import { migrateFulfilmentItem } from '../utils/fulfilmentItem';
 import { ProductPerformance } from '../types';
 
 export type PackingStatusOption = 'READY_FOR_DISPATCH' | 'PACKING' | 'CANCELLED';
@@ -86,14 +87,28 @@ export const CompletePackingView: React.FC = () => {
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'PACKING' | 'READY_FOR_DISPATCH' | 'CANCELLED' | 'ALL'>('PACKING');
+  const [statusFilter, setStatusFilter] = useState<'PACKING' | 'READY_FOR_DISPATCH' | 'CANCELLED' | 'ALL'>('ALL');
   const [brandOwnerFilter, setBrandOwnerFilter] = useState<string>('ALL');
 
   // Track recently updated items so their status changes remain visible in grid
   const [recentlyUpdatedItemKeys, setRecentlyUpdatedItemKeys] = useState<Set<string>>(new Set());
 
   // Track saved items to disable save button and highlight row blue
-  const [savedItemKeys, setSavedItemKeys] = useState<Set<string>>(new Set());
+  const [savedItemKeys, setSavedItemKeys] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('packing_saved_item_keys');
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('packing_saved_item_keys', JSON.stringify(Array.from(savedItemKeys)));
+    } catch {
+      // ignore storage errors
+    }
+  }, [savedItemKeys]);
 
   // Expand / collapse all orders
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(new Set());
@@ -283,6 +298,13 @@ export const CompletePackingView: React.FC = () => {
         if (!salesOrderId) continue;
 
         const matchedOrder = resolveSalesOrder(salesOrderId);
+
+        // Scope: Delivery Status must be PACKING, READY_FOR_DISPATCH or CANCELLED
+        const docDeliveryStatus = String(
+          doc.deliveryStatus || doc.deliverystatus || matchedOrder?.deliveryStatus || ''
+        ).toUpperCase().trim().replace(/[\s-]+/g, '_');
+        const SCOPE = ['PACKING', 'PARTIALLY_PACKED', 'READY_FOR_DISPATCH', 'CANCELLED', 'CANCELED'];
+        if (docDeliveryStatus && !SCOPE.includes(docDeliveryStatus)) continue;
         const orderNo = String(doc.orderNumber || doc.orderNo || matchedOrder?.orderNumber || salesOrderId);
         const customerName = String(
           matchedOrder?.customerName ||
@@ -323,10 +345,22 @@ export const CompletePackingView: React.FC = () => {
           const brandOwnerAssignid = String(item.brandOwnerAssignid || doc.brandOwnerAssignid || (doc.id && String(doc.id).startsWith('boa_') ? doc.id : `boa_${idx}`));
           const brandOwnerName = String(item.brandOwnerName || doc.brandOwnerName || 'Not Assigned');
 
+          // Pack Size = shipment_brand_owner_fulfilment.items[].orderpackingsize.
+          // Legacy rows were saved with the placeholder 'Standard' / blank, so resolve the real size
+          // from the sales order line, then the product master.
+          const storedPackSize = String(item.orderpackingsize ?? item.packingsize ?? '').trim();
+          const isPlaceholderPackSize = !storedPackSize || storedPackSize.toLowerCase() === 'standard';
+          const orderLine = (matchedOrder?.products || []).find(
+            (p: any) => String(p.productId || p.id) === productId || `item_${p.productId || p.id}` === orderItemId
+          );
+          const masterProd = (productsMaster.length > 0 ? productsMaster : globalProducts || []).find(
+            (p: any) => String(p.id) === productId || String(p.id) === orderItemId.replace(/^item_/, '')
+          );
           const orderpackingsize = String(
-            item.orderpackingsize ??
-            item.packingsize ??
-            'Standard'
+            isPlaceholderPackSize
+              ? orderLine?.packingSize || orderLine?.packingsize || orderLine?.orderpackingsize ||
+                (masterProd as any)?.packingSize || storedPackSize || 'Standard'
+              : storedPackSize
           );
           const orderunit = String(
             item.orderunit ??
@@ -347,10 +381,12 @@ export const CompletePackingView: React.FC = () => {
             ? Number(item.outquantity)
             : orderqty;
 
-          const currentRawStatus = String(item.outstatus || item.fulfillmentstatus || 'PACKING').toUpperCase().trim();
+          const currentRawStatus = String(item.outstatus || item.fulfillmentstatus || docDeliveryStatus || 'PACKING').toUpperCase().trim().replace(/[\s-]+/g, '_');
+          // Item-level check only when the document has no delivery status
+          if (!docDeliveryStatus && !SCOPE.includes(currentRawStatus)) continue;
           let outstatus: PackingStatusOption = 'PACKING';
           if (currentRawStatus === 'READY_FOR_DISPATCH') outstatus = 'READY_FOR_DISPATCH';
-          else if (currentRawStatus === 'CANCELLED') outstatus = 'CANCELLED';
+          else if (currentRawStatus === 'CANCELLED' || currentRawStatus === 'CANCELED') outstatus = 'CANCELLED';
 
           const outbalanceqty = Math.max(0, orderqty - outquantity);
           const fulfillmentstatus = outbalanceqty > 0 ? 'PARTIALLY_PACKED' : outstatus;
@@ -399,10 +435,9 @@ export const CompletePackingView: React.FC = () => {
         }
       }
 
-      const allGroups = Array.from(orderGroupsMap.values());
+      const allGroups = Array.from(orderGroupsMap.values()).filter((g) => g.items.length > 0);
       setGroupedOrders(allGroups);
       setExpandedOrderIds(new Set(allGroups.map((g) => g.orderId)));
-      setSavedItemKeys(new Set());
     } catch (err: any) {
       console.error('Failed to load packing records:', err);
       showStatus(err?.message || 'Error loading records from shipment_brand_owner_fulfilment', 'error');
@@ -536,6 +571,9 @@ export const CompletePackingView: React.FC = () => {
         shipid: item.shipid || `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         updatedAt: now,
       };
+      // shipment_brand_owner_fulfilment.items[]: legacy `deliverystatus` -> `itemdeliverystatus`
+      Object.assign(updatedChildDoc, migrateFulfilmentItem({ ...updatedChildDoc }));
+      delete updatedChildDoc.deliverystatus;
 
       let newOrderFulfilmentRecord: any = null;
       if (calculatedBalance > 0) {
@@ -571,6 +609,7 @@ export const CompletePackingView: React.FC = () => {
 
       // 1. Authoritative API call to update grouped document
       let savedSuccessfully = false;
+      let apiValidationError = '';
       try {
         const apiRes = await apiFetch('/api/operations/shipment-brand-owner-fulfilment/save', {
           method: 'POST',
@@ -580,13 +619,16 @@ export const CompletePackingView: React.FC = () => {
             newRecord: newOrderFulfilmentRecord,
           }),
         });
-        const apiData = await apiRes.json();
+        const apiData = await apiRes.json().catch(() => ({}));
         if (apiRes.ok && apiData.success) {
           savedSuccessfully = true;
+        } else if (apiRes.status === 400) {
+          apiValidationError = apiData.error || 'Validation failed on server.';
         }
       } catch (apiErr) {
         console.warn('API save fallback to direct repository:', apiErr);
       }
+      if (apiValidationError) throw new Error(apiValidationError);
 
       // 2. Direct Firestore fallback - only save to parent grouped document
       if (!savedSuccessfully) {
@@ -594,7 +636,7 @@ export const CompletePackingView: React.FC = () => {
         const existingParent = await shipmentBrandOwnerAssignmentRepository.getById(parentDocId);
         if (existingParent && Array.isArray(existingParent.items)) {
           let updatedItems = existingParent.items.map((it: any) =>
-            it.orderItemId === item.orderItemId ? { ...it, ...updatedChildDoc } : it
+            migrateFulfilmentItem(it.orderItemId === item.orderItemId ? { ...it, ...updatedChildDoc } : it)
           );
           if (newOrderFulfilmentRecord) {
             updatedItems.push(newOrderFulfilmentRecord);
@@ -639,7 +681,7 @@ export const CompletePackingView: React.FC = () => {
             shipid: updatedChildDoc.shipid,
             salesOrderId: String(order.orderId),
             createdAt: new Date(),
-            deliverystatus: updatedChildDoc.deliverystatus || 'PACKING',
+            deliverystatus: updatedChildDoc.itemdeliverystatus || 'PACKING',
             outpackingstatus: updatedChildDoc.outstatus === 'READY_FOR_DISPATCH' ? 'PACKED' : 'PACKING',
             updatedby: auth?.currentUser?.email || auth?.currentUser?.uid || 'Ops Admin',
           });
@@ -901,10 +943,10 @@ export const CompletePackingView: React.FC = () => {
             }}
             className="text-xs bg-emerald-50 dark:bg-slate-800 border border-emerald-300 dark:border-slate-700 rounded-xl px-3 py-2 font-extrabold text-emerald-900 dark:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
           >
-            <option value="PACKING">PACKING (Default)</option>
+            <option value="ALL">All (PACKING / READY_FOR_DISPATCH / CANCELLED)</option>
+            <option value="PACKING">PACKING</option>
             <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
             <option value="CANCELLED">CANCELLED</option>
-            <option value="ALL">All Statuses</option>
           </select>
 
           {distinctBrandOwners.length > 0 && (
@@ -1045,7 +1087,7 @@ export const CompletePackingView: React.FC = () => {
                               key={item.orderItemId}
                               className={`transition-colors ${
                                 isSaved
-                                  ? 'bg-blue-100/70 dark:bg-blue-950/60 hover:bg-blue-100/90 dark:hover:bg-blue-900/60 text-blue-950 dark:text-blue-100 border-l-4 border-l-blue-600'
+                                  ? 'bg-[#B9EBFF] hover:bg-[#A5E3FC] text-slate-900 border-l-4 border-l-sky-400'
                                   : 'hover:bg-emerald-50/30 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-200'
                               }`}
                             >
@@ -1053,12 +1095,12 @@ export const CompletePackingView: React.FC = () => {
                               <td
                                 className={`py-3 px-3 min-w-[220px] max-w-[280px] sticky left-0 z-10 border-r border-slate-200 dark:border-slate-700 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)] ${
                                   isSaved
-                                    ? 'bg-blue-100/95 dark:bg-blue-950/95 text-blue-950 dark:text-blue-100'
+                                    ? 'bg-[#B9EBFF] text-slate-900'
                                     : 'bg-white dark:bg-slate-900'
                                 }`}
                               >
                                 <div className="flex items-start gap-2">
-                                  <Package className={`w-4 h-4 mt-0.5 shrink-0 ${isSaved ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600'}`} />
+                                  <Package className={`w-4 h-4 mt-0.5 shrink-0 ${isSaved ? 'text-sky-600 dark:text-sky-400' : 'text-emerald-600'}`} />
                                   <div>
                                     <div className="font-extrabold text-slate-900 dark:text-white line-clamp-2" title={item.productName}>
                                       {item.productName}
@@ -1082,11 +1124,11 @@ export const CompletePackingView: React.FC = () => {
                                 />
                               </td>
 
-                              {/* 3. Outpackingsize (Disabled) */}
+                              {/* 3. Pack Size = shipment_brand_owner_fulfilment.items[].orderpackingsize (Disabled) */}
                               <td className="py-3 px-2 text-center whitespace-nowrap">
                                 <input
                                   type="text"
-                                  value={item.Outpackingsize}
+                                  value={item.orderpackingsize}
                                   disabled
                                   readOnly
                                   className="w-20 text-center px-1.5 py-1 text-xs bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-lg border border-slate-200 dark:border-slate-700 cursor-not-allowed font-medium"
@@ -1221,13 +1263,13 @@ export const CompletePackingView: React.FC = () => {
                                     title={isSaved ? 'Record Saved' : 'Save Item Packing Status'}
                                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-xs ${
                                       isSaved
-                                        ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 cursor-not-allowed shadow-none'
+                                        ? 'bg-sky-200 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 border border-sky-300 dark:border-sky-700 cursor-not-allowed shadow-none'
                                         : isSaving
                                         ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 cursor-not-allowed shadow-none'
                                         : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 cursor-pointer active:scale-95'
                                     }`}
                                   >
-                                    {isSaved ? <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> : <Save className="w-3.5 h-3.5" />}
+                                    {isSaved ? <CheckCircle2 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" /> : <Save className="w-3.5 h-3.5" />}
                                     <span>{isSaving ? 'Saving...' : isSaved ? 'Saved' : 'Save'}</span>
                                   </button>
 

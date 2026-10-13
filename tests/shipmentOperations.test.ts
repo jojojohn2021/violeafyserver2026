@@ -333,7 +333,7 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
       fulfillmentstatus: 'PACKED',
       deliverydate: '2026-10-12',
       deliverycondition: 'Good Condition',
-      deliverystatus: 'IN_TRANSIT',
+      itemdeliverystatus: 'IN_TRANSIT',
       deliverynote: 'Handle with care',
       emailssenddetails: 'Dispatch notification email sent to customer',
     });
@@ -345,7 +345,7 @@ describe('Antigravity Technical Specification - Shipment Operations Integration 
     assert.equal(record.fulfillmentstatus, 'PACKED');
     assert.equal(record.deliverydate, '2026-10-12');
     assert.equal(record.deliverycondition, 'Good Condition');
-    assert.equal(record.deliverystatus, 'IN_TRANSIT');
+    assert.equal(record.itemdeliverystatus, 'IN_TRANSIT');
     assert.equal(record.deliverynote, 'Handle with care');
 
     const updated = await service.addPackingChildRecord(record.id, {

@@ -214,7 +214,7 @@ export class ShipmentOperationsService {
       fulfillmentstatus?: string;
       deliverydate?: string;
       deliverycondition?: string;
-      deliverystatus?: string;
+      itemdeliverystatus?: string;
       deliverynote?: string;
       emailssenddetails?: any;
       orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];
@@ -289,7 +289,7 @@ export class ShipmentOperationsService {
       fulfillmentstatus: payload.fulfillmentstatus || 'ASSIGNED',
       deliverydate: payload.deliverydate || '',
       deliverycondition: payload.deliverycondition || '',
-      deliverystatus: payload.deliverystatus || '',
+      itemdeliverystatus: payload.itemdeliverystatus || (payload as any).deliverystatus || '',
       deliverynote: payload.deliverynote || '',
       emailssenddetails: payload.emailssenddetails || null,
       orderfulfilment: Array.isArray(payload.orderfulfilment) ? payload.orderfulfilment : [],
@@ -326,7 +326,7 @@ export class ShipmentOperationsService {
       fulfillmentstatus?: string;
       deliverydate?: string;
       deliverycondition?: string;
-      deliverystatus?: string;
+      itemdeliverystatus?: string;
       deliverynote?: string;
       emailssenddetails?: any;
       orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];
@@ -394,7 +394,7 @@ export class ShipmentOperationsService {
       fulfillmentstatus: newPayload.fulfillmentstatus || existing.fulfillmentstatus || 'ASSIGNED',
       deliverydate: newPayload.deliverydate || existing.deliverydate || '',
       deliverycondition: newPayload.deliverycondition || existing.deliverycondition || '',
-      deliverystatus: newPayload.deliverystatus || existing.deliverystatus || '',
+      itemdeliverystatus: newPayload.itemdeliverystatus || (newPayload as any).deliverystatus || existing.itemdeliverystatus || (existing as any).deliverystatus || '',
       deliverynote: newPayload.deliverynote || existing.deliverynote || '',
       emailssenddetails: newPayload.emailssenddetails || existing.emailssenddetails || null,
       orderfulfilment: Array.isArray(newPayload.orderfulfilment) ? newPayload.orderfulfilment : (Array.isArray(existing.orderfulfilment) ? existing.orderfulfilment : []),

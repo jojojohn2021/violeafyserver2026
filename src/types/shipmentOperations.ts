@@ -77,7 +77,7 @@ export interface ShipmentBrandOwnerAssignment extends ShipmentOperationalCommon 
   fulfillmentstatus?: string;
   deliverydate?: string;
   deliverycondition?: string;
-  deliverystatus?: string;
+  itemdeliverystatus?: string;
   deliverynote?: string;
   emailssenddetails?: string | Record<string, any> | any[];
 
@@ -119,7 +119,7 @@ export interface ShipmentBrandOwnerFulfilmentChildItem {
   outdealyreasons?: string;
   deliverydate?: string;
   deliverycondition?: string;
-  deliverystatus?: string;
+  itemdeliverystatus?: string;
   fulfillmentstatus?: string;
   status?: string;
   orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];

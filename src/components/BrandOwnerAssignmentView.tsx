@@ -50,9 +50,10 @@ export interface SalesOrderRecord {
   salesChannel?: string;
 }
 
+// Pending-assignment statuses: NOT_STARTED (incl. PENDING / blank) and PROCESSING
 export const isNotStartedDeliveryStatus = (status?: string): boolean => {
   const normalized = (status || '').toUpperCase().trim();
-  return normalized === 'NOT_STARTED' || normalized === 'PENDING' || !normalized;
+  return normalized === 'NOT_STARTED' || normalized === 'PENDING' || normalized === 'PROCESSING' || !normalized;
 };
 
 export const isPackingDeliveryStatus = (status?: string): boolean => {
@@ -99,7 +100,22 @@ export const BrandOwnerAssignmentView: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [brandOwnersList, setBrandOwnersList] = useState<BrandOwner[]>([]);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
-  const [savedOrderIds, setSavedOrderIds] = useState<Set<string>>(new Set());
+  // Saved order IDs persisted in localStorage so rows stay highlighted & locked across reloads
+  const [savedOrderIds, setSavedOrderIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('boa_saved_order_ids');
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('boa_saved_order_ids', JSON.stringify(Array.from(savedOrderIds)));
+    } catch {
+      // ignore storage errors
+    }
+  }, [savedOrderIds]);
   const [summaryMetrics, setSummaryMetrics] = useState({
     total: 0,
     assigned: 0,
@@ -510,6 +526,11 @@ export const BrandOwnerAssignmentView: React.FC = () => {
             saved = true;
           }
         }
+      } else if (res.status === 400) {
+        const data = await res.json().catch(() => ({} as any));
+        showStatus(data?.error || 'Validation failed on server. Assignment not saved.', 'error');
+        setSubmitting(false);
+        return;
       }
     } catch (apiErr) {
       console.warn('API save fallback to direct Firestore:', apiErr);
@@ -533,7 +554,8 @@ export const BrandOwnerAssignmentView: React.FC = () => {
           const prodMatch = (selectedOrder.products || []).find(
             (p: any, idx: number) => getProdKey(p, idx) === a.productId || getItemIdKey(p, idx) === a.orderItemId
           );
-          const packingSize = prodMatch?.packingSize || prodMatch?.orderpackingsize || 'Standard';
+          const masterProd: any = (globalProducts || []).find((p: any) => String(p.id) === String(a.productId));
+          const packingSize = prodMatch?.packingSize || prodMatch?.packingsize || prodMatch?.orderpackingsize || masterProd?.packingSize || 'Standard';
           const unit = prodMatch?.unit || prodMatch?.orderunit || 'PCS';
           const qty = Number(prodMatch?.quantity ?? prodMatch?.qty ?? 1);
           const today = now.split('T')[0];
@@ -945,7 +967,7 @@ export const BrandOwnerAssignmentView: React.FC = () => {
                       key={order.id}
                       className={`transition-colors ${
                         isAssigned
-                          ? 'bg-sky-100 hover:bg-sky-200/70 dark:bg-sky-950/60 dark:hover:bg-sky-900/60'
+                          ? 'bg-[#B9EBFF] hover:bg-[#A5E3FC] text-slate-900 dark:bg-[#B9EBFF] dark:text-slate-900'
                           : isRestricted
                           ? 'bg-slate-50/40 dark:bg-slate-900/40'
                           : 'hover:bg-green-50/40 dark:hover:bg-slate-800/50'

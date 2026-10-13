@@ -93,7 +93,7 @@ export async function persistProductionBrandAssignments(
       courierdocketno: assignment.courierdocketno || assignment.docketno || '',
       fulfillmentstatus: assignment.fulfillmentstatus || 'ASSIGNED',
       deliverydate: assignment.deliverydate || '',
-      deliverystatus: assignment.deliverystatus || '',
+      itemdeliverystatus: assignment.itemdeliverystatus || assignment.deliverystatus || '',
       deliverynote: assignment.deliverynote || '',
       emailssenddetails: assignment.emailssenddetails || null,
       orderfulfilment: Array.isArray(assignment.orderfulfilment) ? assignment.orderfulfilment : [],

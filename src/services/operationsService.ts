@@ -344,7 +344,7 @@ export class OperationsService {
     const stageEligible = combined.filter((rec) => {
       if (targetStage === 'assignment') {
         const delStatus = String(rec.deliveryStatus || '').toUpperCase().trim();
-        return delStatus === 'NOT_STARTED' || delStatus === 'PENDING' || delStatus === 'PACKING';
+        return delStatus === 'NOT_STARTED' || delStatus === 'PENDING' || delStatus === 'PROCESSING' || delStatus === 'PACKING';
       }
       if (targetStage === 'packing') {
         const allAssigned = rec.products.length > 0 && rec.products.every((product: any, index: number) => {
@@ -406,8 +406,8 @@ export class OperationsService {
       searchFiltered.sort((a, b) => {
         const normA = String(a.deliveryStatus || '').toUpperCase().trim();
         const normB = String(b.deliveryStatus || '').toUpperCase().trim();
-        const rankA = (normA === 'NOT_STARTED' || normA === 'PENDING') ? 1 : (normA === 'PACKING' ? 2 : 3);
-        const rankB = (normB === 'NOT_STARTED' || normB === 'PENDING') ? 1 : (normB === 'PACKING' ? 2 : 3);
+        const rankA = (normA === 'NOT_STARTED' || normA === 'PENDING' || normA === 'PROCESSING') ? 1 : (normA === 'PACKING' ? 2 : 3);
+        const rankB = (normB === 'NOT_STARTED' || normB === 'PENDING' || normB === 'PROCESSING') ? 1 : (normB === 'PACKING' ? 2 : 3);
         if (rankA !== rankB) return rankA - rankB;
         return new Date(b.createdAt || b.lastUpdated || 0).getTime() - new Date(a.createdAt || a.lastUpdated || 0).getTime();
       });
@@ -428,7 +428,7 @@ export class OperationsService {
     const assignedOrdersCount = searchFiltered.filter((r) => String(r.deliveryStatus || '').toUpperCase().trim() === 'PACKING').length;
     const pendingOrdersCount = searchFiltered.filter((r) => {
       const s = String(r.deliveryStatus || '').toUpperCase().trim();
-      return s === 'NOT_STARTED' || s === 'PENDING';
+      return s === 'NOT_STARTED' || s === 'PENDING' || s === 'PROCESSING';
     }).length;
 
     return {
@@ -932,7 +932,7 @@ export class OperationsService {
         fulfillmentstatus: (assignment as any).fulfillmentstatus || 'ASSIGNED',
         deliverydate: (assignment as any).deliverydate || (assignment as any).outdeliverydate || '',
         deliverycondition: (assignment as any).deliverycondition || (assignment as any).outdeliverycondition || '',
-        deliverystatus: (assignment as any).deliverystatus || '',
+        itemdeliverystatus: (assignment as any).itemdeliverystatus || (assignment as any).deliverystatus || '',
         deliverynote: (assignment as any).deliverynote || '',
         emailssenddetails: (assignment as any).emailssenddetails || null,
         orderfulfilment: processedFulfilment,
@@ -946,7 +946,7 @@ export class OperationsService {
         shipid: shipmentAssignmentItem.shipid,
         salesOrderId: String(orderId || shipmentAssignmentItem.salesOrderId || ''),
         createdAt: new Date(),
-        deliverystatus: shipmentAssignmentItem.deliverystatus || details.order?.deliveryStatus || 'PACKING',
+        deliverystatus: shipmentAssignmentItem.itemdeliverystatus || details.order?.deliveryStatus || 'PACKING',
         outpackingstatus: (shipmentAssignmentItem as any).outpackingstatus || shipmentAssignmentItem.orderfulfilment?.[0]?.outpackingstatus || 'PACKING',
         updatedby: assignedBy || 'Operations Admin',
       };
@@ -995,7 +995,11 @@ export class OperationsService {
           mergedItems.push(item);
         }
       }
-      parentDoc.items = mergedItems;
+      parentDoc.items = mergedItems.map((it: any) => {
+        if (!it || !Object.prototype.hasOwnProperty.call(it, 'deliverystatus')) return it;
+        const { deliverystatus, ...rest } = it;
+        return { ...rest, itemdeliverystatus: rest.itemdeliverystatus ?? deliverystatus ?? '' };
+      });
       parentDoc.deliveryStatus = computedStatus || parentDoc.deliveryStatus || 'PACKING';
       parentDoc.updatedAt = now;
     }

@@ -27,6 +27,7 @@ import {
 } from '../repositories/repositories';
 import { auth } from '../firebase';
 import { apiFetch } from '../utils/apiFetch';
+import { migrateFulfilmentItem } from '../utils/fulfilmentItem';
 import { ProductPerformance } from '../types';
 
 export type ConfirmDeliveryStatusOption = 'SHIPPED' | 'COMPLETED';
@@ -55,6 +56,8 @@ export interface ConfirmDeliveryGridRow {
   outquantity: number;
   outstatus: ConfirmDeliveryStatusOption;
   fulfillmentstatus: string;
+  // Status as loaded from Firestore; grid filtering uses this so in-grid edits don't hide rows until refresh
+  loadedStatus: ConfirmDeliveryStatusOption;
   outpickupdate: string;
   outcouriername: string;
   outcourierdocketno: string;
@@ -89,10 +92,27 @@ export const ConfirmDeliveryView: React.FC = () => {
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'SHIPPED' | 'COMPLETED' | 'ALL'>('SHIPPED');
+  const [statusFilter, setStatusFilter] = useState<'SHIPPED' | 'COMPLETED' | 'ALL'>('ALL');
 
   // Track recently updated item IDs so they remain visible in grid
   const [recentlyUpdatedItemKeys, setRecentlyUpdatedItemKeys] = useState<Set<string>>(new Set());
+
+  // Track saved items to disable save button and highlight row light sky-blue
+  const [savedItemKeys, setSavedItemKeys] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('delivery_saved_item_keys');
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('delivery_saved_item_keys', JSON.stringify(Array.from(savedItemKeys)));
+    } catch {
+      // ignore storage errors
+    }
+  }, [savedItemKeys]);
 
   // Expand / collapse all orders
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(new Set());
@@ -281,6 +301,13 @@ export const ConfirmDeliveryView: React.FC = () => {
         if (!salesOrderId) continue;
 
         const matchedOrder = resolveSalesOrder(salesOrderId);
+
+        // Scope: Delivery Status must be SHIPPED or COMPLETED (DELIVERED treated as COMPLETED)
+        const DELIVERY_SCOPE = ['SHIPPED', 'COMPLETED', 'DELIVERED'];
+        const docDeliveryStatus = String(
+          doc.deliveryStatus || matchedOrder?.deliveryStatus || ''
+        ).toUpperCase().trim();
+        if (docDeliveryStatus && !DELIVERY_SCOPE.includes(docDeliveryStatus)) continue;
         const orderNo = String(matchedOrder?.orderNumber || doc.orderNumber || doc.orderNo || salesOrderId);
         const customerName = String(
           matchedOrder?.customerName ||
@@ -344,8 +371,11 @@ export const ConfirmDeliveryView: React.FC = () => {
             ? Number(item.outquantity)
             : orderqty;
 
-          const currentRawStatus = String(item.outstatus || item.fulfillmentstatus || 'SHIPPED').toUpperCase().trim();
-          const outstatus: ConfirmDeliveryStatusOption = currentRawStatus === 'COMPLETED' ? 'COMPLETED' : 'SHIPPED';
+          const itemRawStatus = String(item.outstatus || item.fulfillmentstatus || '').toUpperCase().trim();
+          // Item-level scope check only when the document has no delivery status
+          if (!docDeliveryStatus && !DELIVERY_SCOPE.includes(itemRawStatus)) continue;
+          const effectiveStatus = DELIVERY_SCOPE.includes(itemRawStatus) ? itemRawStatus : docDeliveryStatus;
+          const outstatus: ConfirmDeliveryStatusOption = effectiveStatus === 'SHIPPED' ? 'SHIPPED' : 'COMPLETED';
           const fulfillmentstatus = outstatus;
 
           const outpickupdate = String(item.outpickupdate || systemDate);
@@ -380,6 +410,7 @@ export const ConfirmDeliveryView: React.FC = () => {
             outunit,
             outquantity,
             outstatus,
+            loadedStatus: outstatus,
             fulfillmentstatus,
             outpickupdate,
             outcouriername,
@@ -498,7 +529,7 @@ export const ConfirmDeliveryView: React.FC = () => {
 
     try {
       const now = new Date().toISOString();
-      const updatedChildDoc: any = {
+      const updatedChildDoc: any = migrateFulfilmentItem({
         ...(item.rawDoc || {}),
         salesOrderId: order.orderId,
         orderNo: order.orderNo,
@@ -521,7 +552,7 @@ export const ConfirmDeliveryView: React.FC = () => {
         outstatus: item.outstatus,
         fulfillmentstatus: item.outstatus,
         status: item.outstatus === 'COMPLETED' ? 'COMPLETED' : 'SHIPPED',
-        deliverystatus: item.outstatus === 'COMPLETED' ? 'DELIVERED' : 'IN_TRANSIT',
+        itemdeliverystatus: item.outstatus === 'COMPLETED' ? 'DELIVERED' : 'IN_TRANSIT',
         outpickupdate: item.outpickupdate,
         outcouriername: item.outcouriername,
         outcourierdocketno: item.outcourierdocketno,
@@ -530,28 +561,32 @@ export const ConfirmDeliveryView: React.FC = () => {
         deliverycondition: (item.deliverycondition || '').trim().slice(0, 50),
         shipid: item.shipid || `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         updatedAt: now,
-      };
+      });
 
       // 1. Authoritative API call to update grouped document
       let savedSuccessfully = false;
       let notifFeedback = '';
 
+      let apiValidationError = '';
       try {
         const apiRes = await apiFetch('/api/operations/shipment-brand-owner-fulfilment/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ record: updatedChildDoc }),
         });
-        const apiData = await apiRes.json();
+        const apiData = await apiRes.json().catch(() => ({}));
         if (apiRes.ok && apiData.success) {
           savedSuccessfully = true;
           if (apiData.notification?.status === 'dispatched') {
             notifFeedback = ' • WhatsApp notification dispatched to customer!';
           }
+        } else if (apiRes.status === 400) {
+          apiValidationError = apiData.error || 'Validation failed on server.';
         }
       } catch (apiErr) {
         console.warn('API save fallback to direct repository:', apiErr);
       }
+      if (apiValidationError) throw new Error(apiValidationError);
 
       // 2. Direct Firestore fallback
       if (!savedSuccessfully) {
@@ -559,14 +594,14 @@ export const ConfirmDeliveryView: React.FC = () => {
         const existingParent = await shipmentBrandOwnerAssignmentRepository.getById(parentDocId);
         if (existingParent && Array.isArray(existingParent.items)) {
           const updatedItems = existingParent.items.map((it: any) =>
-            it.orderItemId === item.orderItemId ? { ...it, ...updatedChildDoc } : it
+            migrateFulfilmentItem(it.orderItemId === item.orderItemId ? { ...it, ...updatedChildDoc } : it)
           );
           await shipmentBrandOwnerAssignmentRepository.update(parentDocId, {
             ...existingParent,
             items: updatedItems,
             outstatus: item.outstatus,
             fulfillmentstatus: item.outstatus,
-            deliverystatus: updatedChildDoc.deliverystatus,
+            deliverystatus: updatedChildDoc.itemdeliverystatus,
             updatedAt: now,
           });
         } else {
@@ -576,7 +611,7 @@ export const ConfirmDeliveryView: React.FC = () => {
             orderNumber: String(order.orderNo || order.orderId),
             customerName: String(order.customerName || ''),
             customerMobile: String(order.customerMobile || ''),
-            deliveryStatus: updatedChildDoc.deliverystatus || 'DELIVERED',
+            deliveryStatus: updatedChildDoc.itemdeliverystatus || 'DELIVERED',
             fulfillmentstatus: item.outstatus,
             status: 'DELIVERED',
             items: [updatedChildDoc],
@@ -600,7 +635,7 @@ export const ConfirmDeliveryView: React.FC = () => {
             shipid: updatedChildDoc.shipid,
             salesOrderId: String(order.orderId),
             createdAt: new Date(),
-            deliverystatus: updatedChildDoc.deliverystatus,
+            deliverystatus: updatedChildDoc.itemdeliverystatus,
             outpackingstatus: 'PACKED',
             updatedby: auth?.currentUser?.email || auth?.currentUser?.uid || 'Ops Admin',
           });
@@ -610,6 +645,7 @@ export const ConfirmDeliveryView: React.FC = () => {
       }
 
       setRecentlyUpdatedItemKeys((prev) => new Set(prev).add(itemKey));
+      setSavedItemKeys((prev) => new Set(prev).add(itemKey));
 
       showStatus(
         item.outstatus === 'COMPLETED'
@@ -642,16 +678,10 @@ export const ConfirmDeliveryView: React.FC = () => {
     return groupedOrders
       .map((order) => {
         const filteredItems = order.items.filter((item) => {
-          const itemKey = `${order.orderId}_${item.orderItemId}`;
-
-          if (statusFilter === 'SHIPPED') {
-            const isShipped = item.outstatus === 'SHIPPED' || item.fulfillmentstatus === 'SHIPPED';
-            const isRecentlyUpdated = recentlyUpdatedItemKeys.has(itemKey);
-            if (!isShipped && !isRecentlyUpdated) return false;
-          } else if (statusFilter === 'COMPLETED') {
-            const isCompleted = item.outstatus === 'COMPLETED' || item.fulfillmentstatus === 'COMPLETED';
-            if (!isCompleted) return false;
-          }
+          // Filter on the status captured at load time, so editing the
+          // Fulfillment Status dropdown never hides a row until next refresh.
+          if (statusFilter === 'SHIPPED' && item.loadedStatus !== 'SHIPPED') return false;
+          if (statusFilter === 'COMPLETED' && item.loadedStatus !== 'COMPLETED') return false;
 
           if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
@@ -950,12 +980,17 @@ export const ConfirmDeliveryView: React.FC = () => {
                         {order.items.map((item) => {
                           const itemKey = `${order.orderId}_${item.orderItemId}`;
                           const isSaving = savingKey === itemKey;
+                          const isSaved = savedItemKeys.has(itemKey);
                           const isSendingWa = waSendingKey === itemKey;
 
                           return (
                             <tr
                               key={item.orderItemId}
-                              className="hover:bg-emerald-50/30 dark:hover:bg-slate-800/40 transition-colors text-slate-800 dark:text-slate-200"
+                              className={`transition-colors ${
+                                isSaved
+                                  ? 'bg-[#B9EBFF] hover:bg-[#A5E3FC] text-slate-900'
+                                  : 'hover:bg-emerald-50/30 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-200'
+                              }`}
                             >
                               {/* 1. Product Details */}
                               <td className="py-3 px-3">
@@ -1067,17 +1102,19 @@ export const ConfirmDeliveryView: React.FC = () => {
                                 <div className="flex items-center justify-center gap-1.5">
                                   <button
                                     type="button"
-                                    disabled={isSaving}
+                                    disabled={isSaving || isSaved}
                                     onClick={() => handleSaveItem(order, item)}
-                                    title="Save Delivery Status"
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-xs ${
-                                      isSaving
+                                    title={isSaved ? 'Record Saved' : 'Save Delivery Status'}
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-xs ${
+                                      isSaved
+                                        ? 'bg-sky-200 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 border border-sky-300 dark:border-sky-700 cursor-not-allowed shadow-none'
+                                        : isSaving
                                         ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 cursor-not-allowed shadow-none'
-                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 cursor-pointer active:scale-95'
                                     }`}
                                   >
                                     <Save className="w-3.5 h-3.5" />
-                                    <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                                    <span>{isSaving ? 'Saving...' : isSaved ? 'Saved' : 'Save'}</span>
                                   </button>
 
                                   <button

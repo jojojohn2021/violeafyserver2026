@@ -227,8 +227,8 @@ async function saveCollectionDoc(collection: string, item: any): Promise<void> {
 function didStatusChange(previousDoc: any, updatedDoc: any): boolean {
   if (!previousDoc) return true;
 
-  const prevDelivery = previousDoc.deliverystatus ?? previousDoc.deliveryStatus ?? '';
-  const newDelivery = updatedDoc.deliverystatus ?? updatedDoc.deliveryStatus ?? '';
+  const prevDelivery = previousDoc.itemdeliverystatus ?? previousDoc.deliverystatus ?? previousDoc.deliveryStatus ?? '';
+  const newDelivery = updatedDoc.itemdeliverystatus ?? updatedDoc.deliverystatus ?? updatedDoc.deliveryStatus ?? '';
 
   const prevPacking = previousDoc.outpackingstatus ?? previousDoc.orderfulfilment?.[0]?.outpackingstatus ?? previousDoc.outstatus ?? '';
   const newPacking = updatedDoc.outpackingstatus ?? updatedDoc.orderfulfilment?.[0]?.outpackingstatus ?? updatedDoc.outstatus ?? '';
@@ -1881,6 +1881,33 @@ const handleAddFulfilmentChildPacking = async (req: express.Request, res: expres
 app.post("/api/operations/shipment-fulfilment/:id/child-packing", handleAddFulfilmentChildPacking);
 app.post("/api/v1/operations/shipment-fulfilment/:id/child-packing", handleAddFulfilmentChildPacking);
 
+// shipment_brand_owner_fulfilment.items[] field rename: legacy `deliverystatus` -> `itemdeliverystatus`
+function migrateFulfilmentItem(item: any): any {
+  if (!item || typeof item !== 'object' || !Object.prototype.hasOwnProperty.call(item, 'deliverystatus')) return item;
+  const { deliverystatus, ...rest } = item;
+  return { ...rest, itemdeliverystatus: rest.itemdeliverystatus ?? deliverystatus ?? '' };
+}
+
+function fulfilmentDocNeedsItemMigration(doc: any): boolean {
+  return Array.isArray(doc?.items) && doc.items.some((it: any) => it && Object.prototype.hasOwnProperty.call(it, 'deliverystatus'));
+}
+
+async function migrateFulfilmentDocsItemDeliveryStatus(rawDocs: any[]): Promise<number> {
+  let migrated = 0;
+  for (const d of rawDocs) {
+    if (!fulfilmentDocNeedsItemMigration(d)) continue;
+    d.items = d.items.map(migrateFulfilmentItem);
+    try {
+      await saveCollectionDoc('shipment_brand_owner_fulfilment', d);
+      migrated++;
+      console.log(`[VIO-FIRESTORE] Migrated items.deliverystatus -> itemdeliverystatus in shipment_brand_owner_fulfilment/${d.id}`);
+    } catch (err) {
+      console.warn(`[VIO-FIRESTORE] Failed migrating itemdeliverystatus for ${d.id}:`, err);
+    }
+  }
+  return migrated;
+}
+
 function normalizeGroupedFulfilmentDocs(rawDocs: any[]): any[] {
   const groupedMap = new Map<string, any>();
 
@@ -1954,6 +1981,9 @@ const handleGetShipmentBrandOwnerFulfilment = async (req: express.Request, res: 
       }
     }
 
+    // Rename legacy items[].deliverystatus -> itemdeliverystatus and persist to Firestore
+    await migrateFulfilmentDocsItemDeliveryStatus(rawDocs);
+
     const docs = normalizeGroupedFulfilmentDocs(rawDocs);
     return res.json({ success: true, count: docs.length, docs });
   } catch (error: any) {
@@ -1963,12 +1993,27 @@ const handleGetShipmentBrandOwnerFulfilment = async (req: express.Request, res: 
 app.get("/api/operations/shipment-brand-owner-fulfilment", handleGetShipmentBrandOwnerFulfilment);
 app.get("/api/v1/operations/shipment-brand-owner-fulfilment", handleGetShipmentBrandOwnerFulfilment);
 
+// One-time migration: rename items[].deliverystatus -> itemdeliverystatus across the whole table
+const handleMigrateItemDeliveryStatus = async (_req: express.Request, res: express.Response) => {
+  try {
+    const rawDocs = await getCollectionDocs('shipment_brand_owner_fulfilment');
+    const migrated = await migrateFulfilmentDocsItemDeliveryStatus(rawDocs);
+    return res.json({ success: true, migrated, total: rawDocs.length });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || "Migration failed" });
+  }
+};
+app.post("/api/operations/shipment-brand-owner-fulfilment/migrate-itemdeliverystatus", handleMigrateItemDeliveryStatus);
+app.post("/api/v1/operations/shipment-brand-owner-fulfilment/migrate-itemdeliverystatus", handleMigrateItemDeliveryStatus);
+
 const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res: express.Response) => {
   try {
-    const { record, newRecord } = req.body || {};
+    let { record, newRecord } = req.body || {};
     if (!record || (!record.id && !record.orderItemId && !record.productId)) {
       return res.status(400).json({ success: false, error: "Record with a valid ID or item identifier is required for saving." });
     }
+    record = migrateFulfilmentItem(record);
+    if (newRecord) newRecord = migrateFulfilmentItem(newRecord);
 
     // 1. Server-side Validations
     const deliveryConditionVal = String(record.deliverycondition || record.outdeliverycondition || '');
@@ -2032,7 +2077,8 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
       };
     }
 
-    // Locate target child item inside parent items
+    // Locate target child item inside parent items (legacy field names migrated first)
+    parentDoc.items = parentDoc.items.map(migrateFulfilmentItem);
     const childIdx = parentDoc.items.findIndex(
       (it: any) =>
         (record.orderItemId && it.orderItemId && String(it.orderItemId) === String(record.orderItemId)) ||
@@ -2097,7 +2143,7 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
     // Create audit record in shipment_tracking if status changed
     let auditRecord: any = null;
     if (isStatusChanged) {
-      const deliverystatus = record.deliverystatus !== undefined ? record.deliverystatus : (record.deliveryStatus || '');
+      const deliverystatus = record.itemdeliverystatus !== undefined ? record.itemdeliverystatus : (record.deliveryStatus || '');
       const outpackingstatus = record.outpackingstatus !== undefined ? record.outpackingstatus : (record.orderfulfilment?.[0]?.outpackingstatus || record.outstatus || '');
       auditRecord = await recordShipmentTrackingAudit(
         record.shipid || updatedChild.shipid || `ship_${targetSalesOrderId}`,
@@ -2130,7 +2176,7 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
       const existingNew = existingDocs.find((d: any) => String(d.id) === String(newRecord.id));
       const isNewStatusChanged = didStatusChange(existingNew, newRecord);
       if (isNewStatusChanged) {
-        const newDeliveryStatus = newRecord.deliverystatus !== undefined ? newRecord.deliverystatus : (newRecord.deliveryStatus || '');
+        const newDeliveryStatus = newRecord.itemdeliverystatus !== undefined ? newRecord.itemdeliverystatus : (newRecord.deliveryStatus || '');
         const newOutpackingStatus = newRecord.outpackingstatus !== undefined ? newRecord.outpackingstatus : (newRecord.orderfulfilment?.[0]?.outpackingstatus || newRecord.outstatus || '');
         newRecordAudit = await recordShipmentTrackingAudit(
           newRecord.shipid,

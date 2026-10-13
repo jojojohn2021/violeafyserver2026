@@ -28,15 +28,16 @@ import {
 } from '../repositories/repositories';
 import { auth } from '../firebase';
 import { apiFetch } from '../utils/apiFetch';
+import { migrateFulfilmentItem, getItemDeliveryStatus } from '../utils/fulfilmentItem';
 import { ProductPerformance } from '../types';
 
 export type ShipmentStatusOption = 'PACKING' | 'READY_FOR_DISPATCH' | 'SHIPPED' | 'CANCELLED';
 
-// Helper validation: Scope of documents listed in grid is restricted to Delivery Status = 'PACKING', 'READY_FOR_DISPATCH', or 'CANCELLED'
+// Helper validation: Scope of documents listed in grid is restricted to Delivery Status = 'SHIPPED', 'READY_FOR_DISPATCH', or 'CANCELLED'
 export const isEligibleShipmentDeliveryStatus = (status?: string): boolean => {
   if (!status) return false;
   const s = status.toUpperCase().trim().replace(/[-_ ]/g, '_');
-  return s === 'PACKING' || s === 'READY_FOR_DISPATCH' || s === 'CANCELLED' || s === 'CANCELED';
+  return s === 'SHIPPED' || s === 'READY_FOR_DISPATCH' || s === 'CANCELLED' || s === 'CANCELED';
 };
 
 // Helper: Grid row header value should be shipment_brand_owner_fulfilment->orderNumber
@@ -117,11 +118,28 @@ export const CreateShipmentView: React.FC = () => {
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PACKING' | 'READY_FOR_DISPATCH' | 'CANCELLED'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'SHIPPED' | 'READY_FOR_DISPATCH' | 'CANCELLED'>('ALL');
   const [courierFilter, setCourierFilter] = useState<string>('ALL');
 
   // Track recently updated item IDs so they remain visible after status change
   const [recentlyUpdatedItemKeys, setRecentlyUpdatedItemKeys] = useState<Set<string>>(new Set());
+
+  // Track saved items to disable save button and highlight row light sky-blue
+  const [savedItemKeys, setSavedItemKeys] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('shipment_saved_item_keys');
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('shipment_saved_item_keys', JSON.stringify(Array.from(savedItemKeys)));
+    } catch {
+      // ignore storage errors
+    }
+  }, [savedItemKeys]);
 
   // Expand / collapse all orders
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(new Set());
@@ -319,7 +337,7 @@ export const CreateShipmentView: React.FC = () => {
           doc.deliverystatus ||
           matchedOrder?.deliveryStatus ||
           (Array.isArray(doc.items) && doc.items.length > 0
-            ? (doc.items[0]?.deliveryStatus || doc.items[0]?.deliverystatus || doc.items[0]?.outstatus)
+            ? (doc.items[0]?.deliveryStatus || getItemDeliveryStatus(doc.items[0]) || doc.items[0]?.outstatus)
             : '') ||
           ''
         ).trim();
@@ -329,11 +347,11 @@ export const CreateShipmentView: React.FC = () => {
         }
 
         const normalizedDocStatus = docDeliveryStatusRaw.toUpperCase().replace(/[\s_-]+/g, '_');
-        const docDeliveryStatus: 'PACKING' | 'READY_FOR_DISPATCH' | 'CANCELLED' =
+        const docDeliveryStatus: 'SHIPPED' | 'READY_FOR_DISPATCH' | 'CANCELLED' =
           normalizedDocStatus === 'CANCELLED' || normalizedDocStatus === 'CANCELED'
             ? 'CANCELLED'
-            : normalizedDocStatus === 'PACKING'
-            ? 'PACKING'
+            : normalizedDocStatus === 'SHIPPED'
+            ? 'SHIPPED'
             : 'READY_FOR_DISPATCH';
 
         // Display ORDER NO: grid row header value should be shipment_brand_owner_fulfilment->orderNumber
@@ -382,7 +400,7 @@ export const CreateShipmentView: React.FC = () => {
           // Item delivery status inherits docDeliveryStatus unless item has an explicit eligible status or SHIPPED
           const explicitItemStatus = String(
             item.deliveryStatus ||
-            item.deliverystatus ||
+            getItemDeliveryStatus(item) ||
             item.outstatus ||
             ''
           ).trim().toUpperCase().replace(/[\s_-]+/g, '_');
@@ -393,10 +411,22 @@ export const CreateShipmentView: React.FC = () => {
               : docDeliveryStatus
           );
 
+          // Pack Size = shipment_brand_owner_fulfilment.items[].orderpackingsize.
+          // Legacy rows hold the placeholder 'Standard' / blank, so resolve the real size
+          // from the sales order line, then the product master.
+          const storedPackSize = String(item.orderpackingsize ?? item.packingsize ?? '').trim();
+          const isPlaceholderPackSize = !storedPackSize || storedPackSize.toLowerCase() === 'standard';
+          const orderLine = (matchedOrder?.products || []).find(
+            (p: any) => String(p.productId || p.id) === productId || `item_${p.productId || p.id}` === orderItemId
+          );
+          const masterProd = (productsMaster.length > 0 ? productsMaster : globalProducts || []).find(
+            (p: any) => String(p.id) === productId || String(p.id) === orderItemId.replace(/^item_/, '')
+          );
           const orderpackingsize = String(
-            item.orderpackingsize ??
-            item.packingsize ??
-            'Standard'
+            isPlaceholderPackSize
+              ? orderLine?.packingSize || orderLine?.packingsize || orderLine?.orderpackingsize ||
+                (masterProd as any)?.packingSize || storedPackSize || 'Standard'
+              : storedPackSize
           );
           const orderunit = String(
             item.orderunit ??
@@ -575,7 +605,7 @@ export const CreateShipmentView: React.FC = () => {
 
     try {
       const now = new Date().toISOString();
-      const updatedChildDoc: any = {
+      const updatedChildDoc: any = migrateFulfilmentItem({
         ...(item.rawDoc || {}),
         salesOrderId: order.orderId,
         orderNo: order.orderNo,
@@ -598,7 +628,7 @@ export const CreateShipmentView: React.FC = () => {
         outstatus: item.outstatus,
         fulfillmentstatus: item.outstatus,
         status: item.outstatus === 'SHIPPED' ? 'SHIPPED' : 'ASSIGNED',
-        deliverystatus: item.outstatus === 'SHIPPED' ? 'IN_TRANSIT' : '',
+        itemdeliverystatus: item.outstatus === 'SHIPPED' ? 'IN_TRANSIT' : '',
         outpickupdate: item.outpickupdate,
         outcouriername: item.outcouriername,
         couriername: item.outcouriername,
@@ -608,28 +638,32 @@ export const CreateShipmentView: React.FC = () => {
         outpackdate: item.outpackdate,
         shipid: item.shipid || `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         updatedAt: now,
-      };
+      });
 
       // 1. Authoritative API call to update grouped document
       let savedSuccessfully = false;
       let notifFeedback = '';
 
+      let apiValidationError = '';
       try {
         const apiRes = await apiFetch('/api/operations/shipment-brand-owner-fulfilment/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ record: updatedChildDoc }),
         });
-        const apiData = await apiRes.json();
+        const apiData = await apiRes.json().catch(() => ({}));
         if (apiRes.ok && apiData.success) {
           savedSuccessfully = true;
           if (apiData.notification?.status === 'dispatched') {
             notifFeedback = ' • WhatsApp notification dispatched to customer!';
           }
+        } else if (apiRes.status === 400) {
+          apiValidationError = apiData.error || 'Validation failed on server.';
         }
       } catch (apiErr) {
         console.warn('API save fallback to direct repository:', apiErr);
       }
+      if (apiValidationError) throw new Error(apiValidationError);
 
       // 2. Direct Firestore fallback
       if (!savedSuccessfully) {
@@ -637,7 +671,7 @@ export const CreateShipmentView: React.FC = () => {
         const existingParent = await shipmentBrandOwnerAssignmentRepository.getById(parentDocId);
         if (existingParent && Array.isArray(existingParent.items)) {
           const updatedItems = existingParent.items.map((it: any) =>
-            it.orderItemId === item.orderItemId ? { ...it, ...updatedChildDoc } : it
+            migrateFulfilmentItem(it.orderItemId === item.orderItemId ? { ...it, ...updatedChildDoc } : it)
           );
           await shipmentBrandOwnerAssignmentRepository.update(parentDocId, {
             ...existingParent,
@@ -677,7 +711,7 @@ export const CreateShipmentView: React.FC = () => {
             shipid: updatedChildDoc.shipid,
             salesOrderId: String(order.orderId),
             createdAt: new Date(),
-            deliverystatus: updatedChildDoc.deliverystatus || '',
+            deliverystatus: updatedChildDoc.itemdeliverystatus || '',
             outpackingstatus: updatedChildDoc.outstatus === 'SHIPPED' ? 'PACKED' : 'PACKING',
             updatedby: auth?.currentUser?.email || auth?.currentUser?.uid || 'Ops Admin',
           });
@@ -688,6 +722,7 @@ export const CreateShipmentView: React.FC = () => {
 
       // Track recently updated key so it stays visible
       setRecentlyUpdatedItemKeys((prev) => new Set(prev).add(itemKey));
+      setSavedItemKeys((prev) => new Set(prev).add(itemKey));
 
       showStatus(
         item.outstatus === 'SHIPPED'
@@ -941,8 +976,8 @@ export const CreateShipmentView: React.FC = () => {
             }}
             className="text-xs bg-emerald-50 dark:bg-slate-800 border border-emerald-300 dark:border-slate-700 rounded-xl px-3 py-2 font-extrabold text-emerald-900 dark:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
           >
-            <option value="ALL">All Eligible (PACKING / READY_FOR_DISPATCH / CANCELLED)</option>
-            <option value="PACKING">PACKING</option>
+            <option value="ALL">All Eligible (SHIPPED / READY_FOR_DISPATCH / CANCELLED)</option>
+            <option value="SHIPPED">SHIPPED</option>
             <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
             <option value="CANCELLED">CANCELLED</option>
           </select>
@@ -1073,13 +1108,18 @@ export const CreateShipmentView: React.FC = () => {
                         {order.items.map((item) => {
                           const itemKey = `${order.orderId}_${item.orderItemId}`;
                           const isSaving = savingKey === itemKey;
+                          const isSaved = savedItemKeys.has(itemKey);
                           const isSendingWa = waSendingKey === itemKey;
                           const isDocketMissing = !item.outcourierdocketno || item.outcourierdocketno.trim() === '';
 
                           return (
                             <tr
                               key={item.orderItemId}
-                              className="hover:bg-emerald-50/30 dark:hover:bg-slate-800/40 transition-colors text-slate-800 dark:text-slate-200"
+                              className={`transition-colors ${
+                                isSaved
+                                  ? 'bg-[#B9EBFF] hover:bg-[#A5E3FC] text-slate-900'
+                                  : 'hover:bg-emerald-50/30 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-200'
+                              }`}
                             >
                               {/* 1. Product Name & SKU */}
                               <td className="py-3 px-3">
@@ -1096,11 +1136,11 @@ export const CreateShipmentView: React.FC = () => {
                                 </div>
                               </td>
 
-                              {/* 2. Outpackingsize (Disabled) */}
+                              {/* 2. Pack Size = shipment_brand_owner_fulfilment.items[].orderpackingsize (Disabled) */}
                               <td className="py-3 px-2 text-center whitespace-nowrap">
                                 <input
                                   type="text"
-                                  value={item.Outpackingsize}
+                                  value={item.orderpackingsize}
                                   disabled
                                   readOnly
                                   className="w-20 text-center px-1.5 py-1 text-xs bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-lg border border-slate-200 dark:border-slate-700 cursor-not-allowed font-medium"
@@ -1240,17 +1280,19 @@ export const CreateShipmentView: React.FC = () => {
                                 <div className="flex items-center justify-center gap-1.5">
                                   <button
                                     type="button"
-                                    disabled={isDocketMissing || isSaving}
+                                    disabled={isDocketMissing || isSaving || isSaved}
                                     onClick={() => handleSaveItem(order, item)}
-                                    title={isDocketMissing ? 'Enter Courier Docket No to enable Save' : 'Save Item Shipment'}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-xs ${
-                                      isDocketMissing || isSaving
+                                    title={isSaved ? 'Record Saved' : isDocketMissing ? 'Enter Courier Docket No to enable Save' : 'Save Item Shipment'}
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-xs ${
+                                      isSaved
+                                        ? 'bg-sky-200 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 border border-sky-300 dark:border-sky-700 cursor-not-allowed shadow-none'
+                                        : isDocketMissing || isSaving
                                         ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 cursor-not-allowed shadow-none'
-                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 cursor-pointer active:scale-95'
                                     }`}
                                   >
                                     <Save className="w-3.5 h-3.5" />
-                                    <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                                    <span>{isSaving ? 'Saving...' : isSaved ? 'Saved' : 'Save'}</span>
                                   </button>
 
                                   <button

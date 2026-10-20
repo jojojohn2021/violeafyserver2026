@@ -1,5 +1,6 @@
 import { auth } from '../firebase';
 import { apiFetch } from './apiFetch';
+import * as direct from './productDetailsDirect';
 import type { ProductCertification, ProductDetails, ProductDetailsImage } from '../types';
 
 /** Client for the server-side `/api/product-details` API (no direct Firestore/Storage writes). */
@@ -48,6 +49,21 @@ async function parse<T>(res: Response): Promise<T> {
 
 const enc = encodeURIComponent;
 
+/** True when the response is the static-hosting SPA fallback (no Express API deployed). */
+async function isStatic(res: Response): Promise<boolean> {
+  if (res.status !== 404) return false;
+  const body = await res.clone().json().catch(() => null);
+  return body?.code === 'STATIC_DEPLOYMENT';
+}
+
+const wrap = async <T>(fn: () => Promise<T>): Promise<T> => {
+  try { return await fn(); } catch (e: any) {
+    if (e instanceof ProductDetailsApiError) throw e;
+    const denied = e?.code === 'permission-denied' || e?.code === 'storage/unauthorized';
+    throw new ProductDetailsApiError(e?.message || 'Request failed', e?.status ?? (denied ? 403 : 500), e?.code);
+  }
+};
+
 export interface ProductDetailsPayload {
   productId?: string;
   whyShopFromLeafyearth: string;
@@ -65,6 +81,7 @@ export interface ProductDetailsPayload {
 /** Returns `null` when no details exist (404); throws on any other failure. */
 export async function fetchProductDetails(productId: string): Promise<ProductDetails | null> {
   const res = await apiFetch(`/api/product-details/${enc(productId)}`);
+  if (await isStatic(res)) return wrap(() => direct.directFetch(productId));
   if (res.status === 404) {
     const body = await res.json().catch(() => ({}));
     if (body?.notFound) return null;
@@ -79,6 +96,7 @@ export async function createProductDetails(payload: ProductDetailsPayload & { pr
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  if (await isStatic(res)) return wrap(() => direct.directCreate(payload));
   return (await parse<{ details: ProductDetails }>(res)).details;
 }
 
@@ -88,17 +106,20 @@ export async function updateProductDetails(productId: string, payload: ProductDe
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...payload, productId }),
   });
+  if (await isStatic(res)) return wrap(() => direct.directUpdate(productId, payload));
   return (await parse<{ details: ProductDetails }>(res)).details;
 }
 
 export async function deleteProductCertificate(productId: string, certificateId: string): Promise<void> {
   const res = await apiFetch(`/api/product-details/${enc(productId)}/certificates/${enc(certificateId)}`, { method: 'DELETE' });
+  if (await isStatic(res)) return wrap(() => direct.directDeleteCertificate(productId, certificateId));
   if (res.status === 404) return; // already removed — idempotent
   await parse(res);
 }
 
 export async function deleteProductDetailImage(productId: string, imageId: string): Promise<void> {
   const res = await apiFetch(`/api/product-details/${enc(productId)}/images/${enc(imageId)}`, { method: 'DELETE' });
+  if (await isStatic(res)) return wrap(() => direct.directDeleteImage(productId, imageId));
   if (res.status === 404) return;
   await parse(res);
 }
@@ -117,6 +138,9 @@ async function uploadWithProgress<T>(url: string, form: FormData, onProgress?: (
     xhr.onload = () => {
       let body: any = null;
       try { body = JSON.parse(xhr.responseText); } catch { /* ignore */ }
+      if ((xhr.getResponseHeader('content-type') || '').includes('text/html')) {
+        return reject(new ProductDetailsApiError('Static deployment', 404, 'STATIC_DEPLOYMENT'));
+      }
       if (xhr.status >= 200 && xhr.status < 300 && body?.success !== false) resolve(body as T);
       else reject(new ProductDetailsApiError(body?.error || `Upload failed (${xhr.status})`, xhr.status, body?.code));
     };
@@ -128,12 +152,22 @@ export async function uploadProductCertificateImage(productId: string, certifica
   const fd = new FormData();
   fd.append('certificateId', certificateId);
   fd.append('file', file);
-  return (await uploadWithProgress<{ certificate: ProductCertification }>(`/api/product-details/${enc(productId)}/certificates`, fd, onProgress)).certificate;
+  try {
+    return (await uploadWithProgress<{ certificate: ProductCertification }>(`/api/product-details/${enc(productId)}/certificates`, fd, onProgress)).certificate;
+  } catch (e: any) {
+    if (e?.code !== 'STATIC_DEPLOYMENT') throw e;
+    return wrap(() => direct.directUploadCertificate(productId, certificateId, file, onProgress));
+  }
 }
 
 export async function uploadProductDetailImage(productId: string, imageId: string, file: File, onProgress?: (pct: number) => void) {
   const fd = new FormData();
   fd.append('imageId', imageId);
   fd.append('file', file);
-  return (await uploadWithProgress<{ image: ProductDetailsImage }>(`/api/product-details/${enc(productId)}/images`, fd, onProgress)).image;
+  try {
+    return (await uploadWithProgress<{ image: ProductDetailsImage }>(`/api/product-details/${enc(productId)}/images`, fd, onProgress)).image;
+  } catch (e: any) {
+    if (e?.code !== 'STATIC_DEPLOYMENT') throw e;
+    return wrap(() => direct.directUploadImage(productId, imageId, file, onProgress));
+  }
 }

@@ -54,10 +54,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Product Details (1:1 with products). Writes are server-only via /api/product-details.
+    // Product Details (1:1 with products). Written via /api/product-details, or directly
+    // by signed-in (non-anonymous) admins when deployed on static hosting.
     match /product_details/{productId} {
       allow read: if true;
-      allow write: if false;
+      allow write: if isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
 
     // Product Categories Collection (name + picture metadata)

@@ -52,15 +52,21 @@ service firebase.storage {
       allow write: if signedIn() && request.resource.size <= 50 * 1024 * 1024;
     }
 
-    // Product Details images: uploaded only by the server (Admin SDK) after admin checks.
+    // Product Details images: uploaded by the server (Admin SDK) or directly by signed-in admins.
+    function adminUser() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
     match /product_details/{productId}/certificates/{certificateId}/{fileName} {
       allow read: if true;
-      allow write: if false;
+      allow create, update: if adminUser() && validImage();
+      allow delete: if adminUser();
     }
 
     match /product_details/{productId}/images/{imageId}/{fileName} {
       allow read: if true;
-      allow write: if false;
+      allow create, update: if adminUser() && validImage();
+      allow delete: if adminUser();
     }
   }
 }

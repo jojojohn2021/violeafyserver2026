@@ -41,6 +41,7 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
       JSON.stringify({
         success: false,
         error: `Endpoint '${urlStr}' is not hosted on static deployment. Falling back to direct database.`,
+        code: 'STATIC_DEPLOYMENT',
       }),
       {
         status: 404,

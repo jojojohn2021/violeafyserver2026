@@ -51,5 +51,16 @@ service firebase.storage {
       allow read: if true;
       allow write: if signedIn() && request.resource.size <= 50 * 1024 * 1024;
     }
+
+    // Product Details images: uploaded only by the server (Admin SDK) after admin checks.
+    match /product_details/{productId}/certificates/{certificateId}/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /product_details/{productId}/images/{imageId}/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
   }
 }

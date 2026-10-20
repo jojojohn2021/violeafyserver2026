@@ -54,6 +54,51 @@ export interface CalendarEvent {
   linkedTo?: string; // Customer name
 }
 
+/** Certification entry stored in `product_details/{productId}.certifications`. */
+export interface ProductCertification {
+  certificateId: string;
+  certificateName: string;
+  certificateNumber: string;
+  issuingAuthority: string;
+  certificateImageUrl: string;
+  certificateStoragePath: string;
+  validFrom: string;
+  validUntil: string;
+  displayOrder: number;
+  isActive: boolean;
+}
+
+/** Additional product picture stored in `product_details/{productId}.productImageUrls`. */
+export interface ProductDetailsImage {
+  imageId: string;
+  imageUrl: string;
+  storagePath: string;
+  fileName?: string;
+  contentType?: string;
+  fileSize?: number;
+  displayOrder: number;
+  isActive: boolean;
+}
+
+/** `product_details/{productId}` — 1:1 extension of a `products` document. */
+export interface ProductDetails {
+  productId: string;
+  whyShopFromLeafyearth: string;
+  idealForMaking: string;
+  shelfLife: string;
+  fssaiNumber: string;
+  marketedManufacturedBy: string;
+  allergenInformation: string;
+  storageConditions: string;
+  certifications: ProductCertification[];
+  productImageUrls: ProductDetailsImage[];
+  createdAt: string | null;
+  updatedAt: string | null;
+  createdBy: string;
+  updatedBy: string;
+  isActive: boolean;
+}
+
 export interface ProductPerformance {
   id: string;
   name: string;
@@ -92,6 +137,10 @@ export interface ProductPerformance {
   images?: string[];
   description?: string;
   ingredients?: string;
+  uniqueSpec1?: string;
+  uniqueSpec2?: string;
+  uniqueSpec3?: string;
+  uniqueSpec4?: string;
   specifications?: string;
   variants?: string;
   stockAvailability?: string;

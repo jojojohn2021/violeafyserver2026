@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../store';
 import ProductReviewsSection from './ProductReviewsSection';
+import ProductDetailsDisplay from './ProductDetailsDisplay';
 import { 
   ShoppingBag, ShoppingCart, Heart, Search, Star, MapPin, Tag, 
   Truck, ArrowLeft, Check, Plus, Minus, Trash2, Calendar, FileText, 
@@ -1969,6 +1970,9 @@ export default function ShoppingPlatformView() {
                 </div>
               </div>
             </div>
+
+            {/* Additional product details (product_details collection); renders nothing if absent */}
+            <ProductDetailsDisplay productId={selectedProduct.id} />
 
             {/* Reviews list inside detail */}
             <div className="border-t pt-4 dark:border-slate-800">

@@ -4,6 +4,7 @@ import { ProductPerformance, CustomerPerformance, BrandOwner } from '../types';
 import ProductReviewsSection from './ProductReviewsSection';
 import { uploadFileToStorage, uploadProductImage } from '../utils/storageUpload';
 import { auth } from '../firebase';
+import ProductDetailsSection, { ProductDetailsSectionHandle } from './ProductDetailsSection';
 import { 
   LineChart, ShoppingBag, Heart, BarChart3, TrendingUp, Grid, 
   Trash2, Plus, Edit, DollarSign, HelpCircle, Check, Award,
@@ -127,6 +128,10 @@ export default function PerformanceTrackingView() {
   const [editVideosText, setEditVideosText] = useState<string>('');
   const [editDescription, setEditDescription] = useState<string>('');
   const [editIngredients, setEditIngredients] = useState<string>('');
+  const [editUniqueSpec1, setEditUniqueSpec1] = useState<string>('');
+  const [editUniqueSpec2, setEditUniqueSpec2] = useState<string>('');
+  const [editUniqueSpec3, setEditUniqueSpec3] = useState<string>('');
+  const [editUniqueSpec4, setEditUniqueSpec4] = useState<string>('');
   const [editSpecifications, setEditSpecifications] = useState<string>('');
   const [editVariants, setEditVariants] = useState<string>('');
   const [editStockAvailability, setEditStockAvailability] = useState<string>('In Stock');
@@ -184,6 +189,12 @@ export default function PerformanceTrackingView() {
  
   // New product addition
   const [isAddingProduct, setIsAddingProduct] = useState(false);
+  // Product Details (separate product_details collection) integration state
+  const createDetailsRef = useRef<ProductDetailsSectionHandle>(null);
+  const editDetailsRef = useRef<ProductDetailsSectionHandle>(null);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [createDetailsRetry, setCreateDetailsRetry] = useState<{ productId: string; name: string } | null>(null);
+  const [productSaveNotice, setProductSaveNotice] = useState<string | null>(null);
   const [prodName, setProdName] = useState('');
   const [prodSku, setProdSku] = useState('');
   const [prodHsnCode, setProdHsnCode] = useState('');
@@ -213,6 +224,10 @@ export default function PerformanceTrackingView() {
   const [prodVideosText, setProdVideosText] = useState<string>('');
   const [prodDescription, setProdDescription] = useState('');
   const [prodIngredients, setProdIngredients] = useState('');
+  const [prodUniqueSpec1, setProdUniqueSpec1] = useState('');
+  const [prodUniqueSpec2, setProdUniqueSpec2] = useState('');
+  const [prodUniqueSpec3, setProdUniqueSpec3] = useState('');
+  const [prodUniqueSpec4, setProdUniqueSpec4] = useState('');
   const [prodSpecifications, setProdSpecifications] = useState('');
   const [prodVariants, setProdVariants] = useState('');
   const [prodStockAvailability, setProdStockAvailability] = useState('In Stock');
@@ -1015,8 +1030,9 @@ export default function PerformanceTrackingView() {
   };
 
   // Handle Product pricing update
-  const handleSavePricing = (id: string) => {
+  const handleSavePricing = async (id: string) => {
     if (!hasAccess('Products & Clients', 'edit')) return;
+    if (isSavingProduct) return;
 
     if (!editSku.trim()) {
       setSkuError('SKU PREFIX is required.');
@@ -1047,9 +1063,11 @@ export default function PerformanceTrackingView() {
     }
 
     setSkuError(null);
+    setProductSaveNotice(null);
+    setIsSavingProduct(true);
     const parsedEditImages = editImagesText.split(',').map(s => s.trim()).filter(Boolean);
     const parsedEditVideos = editVideosText.split(',').map(s => s.trim()).filter(Boolean);
-    updateProduct(id, { 
+    const productSaved = await updateProduct(id, { 
       name: editName,
       sku: editSku,
       hsnCode: editHsnCode.trim(),
@@ -1074,6 +1092,10 @@ export default function PerformanceTrackingView() {
       videos: parsedEditVideos,
       description: editDescription,
       ingredients: editIngredients,
+      uniqueSpec1: editUniqueSpec1,
+      uniqueSpec2: editUniqueSpec2,
+      uniqueSpec3: editUniqueSpec3,
+      uniqueSpec4: editUniqueSpec4,
       specifications: editSpecifications,
       variants: editVariants,
       stockAvailability: editStockAvailability,
@@ -1083,6 +1105,18 @@ export default function PerformanceTrackingView() {
       rating: editRating,
       reviewsCount: editReviewsCount
     });
+    if (!productSaved) {
+      setIsSavingProduct(false);
+      setProductSaveNotice('Product update failed. Product Details were not saved.');
+      return;
+    }
+    // Product Details are stored separately in product_details/{productId}
+    const detailsResult = await editDetailsRef.current?.save(id);
+    setIsSavingProduct(false);
+    if (detailsResult && !detailsResult.ok) {
+      setProductSaveNotice(`Product fields were saved, but Product Details failed: ${detailsResult.error}. Click Save to retry.`);
+      return;
+    }
     setEditingProductId(null);
   };
 
@@ -1132,6 +1166,10 @@ export default function PerformanceTrackingView() {
     setEditVideosText(parsedVideos.join(', '));
     setEditDescription(p.description || p.notes || '');
     setEditIngredients(p.ingredients || '');
+    setEditUniqueSpec1(p.uniqueSpec1 || '');
+    setEditUniqueSpec2(p.uniqueSpec2 || '');
+    setEditUniqueSpec3(p.uniqueSpec3 || '');
+    setEditUniqueSpec4(p.uniqueSpec4 || '');
     setEditSpecifications(p.specifications || '');
     setEditVariants(p.variants || '');
     setEditStockAvailability(p.stockAvailability || (p.stock > 0 ? 'In Stock' : 'Out of Stock'));
@@ -1140,12 +1178,20 @@ export default function PerformanceTrackingView() {
     setEditDiscount(p.discount ?? (p.shopPrice && p.onlinePrice ? Math.max(0, Math.round(((p.shopPrice - p.onlinePrice) / p.shopPrice) * 100)) : 0));
     setEditRating(p.rating ?? 5);
     setEditReviewsCount(p.reviewsCount ?? 0);
+    setProductSaveNotice(null);
   };
 
   // Handle custom product creation
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasAccess('Products & Clients', 'create')) return;
+    if (isSavingProduct) return;
+
+    // The product already exists but its details failed: retry details only — never create the product again.
+    if (createDetailsRetry) {
+      await handleRetryCreateDetails();
+      return;
+    }
 
     if (!prodName || !prodSku || !prodHsnCode.trim()) {
       setSkuError('HSN Code is required.');
@@ -1164,6 +1210,9 @@ export default function PerformanceTrackingView() {
     }
 
     setSkuError(null);
+    setProductSaveNotice(null);
+    setIsSavingProduct(true);
+    let createdProduct: ProductPerformance | null = null;
     const parsedProdImages = prodImagesText.split(',').map(s => s.trim()).filter(Boolean);
     const parsedProdVideos = prodVideosText.split(',').map(s => s.trim()).filter(Boolean);
 
@@ -1199,6 +1248,10 @@ export default function PerformanceTrackingView() {
       fd.append('videos', JSON.stringify(parsedProdVideos));
       fd.append('description', prodDescription || prodNotes);
       fd.append('ingredients', prodIngredients);
+      fd.append('uniqueSpec1', prodUniqueSpec1);
+      fd.append('uniqueSpec2', prodUniqueSpec2);
+      fd.append('uniqueSpec3', prodUniqueSpec3);
+      fd.append('uniqueSpec4', prodUniqueSpec4);
       fd.append('specifications', prodSpecifications);
       fd.append('variants', prodVariants);
       fd.append('stockAvailability', prodStockAvailability);
@@ -1219,12 +1272,12 @@ export default function PerformanceTrackingView() {
         if (res.ok) {
           const data = await res.json();
           if (data && data.product) {
-            await addProduct(data.product);
+            createdProduct = await addProduct(data.product);
           }
         } else {
           // If server upload fails or 401s, fallback to uploading file via client storage and creating product
           const uploadRes = await uploadFileToStorage(prodImageFile, `products/${prodUploadId}/main.jpg`);
-          await addProduct({
+          createdProduct = await addProduct({
             name: prodName,
             sku: prodSku,
             hsnCode: prodHsnCode.trim(),
@@ -1260,6 +1313,10 @@ export default function PerformanceTrackingView() {
             videos: parsedProdVideos,
             description: prodDescription || prodNotes,
             ingredients: prodIngredients,
+            uniqueSpec1: prodUniqueSpec1,
+            uniqueSpec2: prodUniqueSpec2,
+            uniqueSpec3: prodUniqueSpec3,
+            uniqueSpec4: prodUniqueSpec4,
             specifications: prodSpecifications,
             variants: prodVariants,
             stockAvailability: prodStockAvailability,
@@ -1274,7 +1331,7 @@ export default function PerformanceTrackingView() {
         console.error('Product upload API failed, falling back to client storage upload', err);
         try {
           const uploadRes = await uploadFileToStorage(prodImageFile, `products/${prodUploadId}/main.jpg`);
-          await addProduct({
+          createdProduct = await addProduct({
             name: prodName,
             sku: prodSku,
             hsnCode: prodHsnCode.trim(),
@@ -1310,6 +1367,10 @@ export default function PerformanceTrackingView() {
             videos: parsedProdVideos,
             description: prodDescription || prodNotes,
             ingredients: prodIngredients,
+            uniqueSpec1: prodUniqueSpec1,
+            uniqueSpec2: prodUniqueSpec2,
+            uniqueSpec3: prodUniqueSpec3,
+            uniqueSpec4: prodUniqueSpec4,
             specifications: prodSpecifications,
             variants: prodVariants,
             stockAvailability: prodStockAvailability,
@@ -1322,7 +1383,7 @@ export default function PerformanceTrackingView() {
         } catch (fallbackErr) {
           console.error('Fallback upload failed', fallbackErr);
           alert('Failed to upload product image. Creating product without image.');
-          await addProduct({
+          createdProduct = await addProduct({
             name: prodName,
             sku: prodSku,
             hsnCode: prodHsnCode.trim(),
@@ -1356,6 +1417,10 @@ export default function PerformanceTrackingView() {
             videos: parsedProdVideos,
             description: prodDescription || prodNotes,
             ingredients: prodIngredients,
+            uniqueSpec1: prodUniqueSpec1,
+            uniqueSpec2: prodUniqueSpec2,
+            uniqueSpec3: prodUniqueSpec3,
+            uniqueSpec4: prodUniqueSpec4,
             specifications: prodSpecifications,
             variants: prodVariants,
             stockAvailability: prodStockAvailability,
@@ -1369,7 +1434,7 @@ export default function PerformanceTrackingView() {
       }
     } else {
       // No file selected — create product without image
-      addProduct({
+      createdProduct = await addProduct({
         name: prodName,
         sku: prodSku,
         hsnCode: prodHsnCode.trim(),
@@ -1417,6 +1482,41 @@ export default function PerformanceTrackingView() {
       });
     }
 
+    if (!createdProduct) {
+      setIsSavingProduct(false);
+      setProductSaveNotice('Product creation failed. Product Details were not saved.');
+      return;
+    }
+
+    // Product Details are stored separately in product_details/{productId}, keyed by the real product document ID.
+    const detailsResult = await createDetailsRef.current?.save(createdProduct.id);
+    setIsSavingProduct(false);
+    if (detailsResult && !detailsResult.ok) {
+      setCreateDetailsRetry({ productId: createdProduct.id, name: createdProduct.name });
+      setProductSaveNotice(`Product "${createdProduct.name}" was created, but its Product Details failed: ${detailsResult.error}. Click Save to retry saving the details only.`);
+      return;
+    }
+    resetCreateProductForm();
+  };
+
+  /** Retries Product Details for an already-created product. Never creates another product. */
+  const handleRetryCreateDetails = async () => {
+    if (!createDetailsRetry) return;
+    setIsSavingProduct(true);
+    setProductSaveNotice(null);
+    const result = await createDetailsRef.current?.save(createDetailsRetry.productId);
+    setIsSavingProduct(false);
+    if (result && !result.ok) {
+      setProductSaveNotice(`Product "${createDetailsRetry.name}" exists, but its Product Details still failed: ${result.error}. Click Save to retry.`);
+      return;
+    }
+    resetCreateProductForm();
+  };
+
+  const resetCreateProductForm = () => {
+    setCreateDetailsRetry(null);
+    setProductSaveNotice(null);
+    createDetailsRef.current?.reset();
     setProdName('');
     setProdSku('');
     setProdHsnCode('');
@@ -1448,6 +1548,10 @@ export default function PerformanceTrackingView() {
     setProdVideosText('');
     setProdDescription('');
     setProdIngredients('');
+    setProdUniqueSpec1('');
+    setProdUniqueSpec2('');
+    setProdUniqueSpec3('');
+    setProdUniqueSpec4('');
     setProdSpecifications('');
     setProdVariants('');
     setProdStockAvailability('In Stock');
@@ -2969,6 +3073,24 @@ export default function PerformanceTrackingView() {
                   />
                 </div>
 
+                {([
+                  ['UNIQUE SPEC 1:', prodUniqueSpec1, setProdUniqueSpec1],
+                  ['UNIQUE SPEC 2:', prodUniqueSpec2, setProdUniqueSpec2],
+                  ['UNIQUE SPEC 3:', prodUniqueSpec3, setProdUniqueSpec3],
+                  ['UNIQUE SPEC 4:', prodUniqueSpec4, setProdUniqueSpec4],
+                ] as [string, string, (v: string) => void][]).map(([label, val, setter], i) => (
+                  <div key={`prod-unique-spec-${i + 1}`}>
+                    <label className="block text-[10px] font-bold text-purple-400 mb-1.5 uppercase tracking-wider">{label}</label>
+                    <input
+                      id={`prod-unique-spec-${i + 1}`}
+                      type="text"
+                      value={val}
+                      onChange={e => setter(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                ))}
+
                 <div>
                   <label className="block text-[10px] font-bold text-purple-400 mb-1.5 uppercase tracking-wider">INGREDIENTS:</label>
                   <input 
@@ -3014,9 +3136,16 @@ export default function PerformanceTrackingView() {
                   />
                 </div>
               </div>
+
+              {/* Product Details (separate product_details collection) */}
+              <ProductDetailsSection ref={createDetailsRef} mode="create" disabled={isSavingProduct} />
+
+              {productSaveNotice && (
+                <p role="alert" id="create-product-save-notice" className="mt-3 text-[11px] font-semibold text-rose-700">{productSaveNotice}</p>
+              )}
               <div className="mt-4 flex gap-2 justify-end">
-                <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer">
-                  Create Product
+                <button type="submit" id="create-product-submit" disabled={isSavingProduct} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50">
+                  {isSavingProduct ? 'Saving…' : createDetailsRetry ? 'Retry Saving Product Details' : 'Create Product'}
                 </button>
               </div>
             </form>
@@ -4542,6 +4671,24 @@ export default function PerformanceTrackingView() {
                         />
                       </div>
 
+                      {([
+                        ['UNIQUE SPEC 1:', editUniqueSpec1, setEditUniqueSpec1],
+                        ['UNIQUE SPEC 2:', editUniqueSpec2, setEditUniqueSpec2],
+                        ['UNIQUE SPEC 3:', editUniqueSpec3, setEditUniqueSpec3],
+                        ['UNIQUE SPEC 4:', editUniqueSpec4, setEditUniqueSpec4],
+                      ] as [string, string, (v: string) => void][]).map(([label, val, setter], i) => (
+                        <div key={`edit-unique-spec-${i + 1}`}>
+                          <label className="block text-[10px] font-bold text-purple-400 mb-1.5 uppercase tracking-wider">{label}</label>
+                          <input
+                            id={`edit-unique-spec-${i + 1}`}
+                            type="text"
+                            value={val}
+                            onChange={e => setter(e.target.value)}
+                            className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                      ))}
+
                       <div>
                         <label className="block text-[10px] font-bold text-purple-400 mb-1.5 uppercase tracking-wider">INGREDIENTS:</label>
                         <input 
@@ -4583,22 +4730,30 @@ export default function PerformanceTrackingView() {
                         />
                       </div>
                     </div>
+
+                    {/* Product Details (separate product_details collection) */}
+                    <ProductDetailsSection key={editingProductId} ref={editDetailsRef} mode="edit" productId={editingProductId} disabled={isSavingProduct} />
                   </div>
                 </div>
 
                 {/* Sticky Bottom Actions */}
                 <div className="p-5 border-t border-slate-800 bg-[#0d0d10] flex items-center justify-end gap-3 shrink-0">
+                  {productSaveNotice && (
+                    <p role="alert" id="edit-product-save-notice" className="mr-auto text-[11px] text-rose-300">{productSaveNotice}</p>
+                  )}
                   <button 
                     onClick={() => setEditingProductId(null)}
-                    className="px-4 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    disabled={isSavingProduct}
+                    className="px-4 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button 
                     onClick={() => handleSavePricing(editingProductId)}
-                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    disabled={isSavingProduct}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
                   >
-                    Save
+                    {isSavingProduct ? 'Saving…' : 'Save'}
                   </button>
                 </div>
               </div>

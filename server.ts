@@ -21,6 +21,7 @@ import {
 import { OperationsService } from "./src/services/operationsService";
 import { ShipmentOperationsService } from "./src/services/shipmentOperationsService";
 import { sendOrderStageWhatsAppNotification } from "./src/services/whatsappService";
+import { registerProductDetailsRoutes, PRODUCT_DETAILS_COLLECTION } from "./src/services/productDetailsRoutes";
 
 dotenv.config();
 
@@ -520,6 +521,7 @@ app.post("/api/db/:col", async (req, res) => {
   try {
     const col = req.params.col;
     if (protectedOperationCollections.has(String(col).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
+    if (String(col).toLowerCase() === PRODUCT_DETAILS_COLLECTION) return res.status(403).json({ error: 'Product details must be modified through /api/product-details.' });
 
     // Enforce referral restrictions: NO new referral creation / loop creation via generic DB proxy
     if (col === "referrals" || col === "referral_chains") {
@@ -605,6 +607,7 @@ app.post('/api/uploads', requireAuthenticatedRequest, upload.single('file'), asy
 
 app.delete("/api/db/:col/:id", async (req, res) => {
   try {
+    if (String(req.params.col).toLowerCase() === PRODUCT_DETAILS_COLLECTION) return res.status(403).json({ error: 'Product details must be modified through /api/product-details.' });
     await deleteCollectionDoc(req.params.col, req.params.id);
     return res.json({ success: true });
   } catch (error: any) {
@@ -620,6 +623,9 @@ app.post('/api/products', requireAuthenticatedRequest, upload.single('image'), a
     const productId = String(body.id || body.productId || Date.now());
 
     const payload: any = { ...body, id: productId };
+    for (const key of ['uniqueSpec1', 'uniqueSpec2', 'uniqueSpec3', 'uniqueSpec4']) {
+      payload[key] = body[key] !== undefined && body[key] !== null ? String(body[key]).trim() : '';
+    }
     let parsedCategories: string[] = [];
     if (Array.isArray(body.categories)) {
       parsedCategories = body.categories.map((c: any) => String(c).trim()).filter(Boolean);
@@ -706,6 +712,9 @@ app.put('/api/products/:id/image', requireAuthenticatedRequest, upload.single('i
     return res.status(500).json({ error: error?.message || 'Failed to update product image' });
   }
 });
+
+// Product Details (separate product_details collection, linked 1:1 by product document ID)
+registerProductDetailsRoutes(app, { db: adminDb, auth: adminAuth, storage: adminStorage });
 
 app.post("/api/payment/test-connection", async (req, res) => {
   try {

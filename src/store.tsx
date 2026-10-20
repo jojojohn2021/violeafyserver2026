@@ -111,8 +111,8 @@ export interface CRMContextType {
   deleteCalendarEvent: (id: string, isRemoteSync?: boolean) => Promise<void>;
   
   products: ProductPerformance[];
-  updateProduct: (id: string, updates: Partial<ProductPerformance>) => Promise<void>;
-  addProduct: (product: Omit<ProductPerformance, 'id'>) => Promise<void>;
+  updateProduct: (id: string, updates: Partial<ProductPerformance>) => Promise<boolean>;
+  addProduct: (product: Omit<ProductPerformance, 'id'>) => Promise<ProductPerformance | null>;
   deleteProduct: (id: string) => Promise<void>;
   
   customers: CustomerPerformance[];
@@ -981,10 +981,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // Products CRUD
-  const addProduct = useCallback(async (prodData: Omit<ProductPerformance, 'id'>) => {
+  const addProduct = useCallback(async (prodData: Omit<ProductPerformance, 'id'>): Promise<ProductPerformance | null> => {
     try {
       const created = await productRepository.create(prodData);
       setProducts(prev => [...prev, created]);
+      return created;
     } catch (err: any) {
       setFirestoreError({
         hasError: true,
@@ -993,13 +994,15 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         operationType: 'create',
         timestamp: new Date().toISOString()
       });
+      return null;
     }
   }, []);
 
-  const updateProduct = useCallback(async (id: string, updates: Partial<ProductPerformance>) => {
+  const updateProduct = useCallback(async (id: string, updates: Partial<ProductPerformance>): Promise<boolean> => {
     try {
       await productRepository.update(id, updates);
       setProducts(prev => prev.map(p => String(p.id || '').trim() === String(id || '').trim() ? { ...p, ...updates } : p));
+      return true;
     } catch (err: any) {
       setFirestoreError({
         hasError: true,
@@ -1008,6 +1011,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         operationType: 'update',
         timestamp: new Date().toISOString()
       });
+      return false;
     }
   }, []);
 

@@ -124,6 +124,17 @@ export const CreateShipmentView: React.FC = () => {
   // Track recently updated item IDs so they remain visible after status change
   const [recentlyUpdatedItemKeys, setRecentlyUpdatedItemKeys] = useState<Set<string>>(new Set());
 
+  // Order header (bulk) edits: values cascade to all child rows of the order
+  type ShipHeaderEdit = {
+    outstatus?: ShipmentStatusOption;
+    outpickupdate?: string;
+    outcouriername?: string;
+    outcourierdocketno?: string;
+    outdealyreasons?: string;
+  };
+  const [headerEdits, setHeaderEdits] = useState<Record<string, ShipHeaderEdit>>({});
+  const [headerSavingId, setHeaderSavingId] = useState<string | null>(null);
+
   // Track saved items to disable save button and highlight row light sky-blue
   const [savedItemKeys, setSavedItemKeys] = useState<Set<string>>(() => {
     try {
@@ -332,17 +343,24 @@ export const CreateShipmentView: React.FC = () => {
         const matchedOrder = resolveSalesOrder(salesOrderId);
 
         // Scope validation: Only orders with shipment_brand_owner_fulfilment->deliveryStatus equal to 'PACKING', 'READY_FOR_DISPATCH', or 'CANCELLED'
-        const docDeliveryStatusRaw = String(
-          doc.deliveryStatus ||
-          doc.deliverystatus ||
-          matchedOrder?.deliveryStatus ||
-          (Array.isArray(doc.items) && doc.items.length > 0
-            ? (doc.items[0]?.deliveryStatus || getItemDeliveryStatus(doc.items[0]) || doc.items[0]?.outstatus)
-            : '') ||
-          ''
-        ).trim();
+        // Also honour fulfillmentstatus (doc + items): Complete Packing sets fulfillmentstatus='READY_FOR_DISPATCH'
+        // while the parent deliveryStatus can remain 'PACKING', which previously excluded these orders.
+        const docItemsArr: any[] = Array.isArray(doc.items) ? doc.items : [];
+        const statusCandidates: string[] = [
+          doc.fulfillmentstatus,
+          doc.fulfilmentStatus,
+          ...docItemsArr.map((it: any) => it?.fulfillmentstatus),
+          doc.deliveryStatus,
+          doc.deliverystatus,
+          matchedOrder?.deliveryStatus,
+          ...docItemsArr.flatMap((it: any) => [it?.deliveryStatus, getItemDeliveryStatus(it), it?.outstatus]),
+        ]
+          .map((s) => String(s || '').trim())
+          .filter(Boolean);
 
-        if (!isEligibleShipmentDeliveryStatus(docDeliveryStatusRaw)) {
+        const docDeliveryStatusRaw = statusCandidates.find((s) => isEligibleShipmentDeliveryStatus(s)) || '';
+
+        if (!docDeliveryStatusRaw) {
           continue;
         }
 
@@ -353,6 +371,43 @@ export const CreateShipmentView: React.FC = () => {
             : normalizedDocStatus === 'SHIPPED'
             ? 'SHIPPED'
             : 'READY_FOR_DISPATCH';
+
+        // Auto-persist: order is READY_FOR_DISPATCH, so promote any child still at PACKING / PARTIALLY_PACKED
+        // and align the parent deliveryStatus / fulfillmentstatus in shipment_brand_owner_fulfilment.
+        if (docDeliveryStatus === 'READY_FOR_DISPATCH' && doc.id && docItemsArr.length > 0) {
+          const norm = (s: any) => String(s || '').trim().toUpperCase().replace(/[\s_-]+/g, '_');
+          const isPackingLike = (s: any) => ['PACKING', 'PARTIALLY_PACKED'].includes(norm(s));
+          let changed = false;
+          const promotedItems = docItemsArr.map((it: any) => {
+            if (isPackingLike(it?.fulfillmentstatus) || isPackingLike(it?.outstatus)) {
+              changed = true;
+              return {
+                ...it,
+                fulfillmentstatus: 'READY_FOR_DISPATCH',
+                outstatus: 'READY_FOR_DISPATCH',
+                outpackingstatus: 'PACKED',
+                status: 'PACKED',
+                updatedAt: new Date().toISOString(),
+              };
+            }
+            return it;
+          });
+          const parentNeedsSync =
+            norm(doc.deliveryStatus) !== 'READY_FOR_DISPATCH' || norm(doc.fulfillmentstatus) !== 'READY_FOR_DISPATCH';
+          if (changed || parentNeedsSync) {
+            doc.items = promotedItems;
+            shipmentBrandOwnerAssignmentRepository
+              .update(String(doc.id), {
+                ...doc,
+                items: promotedItems,
+                deliveryStatus: 'READY_FOR_DISPATCH',
+                fulfillmentstatus: 'READY_FOR_DISPATCH',
+                outstatus: 'READY_FOR_DISPATCH',
+                updatedAt: new Date().toISOString(),
+              })
+              .catch((err: any) => console.warn(`[CreateShipmentView] Auto-promote failed for ${doc.id}:`, err));
+          }
+        }
 
         // Display ORDER NO: grid row header value should be shipment_brand_owner_fulfilment->orderNumber
         const orderNo = resolveShipmentOrderNo(doc, matchedOrder, salesOrderId);
@@ -449,11 +504,17 @@ export const CreateShipmentView: React.FC = () => {
 
           let outstatus: ShipmentStatusOption = docDeliveryStatus;
           if (itemDeliveryStatus === 'SHIPPED') outstatus = 'SHIPPED';
-          else if (itemDeliveryStatus === 'PACKING') outstatus = 'PACKING';
           else if (itemDeliveryStatus === 'CANCELLED' || itemDeliveryStatus === 'CANCELED') outstatus = 'CANCELLED';
           else if (itemDeliveryStatus === 'READY_FOR_DISPATCH') outstatus = 'READY_FOR_DISPATCH';
+          // Order is eligible for shipment (at least one item READY_FOR_DISPATCH): any item still at
+          // PACKING / PARTIALLY_PACKED is promoted to READY_FOR_DISPATCH so the whole order can be dispatched.
+          else if (itemDeliveryStatus === 'PACKING' || itemDeliveryStatus === 'PARTIALLY_PACKED') outstatus = 'READY_FOR_DISPATCH';
 
-          const explicitFulfillment = String(item.fulfillmentstatus || '').trim().toUpperCase().replace(/[\s_-]+/g, '_');
+          const explicitFulfillmentRaw = String(item.fulfillmentstatus || '').trim().toUpperCase().replace(/[\s_-]+/g, '_');
+          const explicitFulfillment =
+            explicitFulfillmentRaw === 'PACKING' || explicitFulfillmentRaw === 'PARTIALLY_PACKED'
+              ? 'READY_FOR_DISPATCH'
+              : explicitFulfillmentRaw;
           const fulfillmentstatus = (
             explicitFulfillment && (isEligibleShipmentDeliveryStatus(explicitFulfillment) || explicitFulfillment === 'SHIPPED')
               ? explicitFulfillment
@@ -550,6 +611,65 @@ export const CreateShipmentView: React.FC = () => {
     );
   };
 
+  // Header (order-level) field change: store value and cascade to all unsaved child rows
+  const handleHeaderFieldChange = (orderId: string, field: keyof ShipHeaderEdit, val: any) => {
+    setHeaderEdits((prev) => ({ ...prev, [orderId]: { ...(prev[orderId] || {}), [field]: val } }));
+    setGroupedOrders((prevOrders) =>
+      prevOrders.map((ord) => {
+        if (ord.orderId !== orderId) return ord;
+        return {
+          ...ord,
+          items: ord.items.map((it) => {
+            if (savedItemKeys.has(`${orderId}_${it.orderItemId}`)) return it;
+            const updated: any = { ...it, [field]: val };
+            if (field === 'outstatus') updated.fulfillmentstatus = val;
+            return updated;
+          }),
+        };
+      })
+    );
+  };
+
+  // Header Save: save every unsaved child record of the order with header values
+  const handleSaveOrderHeader = async (order: GroupedShipmentOrder) => {
+    const header = headerEdits[order.orderId] || {};
+    const fullOrder = groupedOrders.find((o) => o.orderId === order.orderId) || order;
+    const pending = fullOrder.items.filter((it) => !savedItemKeys.has(`${order.orderId}_${it.orderItemId}`));
+    if (pending.length === 0) {
+      showStatus('All items of this order are already saved.', 'warning');
+      return;
+    }
+    const missingDocket = pending.some((it) => !String(header.outcourierdocketno ?? it.outcourierdocketno ?? '').trim());
+    if (missingDocket) {
+      showStatus('Validation Error: Courier Docket No is mandatory. Enter it in the header to apply to all items.', 'error');
+      return;
+    }
+    if (header.outdealyreasons && header.outdealyreasons.length > 70) {
+      showStatus('Validation Error: Delay Reasons cannot exceed 70 characters.', 'error');
+      return;
+    }
+
+    setHeaderSavingId(order.orderId);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const it of pending) {
+        const merged: any = { ...it, ...header };
+        if (header.outstatus) merged.fulfillmentstatus = header.outstatus;
+        const success = await handleSaveItem(fullOrder, merged as CreateShipmentGridRow, { silent: true });
+        success ? ok++ : failed++;
+      }
+    } finally {
+      setHeaderSavingId(null);
+    }
+
+    if (failed === 0) {
+      showStatus(`Order ${order.orderNo}: ${ok} item(s) saved from header.`, 'success');
+    } else {
+      showStatus(`Order ${order.orderNo}: ${ok} saved, ${failed} failed. Check item values and retry.`, 'error');
+    }
+  };
+
   // Send WhatsApp Notification directly from grid
   const handleSendWhatsAppNotification = async (orderId: string, item: CreateShipmentGridRow) => {
     const itemKey = `${orderId}_${item.orderItemId}`;
@@ -587,17 +707,21 @@ export const CreateShipmentView: React.FC = () => {
   };
 
   // Save Item directly from Grid
-  const handleSaveItem = async (order: GroupedShipmentOrder, item: CreateShipmentGridRow) => {
+  const handleSaveItem = async (
+    order: GroupedShipmentOrder,
+    item: CreateShipmentGridRow,
+    opts?: { silent?: boolean }
+  ): Promise<boolean> => {
     // 1. Mandatory Validation: Courier Docket No must be present
     if (!item.outcourierdocketno || item.outcourierdocketno.trim() === '') {
       showStatus(`Validation Error: Courier Docket No is mandatory for ${item.productName}.`, 'error');
-      return;
+      return false;
     }
 
     // 2. Character limit validation: Delay reasons <= 70
     if (item.outdealyreasons && item.outdealyreasons.length > 70) {
       showStatus(`Validation Error: Delay Reasons cannot exceed 70 characters.`, 'error');
-      return;
+      return false;
     }
 
     const itemKey = `${order.orderId}_${item.orderItemId}`;
@@ -677,6 +801,7 @@ export const CreateShipmentView: React.FC = () => {
             ...existingParent,
             items: updatedItems,
             outstatus: item.outstatus,
+            deliveryStatus: item.outstatus,
             fulfillmentstatus: item.outstatus,
             updatedAt: now,
           });
@@ -724,15 +849,19 @@ export const CreateShipmentView: React.FC = () => {
       setRecentlyUpdatedItemKeys((prev) => new Set(prev).add(itemKey));
       setSavedItemKeys((prev) => new Set(prev).add(itemKey));
 
-      showStatus(
-        item.outstatus === 'SHIPPED'
-          ? `Shipment marked as SHIPPED with Docket #${item.outcourierdocketno} via ${item.outcouriername}!${notifFeedback}`
-          : `Shipment details saved successfully with Docket #${item.outcourierdocketno}.${notifFeedback}`,
-        'success'
-      );
+      if (!opts?.silent) {
+        showStatus(
+          item.outstatus === 'SHIPPED'
+            ? `Shipment marked as SHIPPED with Docket #${item.outcourierdocketno} via ${item.outcouriername}!${notifFeedback}`
+            : `Shipment details saved successfully with Docket #${item.outcourierdocketno}.${notifFeedback}`,
+          'success'
+        );
+      }
+      return true;
     } catch (err: any) {
       console.error('Failed to save shipment item:', err);
       showStatus(err?.message || 'Failed to save shipment details.', 'error');
+      return false;
     } finally {
       setSavingKey(null);
     }
@@ -1077,11 +1206,103 @@ export const CreateShipmentView: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800">
-                      {order.items.length} Product{order.items.length > 1 ? 's' : ''}
-                    </span>
-                  </div>
+                  {/* Header bulk controls: cascade to all child rows */}
+                  {(() => {
+                    const header = headerEdits[order.orderId] || {};
+                    const fullOrder = groupedOrders.find((o) => o.orderId === order.orderId) || order;
+                    const allSaved = fullOrder.items.every((it) => savedItemKeys.has(`${order.orderId}_${it.orderItemId}`));
+                    const isHeaderSaving = headerSavingId === order.orderId;
+                    const lockHeader = allSaved || isHeaderSaving;
+                    const headerStatus = header.outstatus || '';
+                    const headerDocketMissing = !String(header.outcourierdocketno || '').trim();
+                    const ctl = 'px-2 py-1 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed';
+                    return (
+                      <div onClick={(e) => e.stopPropagation()} className="flex flex-wrap items-center gap-2 cursor-default">
+                        <select
+                          value={headerStatus}
+                          disabled={lockHeader}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outstatus', e.target.value as ShipmentStatusOption)}
+                          title="Fulfillment Status (applies to all items)"
+                          className={`${ctl} font-bold cursor-pointer ${
+                            headerStatus === 'SHIPPED'
+                              ? '!bg-emerald-50 text-emerald-900 !border-emerald-300'
+                              : headerStatus === 'CANCELLED'
+                              ? '!bg-rose-50 text-rose-900 !border-rose-300'
+                              : headerStatus === 'READY_FOR_DISPATCH'
+                              ? '!bg-lime-50 text-lime-900 !border-lime-300'
+                              : headerStatus === 'PACKING'
+                              ? '!bg-amber-50 text-amber-900 !border-amber-300'
+                              : ''
+                          }`}
+                        >
+                          <option value="" disabled>Fulfillment Status</option>
+                          <option value="PACKING">PACKING</option>
+                          <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
+                          <option value="SHIPPED">SHIPPED</option>
+                          <option value="CANCELLED">CANCELLED</option>
+                        </select>
+                        <input
+                          type="date"
+                          value={header.outpickupdate || ''}
+                          disabled={lockHeader}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outpickupdate', e.target.value)}
+                          title="Pickup Date (applies to all items)"
+                          className={`${ctl} cursor-pointer`}
+                        />
+                        <select
+                          value={header.outcouriername || ''}
+                          disabled={lockHeader}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outcouriername', e.target.value)}
+                          title="Courier Partner (applies to all items)"
+                          className={`${ctl} font-bold cursor-pointer`}
+                        >
+                          <option value="" disabled>Courier Partner</option>
+                          {COURIER_PARTNERS.map((cp) => (
+                            <option key={cp} value={cp}>{cp}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="Docket No (Req) *"
+                          value={header.outcourierdocketno || ''}
+                          disabled={lockHeader}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outcourierdocketno', e.target.value)}
+                          title="Courier Docket No - mandatory (applies to all items)"
+                          className={`${ctl} w-36 font-mono font-bold ${
+                            headerDocketMissing && !allSaved ? '!bg-amber-50 !border-amber-400 placeholder-amber-400' : 'text-emerald-700'
+                          }`}
+                        />
+                        <input
+                          type="text"
+                          maxLength={70}
+                          placeholder="Delay reasons (all items)"
+                          value={header.outdealyreasons || ''}
+                          disabled={lockHeader}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outdealyreasons', e.target.value)}
+                          className={`${ctl} w-44`}
+                        />
+                        <button
+                          type="button"
+                          disabled={lockHeader || headerDocketMissing}
+                          onClick={() => handleSaveOrderHeader(order)}
+                          title={allSaved ? 'All items saved' : headerDocketMissing ? 'Enter Courier Docket No to enable Save All' : 'Save and apply to all items'}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+                            allSaved
+                              ? 'bg-sky-200 text-sky-800 border border-sky-300 cursor-not-allowed'
+                              : isHeaderSaving || headerDocketMissing
+                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                              : 'bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer active:scale-95'
+                          }`}
+                        >
+                          {allSaved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                          <span>{isHeaderSaving ? 'Saving All...' : allSaved ? 'All Saved' : 'Save All'}</span>
+                        </button>
+                        <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800">
+                          {order.items.length} Product{order.items.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Child Items Table with Grid-Level Controls */}
@@ -1107,7 +1328,7 @@ export const CreateShipmentView: React.FC = () => {
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                         {order.items.map((item) => {
                           const itemKey = `${order.orderId}_${item.orderItemId}`;
-                          const isSaving = savingKey === itemKey;
+                          const isSaving = savingKey === itemKey || headerSavingId === order.orderId;
                           const isSaved = savedItemKeys.has(itemKey);
                           const isSendingWa = waSendingKey === itemKey;
                           const isDocketMissing = !item.outcourierdocketno || item.outcourierdocketno.trim() === '';

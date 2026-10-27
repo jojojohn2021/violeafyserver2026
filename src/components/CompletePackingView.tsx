@@ -93,6 +93,11 @@ export const CompletePackingView: React.FC = () => {
   // Track recently updated items so their status changes remain visible in grid
   const [recentlyUpdatedItemKeys, setRecentlyUpdatedItemKeys] = useState<Set<string>>(new Set());
 
+  // Order header (bulk) edits: values cascade to all child rows of the order
+  type HeaderEdit = { outstatus?: PackingStatusOption; outexpecteddateofdespatchdate?: string; outdealyreasons?: string };
+  const [headerEdits, setHeaderEdits] = useState<Record<string, HeaderEdit>>({});
+  const [headerSavingId, setHeaderSavingId] = useState<string | null>(null);
+
   // Track saved items to disable save button and highlight row blue
   const [savedItemKeys, setSavedItemKeys] = useState<Set<string>>(() => {
     try {
@@ -481,6 +486,56 @@ export const CompletePackingView: React.FC = () => {
     );
   };
 
+  // Header (order-level) field change: store header value and cascade to all unsaved child rows
+  const handleHeaderFieldChange = (orderId: string, field: keyof HeaderEdit, val: any) => {
+    setHeaderEdits((prev) => ({ ...prev, [orderId]: { ...(prev[orderId] || {}), [field]: val } }));
+    setGroupedOrders((prevOrders) =>
+      prevOrders.map((ord) => {
+        if (ord.orderId !== orderId) return ord;
+        return {
+          ...ord,
+          items: ord.items.map((it) =>
+            savedItemKeys.has(`${orderId}_${it.orderItemId}`) ? it : { ...it, [field]: val }
+          ),
+        };
+      })
+    );
+  };
+
+  // Header Save: save every unsaved child record of the order
+  const handleSaveOrderHeader = async (order: GroupedPackingOrder) => {
+    const header = headerEdits[order.orderId] || {};
+    if (header.outdealyreasons && header.outdealyreasons.length > 70) {
+      showStatus('Validation Error: Delay Reasons cannot exceed 70 characters.', 'error');
+      return;
+    }
+    const fullOrder = groupedOrders.find((o) => o.orderId === order.orderId) || order;
+    const pending = fullOrder.items.filter((it) => !savedItemKeys.has(`${order.orderId}_${it.orderItemId}`));
+    if (pending.length === 0) {
+      showStatus('All items of this order are already saved.', 'warning');
+      return;
+    }
+
+    setHeaderSavingId(order.orderId);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const it of pending) {
+        const merged: PackingGridRow = { ...it, ...header } as PackingGridRow;
+        const success = await handleSaveItem(fullOrder, merged, { silent: true });
+        success ? ok++ : failed++;
+      }
+    } finally {
+      setHeaderSavingId(null);
+    }
+
+    if (failed === 0) {
+      showStatus(`Order ${order.orderNo}: ${ok} item(s) saved from header.`, 'success');
+    } else {
+      showStatus(`Order ${order.orderNo}: ${ok} saved, ${failed} failed. Check item values and retry.`, 'error');
+    }
+  };
+
   // Direct WhatsApp notification from grid
   const handleSendWhatsAppNotification = async (orderId: string, item: PackingGridRow) => {
     const itemKey = `${orderId}_${item.orderItemId}`;
@@ -518,21 +573,25 @@ export const CompletePackingView: React.FC = () => {
   };
 
   // Direct Save Item from Grid
-  const handleSaveItem = async (order: GroupedPackingOrder, item: PackingGridRow) => {
+  const handleSaveItem = async (
+    order: GroupedPackingOrder,
+    item: PackingGridRow,
+    opts?: { silent?: boolean }
+  ): Promise<boolean> => {
     // 1. Validation: outquantity > 0 and <= orderqty
     if (item.outquantity <= 0) {
       showStatus(`Validation Error: Packed quantity must be greater than 0 for ${item.productName}.`, 'error');
-      return;
+      return false;
     }
     if (item.outquantity > item.orderqty) {
       showStatus(`Validation Error: Packed quantity (${item.outquantity}) cannot exceed order quantity (${item.orderqty}).`, 'error');
-      return;
+      return false;
     }
 
     // 2. Character limit validation: Delay reasons <= 70
     if (item.outdealyreasons && item.outdealyreasons.length > 70) {
       showStatus(`Validation Error: Delay Reasons cannot exceed 70 characters.`, 'error');
-      return;
+      return false;
     }
 
     const itemKey = `${order.orderId}_${item.orderItemId}`;
@@ -645,6 +704,7 @@ export const CompletePackingView: React.FC = () => {
             ...existingParent,
             items: updatedItems,
             outstatus: item.outstatus,
+            deliveryStatus: item.outstatus,
             fulfillmentstatus: computedFulfillmentStatus,
             updatedAt: now,
           });
@@ -693,15 +753,19 @@ export const CompletePackingView: React.FC = () => {
       setRecentlyUpdatedItemKeys((prev) => new Set(prev).add(itemKey));
       setSavedItemKeys((prev) => new Set(prev).add(itemKey));
 
-      showStatus(
-        calculatedBalance > 0
-          ? `Record saved! Balance qty (${calculatedBalance}) created for remaining split packing.`
-          : `Packing completed! Status updated to '${item.outstatus}'.`,
-        'success'
-      );
+      if (!opts?.silent) {
+        showStatus(
+          calculatedBalance > 0
+            ? `Record saved! Balance qty (${calculatedBalance}) created for remaining split packing.`
+            : `Packing completed! Status updated to '${item.outstatus}'.`,
+          'success'
+        );
+      }
+      return true;
     } catch (err: any) {
       console.error('Failed to save packing item:', err);
       showStatus(err?.message || 'Failed to save packing details.', 'error');
+      return false;
     } finally {
       setSavingKey(null);
     }
@@ -1046,11 +1110,77 @@ export const CompletePackingView: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800">
-                      {order.items.length} Product{order.items.length > 1 ? 's' : ''}
-                    </span>
-                  </div>
+                  {/* Header bulk controls: cascade to all child rows */}
+                  {(() => {
+                    const header = headerEdits[order.orderId] || {};
+                    const fullOrder = groupedOrders.find((o) => o.orderId === order.orderId) || order;
+                    const allSaved = fullOrder.items.every((it) => savedItemKeys.has(`${order.orderId}_${it.orderItemId}`));
+                    const isHeaderSaving = headerSavingId === order.orderId;
+                    const headerStatus = header.outstatus || '';
+                    return (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex flex-wrap items-center gap-2 cursor-default"
+                      >
+                        <select
+                          value={headerStatus}
+                          disabled={allSaved || isHeaderSaving}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outstatus', e.target.value as PackingStatusOption)}
+                          title="Fulfillment Status (applies to all items)"
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border outline-none cursor-pointer focus:ring-2 focus:ring-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed ${
+                            headerStatus === 'READY_FOR_DISPATCH'
+                              ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                              : headerStatus === 'CANCELLED'
+                              ? 'bg-rose-50 text-rose-900 border-rose-300'
+                              : headerStatus === 'PACKING'
+                              ? 'bg-amber-50 text-amber-900 border-amber-300'
+                              : 'bg-white text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                          }`}
+                        >
+                          <option value="" disabled>Fulfillment Status</option>
+                          <option value="PACKING">PACKING</option>
+                          <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
+                          <option value="CANCELLED">CANCELLED</option>
+                        </select>
+                        <input
+                          type="date"
+                          value={header.outexpecteddateofdespatchdate || ''}
+                          disabled={allSaved || isHeaderSaving}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outexpecteddateofdespatchdate', e.target.value)}
+                          title="Exp Dispatch Date (applies to all items)"
+                          className="px-2 py-1 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer disabled:opacity-60"
+                        />
+                        <input
+                          type="text"
+                          maxLength={70}
+                          placeholder="Delay reasons (all items)"
+                          value={header.outdealyreasons || ''}
+                          disabled={allSaved || isHeaderSaving}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outdealyreasons', e.target.value)}
+                          className="w-48 px-2 py-1 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+                        />
+                        <button
+                          type="button"
+                          disabled={allSaved || isHeaderSaving}
+                          onClick={() => handleSaveOrderHeader(order)}
+                          title={allSaved ? 'All items saved' : 'Save and apply to all items'}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+                            allSaved
+                              ? 'bg-sky-200 text-sky-800 border border-sky-300 cursor-not-allowed'
+                              : isHeaderSaving
+                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                              : 'bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer active:scale-95'
+                          }`}
+                        >
+                          {allSaved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                          <span>{isHeaderSaving ? 'Saving All...' : allSaved ? 'All Saved' : 'Save All'}</span>
+                        </button>
+                        <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800">
+                          {order.items.length} Product{order.items.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Child Items Table with Grid-Level Controls */}
@@ -1077,7 +1207,7 @@ export const CompletePackingView: React.FC = () => {
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                         {order.items.map((item) => {
                           const itemKey = `${order.orderId}_${item.orderItemId}`;
-                          const isSaving = savingKey === itemKey;
+                          const isSaving = savingKey === itemKey || headerSavingId === order.orderId;
                           const isSaved = savedItemKeys.has(itemKey);
                           const isSendingWa = waSendingKey === itemKey;
                           const hasBalance = item.outbalanceqty > 0;

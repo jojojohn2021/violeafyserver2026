@@ -94,7 +94,7 @@ export const CompletePackingView: React.FC = () => {
   const [recentlyUpdatedItemKeys, setRecentlyUpdatedItemKeys] = useState<Set<string>>(new Set());
 
   // Order header (bulk) edits: values cascade to all child rows of the order
-  type HeaderEdit = { outstatus?: PackingStatusOption; outexpecteddateofdespatchdate?: string; outdealyreasons?: string };
+  type HeaderEdit = { outstatus?: PackingStatusOption; outpackdate?: string; outexpecteddateofdespatchdate?: string; outdealyreasons?: string };
   const [headerEdits, setHeaderEdits] = useState<Record<string, HeaderEdit>>({});
   const [headerSavingId, setHeaderSavingId] = useState<string | null>(null);
 
@@ -303,13 +303,6 @@ export const CompletePackingView: React.FC = () => {
         if (!salesOrderId) continue;
 
         const matchedOrder = resolveSalesOrder(salesOrderId);
-
-        // Scope: Delivery Status must be PACKING, READY_FOR_DISPATCH or CANCELLED
-        const docDeliveryStatus = String(
-          doc.deliveryStatus || doc.deliverystatus || matchedOrder?.deliveryStatus || ''
-        ).toUpperCase().trim().replace(/[\s-]+/g, '_');
-        const SCOPE = ['PACKING', 'PARTIALLY_PACKED', 'READY_FOR_DISPATCH', 'CANCELLED', 'CANCELED'];
-        if (docDeliveryStatus && !SCOPE.includes(docDeliveryStatus)) continue;
         const orderNo = String(doc.orderNumber || doc.orderNo || matchedOrder?.orderNumber || salesOrderId);
         const customerName = String(
           matchedOrder?.customerName ||
@@ -386,15 +379,19 @@ export const CompletePackingView: React.FC = () => {
             ? Number(item.outquantity)
             : orderqty;
 
-          const currentRawStatus = String(item.outstatus || item.fulfillmentstatus || docDeliveryStatus || 'PACKING').toUpperCase().trim().replace(/[\s-]+/g, '_');
-          // Item-level check only when the document has no delivery status
-          if (!docDeliveryStatus && !SCOPE.includes(currentRawStatus)) continue;
+          // Restrict to records where fulfillmentstatus = 'ASSIGNED' only
+          const rawFulfillmentStatus = String(
+            item.fulfillmentstatus || item.fulfilmentStatus || doc.fulfillmentstatus || doc.fulfilmentStatus || ''
+          ).toUpperCase().trim().replace(/[\s-]+/g, '_');
+          if (rawFulfillmentStatus !== 'ASSIGNED') continue;
+
+          const currentRawStatus = String(item.outstatus || 'PACKING').toUpperCase().trim().replace(/[\s-]+/g, '_');
           let outstatus: PackingStatusOption = 'PACKING';
           if (currentRawStatus === 'READY_FOR_DISPATCH') outstatus = 'READY_FOR_DISPATCH';
           else if (currentRawStatus === 'CANCELLED' || currentRawStatus === 'CANCELED') outstatus = 'CANCELLED';
 
           const outbalanceqty = Math.max(0, orderqty - outquantity);
-          const fulfillmentstatus = outbalanceqty > 0 ? 'PARTIALLY_PACKED' : outstatus;
+          const fulfillmentstatus = rawFulfillmentStatus;
 
           const outpackdate = item.outpackdate ? String(item.outpackdate) : systemDate;
           const outexpecteddateofdespatchdate = item.outexpecteddateofdespatchdate ? String(item.outexpecteddateofdespatchdate) : systemDate;
@@ -520,8 +517,9 @@ export const CompletePackingView: React.FC = () => {
     let ok = 0;
     let failed = 0;
     try {
+      const defaultPackDate = header.outpackdate || getSystemDate();
       for (const it of pending) {
-        const merged: PackingGridRow = { ...it, ...header } as PackingGridRow;
+        const merged: PackingGridRow = { ...it, outpackdate: defaultPackDate, ...header } as PackingGridRow;
         const success = await handleSaveItem(fullOrder, merged, { silent: true });
         success ? ok++ : failed++;
       }
@@ -625,14 +623,15 @@ export const CompletePackingView: React.FC = () => {
         outexpecteddateofdespatchdate: item.outexpecteddateofdespatchdate,
         outdealyreasons: (item.outdealyreasons || '').trim().slice(0, 70),
         fulfillmentstatus: computedFulfillmentStatus,
-        status: item.outstatus === 'READY_FOR_DISPATCH' ? 'PACKED' : 'ASSIGNED',
+        itemstatus: item.outstatus === 'READY_FOR_DISPATCH' ? 'PACKED' : 'ASSIGNED',
         outpackingstatus: item.outstatus === 'READY_FOR_DISPATCH' ? 'PACKED' : 'PACKING',
         shipid: item.shipid || `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         updatedAt: now,
       };
-      // shipment_brand_owner_fulfilment.items[]: legacy `deliverystatus` -> `itemdeliverystatus`
+      // shipment_brand_owner_fulfilment.items[]: legacy `deliverystatus` -> `itemdeliverystatus`, `status` -> `itemstatus`
       Object.assign(updatedChildDoc, migrateFulfilmentItem({ ...updatedChildDoc }));
       delete updatedChildDoc.deliverystatus;
+      delete updatedChildDoc.status;
 
       let newOrderFulfilmentRecord: any = null;
       if (calculatedBalance > 0) {
@@ -659,8 +658,8 @@ export const CompletePackingView: React.FC = () => {
           productId: item.productId || '',
           productName: item.productName,
           salesOrderId: order.orderId,
-          fulfillmentstatus: 'PACKING',
-          status: 'ASSIGNED',
+          fulfillmentstatus: 'ASSIGNED',
+          itemstatus: 'ASSIGNED',
           createdAt: now,
           updatedAt: now,
         };
@@ -789,13 +788,18 @@ export const CompletePackingView: React.FC = () => {
       .map((order) => {
         const filteredItems = order.items.filter((item) => {
           const itemKey = `${order.orderId}_${item.orderItemId}`;
+          const isRecentlyUpdated = recentlyUpdatedItemKeys.has(itemKey);
+
+          if (String(item.fulfillmentstatus || '').toUpperCase().trim() !== 'ASSIGNED' && !isRecentlyUpdated) {
+            return false;
+          }
 
           if (statusFilter === 'PACKING') {
             const isPacking =
               item.outstatus === 'PACKING' ||
+              item.fulfillmentstatus === 'ASSIGNED' ||
               item.fulfillmentstatus === 'PACKING' ||
               item.fulfillmentstatus === 'PARTIALLY_PACKED';
-            const isRecentlyUpdated = recentlyUpdatedItemKeys.has(itemKey);
             if (!isPacking && !isRecentlyUpdated) return false;
           } else if (statusFilter === 'READY_FOR_DISPATCH') {
             const isReady = item.outstatus === 'READY_FOR_DISPATCH' || item.fulfillmentstatus === 'READY_FOR_DISPATCH';
@@ -1144,10 +1148,10 @@ export const CompletePackingView: React.FC = () => {
                         </select>
                         <input
                           type="date"
-                          value={header.outexpecteddateofdespatchdate || ''}
+                          value={header.outpackdate || getSystemDate()}
                           disabled={allSaved || isHeaderSaving}
-                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outexpecteddateofdespatchdate', e.target.value)}
-                          title="Exp Dispatch Date (applies to all items)"
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outpackdate', e.target.value)}
+                          title="Pack Date (applies to all items)"
                           className="px-2 py-1 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer disabled:opacity-60"
                         />
                         <input
@@ -1196,11 +1200,11 @@ export const CompletePackingView: React.FC = () => {
                           <th className="py-2.5 px-2 text-center min-w-[60px]">Order Qty</th>
                           <th className="py-2.5 px-2 text-center min-w-[80px]">Out Qty *</th>
                           <th className="py-2.5 px-2 text-center min-w-[80px]">Balance Qty</th>
-                          <th className="py-2.5 px-2 min-w-[150px]">Out Status</th>
-                          <th className="py-2.5 px-2 text-center min-w-[120px]">Fulfillment Status</th>
-                          <th className="py-2.5 px-2 min-w-[130px]">Exp Dispatch Date</th>
-                          <th className="py-2.5 px-2 min-w-[180px]">Delay Reasons</th>
-                          <th className="py-2.5 px-3 text-center min-w-[150px]">Action</th>
+                          <th className="hidden py-2.5 px-2 min-w-[150px]">Out Status</th>
+                          <th className="hidden py-2.5 px-2 text-center min-w-[120px]">Fulfillment Status</th>
+                          <th className="hidden py-2.5 px-2 min-w-[130px]">Exp Dispatch Date</th>
+                          <th className="hidden py-2.5 px-2 min-w-[180px]">Delay Reasons</th>
+                          <th className="py-2.5 px-3 text-center min-w-[80px]">Action</th>
                         </tr>
                       </thead>
 
@@ -1315,7 +1319,7 @@ export const CompletePackingView: React.FC = () => {
                               </td>
 
                               {/* 8. Out Status (Selection Combo Box) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <select
                                   value={item.outstatus}
                                   onChange={(e) =>
@@ -1336,7 +1340,7 @@ export const CompletePackingView: React.FC = () => {
                               </td>
 
                               {/* 9. Fulfillment Status Badge */}
-                              <td className="py-3 px-2 text-center whitespace-nowrap">
+                              <td className="hidden py-3 px-2 text-center whitespace-nowrap">
                                 <span
                                   className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black border ${
                                     item.fulfillmentstatus === 'READY_FOR_DISPATCH'
@@ -1353,7 +1357,7 @@ export const CompletePackingView: React.FC = () => {
                               </td>
 
                               {/* 10. Expected Date of Despatch Date */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <input
                                   type="date"
                                   value={item.outexpecteddateofdespatchdate}
@@ -1365,7 +1369,7 @@ export const CompletePackingView: React.FC = () => {
                               </td>
 
                               {/* 11. Delay Reasons (Max 70 chars) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <div className="flex flex-col">
                                   <input
                                     type="text"
@@ -1391,7 +1395,7 @@ export const CompletePackingView: React.FC = () => {
                                     disabled={isSaving || isSaved}
                                     onClick={() => handleSaveItem(order, item)}
                                     title={isSaved ? 'Record Saved' : 'Save Item Packing Status'}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-xs ${
+                                    className={`hidden px-3 py-1.5 rounded-xl text-xs font-bold transition items-center gap-1 shadow-xs ${
                                       isSaved
                                         ? 'bg-sky-200 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 border border-sky-300 dark:border-sky-700 cursor-not-allowed shadow-none'
                                         : isSaving

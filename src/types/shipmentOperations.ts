@@ -121,7 +121,7 @@ export interface ShipmentBrandOwnerFulfilmentChildItem {
   deliverycondition?: string;
   itemdeliverystatus?: string;
   fulfillmentstatus?: string;
-  status?: string;
+  itemstatus?: string;
   orderfulfilment?: ShipmentBrandOwnerFulfilmentChildRecord[];
   createdAt?: string;
   updatedAt?: string;

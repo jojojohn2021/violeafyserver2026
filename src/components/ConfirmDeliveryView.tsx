@@ -551,7 +551,7 @@ export const ConfirmDeliveryView: React.FC = () => {
         outquantity: item.outquantity,
         outstatus: item.outstatus,
         fulfillmentstatus: item.outstatus,
-        status: item.outstatus === 'COMPLETED' ? 'COMPLETED' : 'SHIPPED',
+        itemstatus: item.outstatus === 'COMPLETED' ? 'COMPLETED' : 'SHIPPED',
         itemdeliverystatus: item.outstatus === 'COMPLETED' ? 'DELIVERED' : 'IN_TRANSIT',
         outpickupdate: item.outpickupdate,
         outcouriername: item.outcouriername,

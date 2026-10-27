@@ -240,8 +240,8 @@ function didStatusChange(previousDoc: any, updatedDoc: any): boolean {
   const prevFulfillment = previousDoc.fulfillmentstatus ?? '';
   const newFulfillment = updatedDoc.fulfillmentstatus ?? '';
 
-  const prevStatus = previousDoc.status ?? '';
-  const newStatus = updatedDoc.status ?? '';
+  const prevStatus = previousDoc.itemstatus ?? previousDoc.status ?? '';
+  const newStatus = updatedDoc.itemstatus ?? updatedDoc.status ?? '';
 
   return (
     prevDelivery !== newDelivery ||
@@ -1892,13 +1892,13 @@ app.post("/api/v1/operations/shipment-fulfilment/:id/child-packing", handleAddFu
 
 // shipment_brand_owner_fulfilment.items[] field rename: legacy `deliverystatus` -> `itemdeliverystatus`
 function migrateFulfilmentItem(item: any): any {
-  if (!item || typeof item !== 'object' || !Object.prototype.hasOwnProperty.call(item, 'deliverystatus')) return item;
-  const { deliverystatus, ...rest } = item;
-  return { ...rest, itemdeliverystatus: rest.itemdeliverystatus ?? deliverystatus ?? '' };
+  if (!item || typeof item !== 'object' || (!Object.prototype.hasOwnProperty.call(item, 'deliverystatus') && !Object.prototype.hasOwnProperty.call(item, 'status'))) return item;
+  const { deliverystatus, status, ...rest } = item;
+  return { ...rest, ...(Object.prototype.hasOwnProperty.call(item, 'deliverystatus') ? { itemdeliverystatus: rest.itemdeliverystatus ?? deliverystatus ?? '' } : {}), ...(Object.prototype.hasOwnProperty.call(item, 'status') ? { itemstatus: rest.itemstatus ?? status ?? '' } : {}) };
 }
 
 function fulfilmentDocNeedsItemMigration(doc: any): boolean {
-  return Array.isArray(doc?.items) && doc.items.some((it: any) => it && Object.prototype.hasOwnProperty.call(it, 'deliverystatus'));
+  return Array.isArray(doc?.items) && doc.items.some((it: any) => it && (Object.prototype.hasOwnProperty.call(it, 'deliverystatus') || Object.prototype.hasOwnProperty.call(it, 'status')));
 }
 
 async function migrateFulfilmentDocsItemDeliveryStatus(rawDocs: any[]): Promise<number> {
@@ -2041,7 +2041,7 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
       });
     }
 
-    const statusVal = String(record.outstatus || record.fulfillmentstatus || record.status || '').toUpperCase().trim();
+    const statusVal = String(record.outstatus || record.fulfillmentstatus || record.itemstatus || record.status || '').toUpperCase().trim();
     const courierNameVal = String(record.outcouriername || record.couriername || record.courierAgency || '').trim();
     const docketNoVal = String(record.outcourierdocketno || record.courierdocketno || record.trackingNumber || '').trim();
 
@@ -2115,6 +2115,9 @@ const handleSaveShipmentBrandOwnerFulfilment = async (req: express.Request, res:
     parentDoc.updatedAt = now;
     if (statusVal) {
       parentDoc.deliveryStatus = statusVal;
+      parentDoc.outstatus = record.outstatus || statusVal;
+      parentDoc.fulfillmentstatus = record.fulfillmentstatus || statusVal;
+      parentDoc.status = statusVal;
     }
 
     // Save parent doc into shipment_brand_owner_fulfilment
@@ -2380,7 +2383,7 @@ const handleSyncShipmentBrandOwnerFulfilmentFromOrders = async (req: express.Req
             outexpecteddateofdespatchdate: today,
             outdealyreasons: '',
             fulfillmentstatus: 'PACKING',
-            status: 'ASSIGNED',
+            itemstatus: 'ASSIGNED',
             deliverydate: '',
             deliverycondition: '',
             outdeliverydate: '',

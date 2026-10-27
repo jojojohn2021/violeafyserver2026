@@ -347,13 +347,14 @@ export const CreateShipmentView: React.FC = () => {
         // while the parent deliveryStatus can remain 'PACKING', which previously excluded these orders.
         const docItemsArr: any[] = Array.isArray(doc.items) ? doc.items : [];
         const statusCandidates: string[] = [
-          doc.fulfillmentstatus,
-          doc.fulfilmentStatus,
-          ...docItemsArr.map((it: any) => it?.fulfillmentstatus),
           doc.deliveryStatus,
           doc.deliverystatus,
+          ...docItemsArr.map((it: any) => it?.fulfillmentstatus),
+          ...docItemsArr.map((it: any) => it?.outstatus),
+          doc.fulfillmentstatus,
+          doc.fulfilmentStatus,
           matchedOrder?.deliveryStatus,
-          ...docItemsArr.flatMap((it: any) => [it?.deliveryStatus, getItemDeliveryStatus(it), it?.outstatus]),
+          ...docItemsArr.flatMap((it: any) => [it?.deliveryStatus, getItemDeliveryStatus(it)]),
         ]
           .map((s) => String(s || '').trim())
           .filter(Boolean);
@@ -374,21 +375,26 @@ export const CreateShipmentView: React.FC = () => {
 
         // Auto-persist: order is READY_FOR_DISPATCH, so promote any child still at PACKING / PARTIALLY_PACKED
         // and align the parent deliveryStatus / fulfillmentstatus in shipment_brand_owner_fulfilment.
-        if (docDeliveryStatus === 'READY_FOR_DISPATCH' && doc.id && docItemsArr.length > 0) {
+        const hasShippedItem = docItemsArr.some(
+          (it: any) =>
+            String(it?.outstatus || '').toUpperCase().trim() === 'SHIPPED' ||
+            String(it?.fulfillmentstatus || '').toUpperCase().trim() === 'SHIPPED'
+        );
+        if (docDeliveryStatus === 'READY_FOR_DISPATCH' && !hasShippedItem && doc.id && docItemsArr.length > 0) {
           const norm = (s: any) => String(s || '').trim().toUpperCase().replace(/[\s_-]+/g, '_');
           const isPackingLike = (s: any) => ['PACKING', 'PARTIALLY_PACKED'].includes(norm(s));
           let changed = false;
           const promotedItems = docItemsArr.map((it: any) => {
             if (isPackingLike(it?.fulfillmentstatus) || isPackingLike(it?.outstatus)) {
               changed = true;
-              return {
+              return migrateFulfilmentItem({
                 ...it,
                 fulfillmentstatus: 'READY_FOR_DISPATCH',
                 outstatus: 'READY_FOR_DISPATCH',
                 outpackingstatus: 'PACKED',
-                status: 'PACKED',
+                itemstatus: 'PACKED',
                 updatedAt: new Date().toISOString(),
-              };
+              });
             }
             return it;
           });
@@ -653,9 +659,18 @@ export const CreateShipmentView: React.FC = () => {
     let ok = 0;
     let failed = 0;
     try {
+      const defaultPickupDate = header.outpickupdate || getSystemDate();
+      const defaultCourier = header.outcouriername || 'Delhivery';
+      const targetStatus: ShipmentStatusOption = header.outstatus || 'SHIPPED';
       for (const it of pending) {
-        const merged: any = { ...it, ...header };
-        if (header.outstatus) merged.fulfillmentstatus = header.outstatus;
+        const merged: any = {
+          ...it,
+          outpickupdate: defaultPickupDate,
+          outcouriername: defaultCourier,
+          ...header,
+          outstatus: targetStatus,
+          fulfillmentstatus: targetStatus,
+        };
         const success = await handleSaveItem(fullOrder, merged as CreateShipmentGridRow, { silent: true });
         success ? ok++ : failed++;
       }
@@ -751,7 +766,7 @@ export const CreateShipmentView: React.FC = () => {
         outquantity: item.outquantity,
         outstatus: item.outstatus,
         fulfillmentstatus: item.outstatus,
-        status: item.outstatus === 'SHIPPED' ? 'SHIPPED' : 'ASSIGNED',
+        itemstatus: item.outstatus === 'SHIPPED' ? 'SHIPPED' : 'ASSIGNED',
         itemdeliverystatus: item.outstatus === 'SHIPPED' ? 'IN_TRANSIT' : '',
         outpickupdate: item.outpickupdate,
         outcouriername: item.outcouriername,
@@ -781,6 +796,17 @@ export const CreateShipmentView: React.FC = () => {
           if (apiData.notification?.status === 'dispatched') {
             notifFeedback = ' • WhatsApp notification dispatched to customer!';
           }
+          // Ensure parent document top-level status, outstatus, fulfillmentstatus are synced in Firestore
+          const parentDocId = `fulfil_${order.orderId}`;
+          await shipmentBrandOwnerAssignmentRepository
+            .update(parentDocId, {
+              status: item.outstatus,
+              outstatus: item.outstatus,
+              fulfillmentstatus: item.outstatus,
+              deliveryStatus: item.outstatus,
+              updatedAt: now,
+            })
+            .catch(() => {});
         } else if (apiRes.status === 400) {
           apiValidationError = apiData.error || 'Validation failed on server.';
         }
@@ -800,6 +826,7 @@ export const CreateShipmentView: React.FC = () => {
           await shipmentBrandOwnerAssignmentRepository.update(parentDocId, {
             ...existingParent,
             items: updatedItems,
+            status: item.outstatus,
             outstatus: item.outstatus,
             deliveryStatus: item.outstatus,
             fulfillmentstatus: item.outstatus,
@@ -813,8 +840,9 @@ export const CreateShipmentView: React.FC = () => {
             customerName: String(order.customerName || ''),
             customerMobile: String(order.customerMobile || ''),
             deliveryStatus: item.outstatus,
+            outstatus: item.outstatus,
             fulfillmentstatus: item.outstatus,
-            status: 'SHIPPED',
+            status: item.outstatus,
             items: [updatedChildDoc],
             createdAt: now,
             updatedAt: now,
@@ -1236,14 +1264,12 @@ export const CreateShipmentView: React.FC = () => {
                           }`}
                         >
                           <option value="" disabled>Fulfillment Status</option>
-                          <option value="PACKING">PACKING</option>
-                          <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
                           <option value="SHIPPED">SHIPPED</option>
                           <option value="CANCELLED">CANCELLED</option>
                         </select>
                         <input
                           type="date"
-                          value={header.outpickupdate || ''}
+                          value={header.outpickupdate || getSystemDate()}
                           disabled={lockHeader}
                           onChange={(e) => handleHeaderFieldChange(order.orderId, 'outpickupdate', e.target.value)}
                           title="Pickup Date (applies to all items)"
@@ -1315,13 +1341,13 @@ export const CreateShipmentView: React.FC = () => {
                           <th className="py-2.5 px-2 text-center min-w-[80px]">Pack Size</th>
                           <th className="py-2.5 px-2 text-center min-w-[60px]">Unit</th>
                           <th className="py-2.5 px-2 text-center min-w-[60px]">Qty</th>
-                          <th className="py-2.5 px-2 min-w-[150px]">Out Status</th>
-                          <th className="py-2.5 px-2 text-center min-w-[120px]">Fulfillment Status</th>
-                          <th className="py-2.5 px-2 min-w-[130px]">Pickup Date</th>
-                          <th className="py-2.5 px-2 min-w-[160px]">Courier Partner</th>
-                          <th className="py-2.5 px-2 min-w-[160px]">Courier Docket No *</th>
-                          <th className="py-2.5 px-2 min-w-[180px]">Delay Reasons</th>
-                          <th className="py-2.5 px-3 text-center min-w-[160px]">Action</th>
+                          <th className="hidden py-2.5 px-2 min-w-[150px]">Out Status</th>
+                          <th className="hidden py-2.5 px-2 text-center min-w-[120px]">Fulfillment Status</th>
+                          <th className="hidden py-2.5 px-2 min-w-[130px]">Pickup Date</th>
+                          <th className="hidden py-2.5 px-2 min-w-[160px]">Courier Partner</th>
+                          <th className="hidden py-2.5 px-2 min-w-[160px]">Courier Docket No *</th>
+                          <th className="hidden py-2.5 px-2 min-w-[180px]">Delay Reasons</th>
+                          <th className="py-2.5 px-3 text-center min-w-[80px]">Action</th>
                         </tr>
                       </thead>
 
@@ -1391,7 +1417,7 @@ export const CreateShipmentView: React.FC = () => {
                               </td>
 
                               {/* 5. Out Status Combo Box (Grid-Level Control) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <select
                                   value={item.outstatus}
                                   onChange={(e) =>
@@ -1415,7 +1441,7 @@ export const CreateShipmentView: React.FC = () => {
                               </td>
 
                               {/* 6. Fulfillment Status Badge */}
-                              <td className="py-3 px-2 text-center whitespace-nowrap">
+                              <td className="hidden py-3 px-2 text-center whitespace-nowrap">
                                 <span
                                   className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black border ${
                                     item.fulfillmentstatus === 'SHIPPED'
@@ -1432,7 +1458,7 @@ export const CreateShipmentView: React.FC = () => {
                               </td>
 
                               {/* 7. Pickup Date (Grid-Level Control) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <input
                                   type="date"
                                   value={item.outpickupdate}
@@ -1444,7 +1470,7 @@ export const CreateShipmentView: React.FC = () => {
                               </td>
 
                               {/* 8. Courier Partner Combo Box (Grid-Level Control) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <select
                                   value={item.outcouriername}
                                   onChange={(e) =>
@@ -1461,7 +1487,7 @@ export const CreateShipmentView: React.FC = () => {
                               </td>
 
                               {/* 9. Courier Docket No (Mandatory Grid-Level Control) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <input
                                   type="text"
                                   placeholder="Docket No (Req) *"
@@ -1478,7 +1504,7 @@ export const CreateShipmentView: React.FC = () => {
                               </td>
 
                               {/* 10. Delay Reasons (Max 70 chars Grid-Level Control) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <div className="flex flex-col">
                                   <input
                                     type="text"
@@ -1504,7 +1530,7 @@ export const CreateShipmentView: React.FC = () => {
                                     disabled={isDocketMissing || isSaving || isSaved}
                                     onClick={() => handleSaveItem(order, item)}
                                     title={isSaved ? 'Record Saved' : isDocketMissing ? 'Enter Courier Docket No to enable Save' : 'Save Item Shipment'}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-xs ${
+                                    className={`hidden px-3 py-1.5 rounded-xl text-xs font-bold transition items-center gap-1 shadow-xs ${
                                       isSaved
                                         ? 'bg-sky-200 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 border border-sky-300 dark:border-sky-700 cursor-not-allowed shadow-none'
                                         : isDocketMissing || isSaving

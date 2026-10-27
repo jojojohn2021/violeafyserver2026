@@ -924,7 +924,7 @@ export class OperationsService {
         whatsappNo: assignment.whatsappNo,
         assignedBy: assignedBy || 'Operations Admin',
         assignedAt: now,
-        status: 'ASSIGNED',
+        itemstatus: 'ASSIGNED',
         packdate: (assignment as any).packdate || now,
         pickupdate: (assignment as any).pickupdate || (assignment as any).outpickupdate || '',
         couriername: (assignment as any).couriername || (assignment as any).courier || '',
@@ -996,9 +996,16 @@ export class OperationsService {
         }
       }
       parentDoc.items = mergedItems.map((it: any) => {
-        if (!it || !Object.prototype.hasOwnProperty.call(it, 'deliverystatus')) return it;
-        const { deliverystatus, ...rest } = it;
-        return { ...rest, itemdeliverystatus: rest.itemdeliverystatus ?? deliverystatus ?? '' };
+        if (!it || typeof it !== 'object') return it;
+        const hasDelivery = Object.prototype.hasOwnProperty.call(it, 'deliverystatus');
+        const hasStatus = Object.prototype.hasOwnProperty.call(it, 'status');
+        if (!hasDelivery && !hasStatus) return it;
+        const { deliverystatus, status, ...rest } = it;
+        return {
+          ...rest,
+          ...(hasDelivery ? { itemdeliverystatus: rest.itemdeliverystatus ?? deliverystatus ?? '' } : {}),
+          ...(hasStatus ? { itemstatus: rest.itemstatus ?? status ?? '' } : {}),
+        };
       });
       parentDoc.deliveryStatus = computedStatus || parentDoc.deliveryStatus || 'PACKING';
       parentDoc.updatedAt = now;

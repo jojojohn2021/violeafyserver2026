@@ -92,10 +92,21 @@ export const ConfirmDeliveryView: React.FC = () => {
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'SHIPPED' | 'COMPLETED' | 'ALL'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'SHIPPED' | 'COMPLETED' | 'ALL'>('SHIPPED');
 
   // Track recently updated item IDs so they remain visible in grid
   const [recentlyUpdatedItemKeys, setRecentlyUpdatedItemKeys] = useState<Set<string>>(new Set());
+
+  // Header-level bulk values per order (cascades to all child rows)
+  type DeliveryHeaderEdit = {
+    outstatus?: ConfirmDeliveryStatusOption;
+    deliverydate?: string;
+    deliverycondition?: string;
+    outdealyreasons?: string;
+  };
+  const [headerEdits, setHeaderEdits] = useState<Record<string, DeliveryHeaderEdit>>({});
+  const [headerSavingId, setHeaderSavingId] = useState<string | null>(null);
+  const [confirmSaveOrder, setConfirmSaveOrder] = useState<GroupedConfirmDeliveryOrder | null>(null);
 
   // Track saved items to disable save button and highlight row light sky-blue
   const [savedItemKeys, setSavedItemKeys] = useState<Set<string>>(() => {
@@ -471,6 +482,128 @@ export const ConfirmDeliveryView: React.FC = () => {
     );
   };
 
+  // Header bulk edit: updates header state and cascades to all unsaved child rows
+  const handleHeaderFieldChange = <K extends keyof DeliveryHeaderEdit>(
+    orderId: string,
+    field: K,
+    val: DeliveryHeaderEdit[K]
+  ) => {
+    setHeaderEdits((prev) => ({
+      ...prev,
+      [orderId]: { ...(prev[orderId] || {}), [field]: val },
+    }));
+    setGroupedOrders((prevOrders) =>
+      prevOrders.map((ord) => {
+        if (ord.orderId !== orderId) return ord;
+        return {
+          ...ord,
+          items: ord.items.map((it) => {
+            if (savedItemKeys.has(`${orderId}_${it.orderItemId}`)) return it;
+            const updated: ConfirmDeliveryGridRow = { ...it, [field]: val as any };
+            if (field === 'outstatus') {
+              updated.fulfillmentstatus = val as any;
+            }
+            return updated;
+          }),
+        };
+      })
+    );
+  };
+
+  // Prompt confirmation before saving all child items of an order using header values
+  const handleRequestSaveOrderHeader = (order: GroupedConfirmDeliveryOrder) => {
+    const header = headerEdits[order.orderId] || {};
+    const effectiveCondition = header.deliverycondition ?? 'Good Condition';
+    const effectiveDelay = header.outdealyreasons ?? '';
+
+    if (effectiveCondition.length > 50) {
+      showStatus('Validation Error: Delivery condition cannot exceed 50 characters.', 'error');
+      return;
+    }
+    if (effectiveDelay.length > 70) {
+      showStatus('Validation Error: Delay reasons cannot exceed 70 characters.', 'error');
+      return;
+    }
+
+    const fullOrder = groupedOrders.find((o) => o.orderId === order.orderId) || order;
+    const unsavedCount = fullOrder.items.filter(
+      (it) => !savedItemKeys.has(`${order.orderId}_${it.orderItemId}`)
+    ).length;
+
+    if (unsavedCount === 0) {
+      showStatus(`All items in Order #${order.orderNo} are already saved.`, 'warning');
+      return;
+    }
+
+    setConfirmSaveOrder(order);
+  };
+
+  // Save all child items of an order using header values
+  const handleSaveOrderHeader = async (order: GroupedConfirmDeliveryOrder) => {
+    setConfirmSaveOrder(null);
+    const header = headerEdits[order.orderId] || {};
+    const effectiveDeliveryDate = header.deliverydate || getSystemDate();
+    const effectiveCondition = header.deliverycondition ?? 'Good Condition';
+    const effectiveDelay = header.outdealyreasons ?? '';
+
+    if (effectiveCondition.length > 50) {
+      showStatus('Validation Error: Delivery condition cannot exceed 50 characters.', 'error');
+      return;
+    }
+    if (effectiveDelay.length > 70) {
+      showStatus('Validation Error: Delay reasons cannot exceed 70 characters.', 'error');
+      return;
+    }
+
+    const fullOrder = groupedOrders.find((o) => o.orderId === order.orderId) || order;
+    const targetStatus: ConfirmDeliveryStatusOption = header.outstatus || 'COMPLETED';
+    const itemsToSave = fullOrder.items
+      .filter((it) => !savedItemKeys.has(`${order.orderId}_${it.orderItemId}`))
+      .map((it) => {
+        const merged: ConfirmDeliveryGridRow = {
+          ...it,
+          outstatus: targetStatus,
+          fulfillmentstatus: targetStatus,
+          deliverydate: header.deliverydate || it.deliverydate || effectiveDeliveryDate,
+          deliverycondition: header.deliverycondition !== undefined ? header.deliverycondition : (it.deliverycondition || 'Good Condition'),
+          outdealyreasons: header.outdealyreasons !== undefined ? header.outdealyreasons : it.outdealyreasons,
+        };
+        return merged;
+      });
+
+    if (itemsToSave.length === 0) {
+      showStatus(`All items in Order #${order.orderNo} are already saved.`, 'warning');
+      return;
+    }
+
+    setGroupedOrders((prev) =>
+      prev.map((ord) =>
+        ord.orderId === order.orderId
+          ? {
+              ...ord,
+              items: ord.items.map((it) => itemsToSave.find((m) => m.orderItemId === it.orderItemId) || it),
+            }
+          : ord
+      )
+    );
+
+    setHeaderSavingId(order.orderId);
+    let okCount = 0;
+    try {
+      for (const it of itemsToSave) {
+        const ok = await handleSaveItem(fullOrder, it, { silent: true });
+        if (ok) okCount++;
+      }
+      if (okCount === itemsToSave.length) {
+        showStatus(`Saved all ${okCount} item(s) for Order #${order.orderNo}.`, 'success');
+      } else if (okCount > 0) {
+        showStatus(`Saved ${okCount}/${itemsToSave.length} item(s) for Order #${order.orderNo}.`, 'warning');
+      }
+    } finally {
+      setHeaderSavingId(null);
+    }
+  };
+
   // Direct WhatsApp notification from grid
   const handleSendWhatsAppNotification = async (orderId: string, item: ConfirmDeliveryGridRow) => {
     const itemKey = `${orderId}_${item.orderItemId}`;
@@ -511,17 +644,21 @@ export const ConfirmDeliveryView: React.FC = () => {
   };
 
   // Direct Save Item from Grid
-  const handleSaveItem = async (order: GroupedConfirmDeliveryOrder, item: ConfirmDeliveryGridRow) => {
+  const handleSaveItem = async (
+    order: GroupedConfirmDeliveryOrder,
+    item: ConfirmDeliveryGridRow,
+    opts?: { silent?: boolean }
+  ): Promise<boolean> => {
     // 1. Validation: deliverycondition <= 50 chars
     if (item.deliverycondition && item.deliverycondition.length > 50) {
       showStatus(`Validation Error: Delivery condition cannot exceed 50 characters.`, 'error');
-      return;
+      return false;
     }
 
     // 2. Validation: outdealyreasons <= 70 chars
     if (item.outdealyreasons && item.outdealyreasons.length > 70) {
       showStatus(`Validation Error: Delay reasons cannot exceed 70 characters.`, 'error');
-      return;
+      return false;
     }
 
     const itemKey = `${order.orderId}_${item.orderItemId}`;
@@ -599,8 +736,10 @@ export const ConfirmDeliveryView: React.FC = () => {
           await shipmentBrandOwnerAssignmentRepository.update(parentDocId, {
             ...existingParent,
             items: updatedItems,
+            status: item.outstatus,
             outstatus: item.outstatus,
             fulfillmentstatus: item.outstatus,
+            deliveryStatus: updatedChildDoc.itemdeliverystatus || item.outstatus,
             deliverystatus: updatedChildDoc.itemdeliverystatus,
             updatedAt: now,
           });
@@ -612,8 +751,9 @@ export const ConfirmDeliveryView: React.FC = () => {
             customerName: String(order.customerName || ''),
             customerMobile: String(order.customerMobile || ''),
             deliveryStatus: updatedChildDoc.itemdeliverystatus || 'DELIVERED',
+            status: item.outstatus,
+            outstatus: item.outstatus,
             fulfillmentstatus: item.outstatus,
-            status: 'DELIVERED',
             items: [updatedChildDoc],
             createdAt: now,
             updatedAt: now,
@@ -642,20 +782,42 @@ export const ConfirmDeliveryView: React.FC = () => {
         } catch (auditErr) {
           console.warn('[ConfirmDeliveryView] Warning creating shipment_tracking audit log:', auditErr);
         }
+      } else {
+        // Ensure top-level status, outstatus, and fulfillmentstatus on parent doc are synced in Firestore
+        const parentDocId = `fulfil_${order.orderId}`;
+        try {
+          const existingParent = await shipmentBrandOwnerAssignmentRepository.getById(parentDocId);
+          if (existingParent) {
+            await shipmentBrandOwnerAssignmentRepository.update(parentDocId, {
+              ...existingParent,
+              status: item.outstatus,
+              outstatus: item.outstatus,
+              fulfillmentstatus: item.outstatus,
+              deliveryStatus: updatedChildDoc.itemdeliverystatus || item.outstatus,
+              updatedAt: now,
+            });
+          }
+        } catch (syncErr) {
+          console.warn('[ConfirmDeliveryView] Warning syncing parent status fields:', syncErr);
+        }
       }
 
       setRecentlyUpdatedItemKeys((prev) => new Set(prev).add(itemKey));
       setSavedItemKeys((prev) => new Set(prev).add(itemKey));
 
-      showStatus(
-        item.outstatus === 'COMPLETED'
-          ? `Delivery confirmed as COMPLETED for ${item.productName}! Condition: '${item.deliverycondition}'.${notifFeedback}`
-          : `Record saved successfully! Status: '${item.outstatus}'.${notifFeedback}`,
-        'success'
-      );
+      if (!opts?.silent) {
+        showStatus(
+          item.outstatus === 'COMPLETED'
+            ? `Delivery confirmed as COMPLETED for ${item.productName}! Condition: '${item.deliverycondition}'.${notifFeedback}`
+            : `Record saved successfully! Status: '${item.outstatus}'.${notifFeedback}`,
+          'success'
+        );
+      }
+      return true;
     } catch (err: any) {
       console.error('Failed to save delivery confirmation:', err);
       showStatus(err?.message || 'Failed to save delivery confirmation.', 'error');
+      return false;
     } finally {
       setSavingKey(null);
     }
@@ -673,38 +835,53 @@ export const ConfirmDeliveryView: React.FC = () => {
     });
   };
 
-  // Filtered orders & items
+  // Filtered orders & items (sorted with SHIPPED records at the top)
   const filteredOrders = useMemo(() => {
+    const isShippedItem = (it: ConfirmDeliveryGridRow) =>
+      String(it.loadedStatus || it.fulfillmentstatus || it.outstatus || '').toUpperCase() === 'SHIPPED';
+
     return groupedOrders
       .map((order) => {
-        const filteredItems = order.items.filter((item) => {
-          // Filter on the status captured at load time, so editing the
-          // Fulfillment Status dropdown never hides a row until next refresh.
-          if (statusFilter === 'SHIPPED' && item.loadedStatus !== 'SHIPPED') return false;
-          if (statusFilter === 'COMPLETED' && item.loadedStatus !== 'COMPLETED') return false;
+        const filteredItems = order.items
+          .filter((item) => {
+            // Filter on the status captured at load time, so editing the
+            // Fulfillment Status dropdown never hides a row until next refresh.
+            if (statusFilter === 'SHIPPED' && item.loadedStatus !== 'SHIPPED') return false;
+            if (statusFilter === 'COMPLETED' && item.loadedStatus !== 'COMPLETED') return false;
 
-          if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase();
-            const pMatch = item.productName?.toLowerCase().includes(q);
-            const orderMatch = order.orderNo?.toLowerCase().includes(q) || order.orderId?.toLowerCase().includes(q);
-            const customerMatch = order.customerName?.toLowerCase().includes(q);
-            const mobileMatch = order.customerMobile?.toLowerCase().includes(q);
-            const courierMatch = item.outcouriername?.toLowerCase().includes(q);
-            const docketMatch = item.outcourierdocketno?.toLowerCase().includes(q);
-            if (!pMatch && !orderMatch && !customerMatch && !mobileMatch && !courierMatch && !docketMatch) {
-              return false;
+            if (searchQuery.trim()) {
+              const q = searchQuery.toLowerCase();
+              const pMatch = item.productName?.toLowerCase().includes(q);
+              const orderMatch = order.orderNo?.toLowerCase().includes(q) || order.orderId?.toLowerCase().includes(q);
+              const customerMatch = order.customerName?.toLowerCase().includes(q);
+              const mobileMatch = order.customerMobile?.toLowerCase().includes(q);
+              const courierMatch = item.outcouriername?.toLowerCase().includes(q);
+              const docketMatch = item.outcourierdocketno?.toLowerCase().includes(q);
+              if (!pMatch && !orderMatch && !customerMatch && !mobileMatch && !courierMatch && !docketMatch) {
+                return false;
+              }
             }
-          }
 
-          return true;
-        });
+            return true;
+          })
+          .sort((a, b) => (isShippedItem(b) ? 1 : 0) - (isShippedItem(a) ? 1 : 0));
 
         return {
           ...order,
           items: filteredItems,
         };
       })
-      .filter((order) => order.items.length > 0);
+      .filter((order) => order.items.length > 0)
+      .sort((a, b) => {
+        const aHasShipped =
+          a.items.some(isShippedItem) || String(a.fulfilmentStatus || '').toUpperCase() === 'SHIPPED';
+        const bHasShipped =
+          b.items.some(isShippedItem) || String(b.fulfilmentStatus || '').toUpperCase() === 'SHIPPED';
+        if (aHasShipped !== bHasShipped) {
+          return aHasShipped ? -1 : 1;
+        }
+        return 0;
+      });
   }, [groupedOrders, statusFilter, searchQuery, recentlyUpdatedItemKeys]);
 
   const totalOrdersCount = filteredOrders.length;
@@ -859,18 +1036,34 @@ export const ConfirmDeliveryView: React.FC = () => {
             <Filter className="w-3.5 h-3.5" />
             <span>Fulfillment Status:</span>
           </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value as any);
-              setPage(1);
-            }}
-            className="text-xs bg-emerald-50 dark:bg-slate-800 border border-emerald-300 dark:border-slate-700 rounded-xl px-3 py-2 font-extrabold text-emerald-900 dark:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-          >
-            <option value="SHIPPED">SHIPPED (In Transit)</option>
-            <option value="COMPLETED">COMPLETED (Delivered)</option>
-            <option value="ALL">All Statuses</option>
-          </select>
+          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 border border-emerald-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5">
+            {(['SHIPPED', 'COMPLETED', 'ALL'] as const).map((opt) => {
+              const active = statusFilter === opt;
+              return (
+                <label
+                  key={opt}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-extrabold cursor-pointer transition select-none ${
+                    active
+                      ? 'bg-emerald-600 !text-white shadow-xs'
+                      : 'text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="confirm-delivery-status-filter"
+                    value={opt}
+                    checked={active}
+                    onChange={() => {
+                      setStatusFilter(opt);
+                      setPage(1);
+                    }}
+                    className="accent-emerald-600 cursor-pointer"
+                  />
+                  <span>{opt}</span>
+                </label>
+              );
+            })}
+          </div>
 
           <span className="text-xs font-bold text-slate-500 ml-1">
             Showing <strong className="text-slate-900 dark:text-white">{filteredOrders.length}</strong> orders
@@ -928,7 +1121,7 @@ export const ConfirmDeliveryView: React.FC = () => {
                     </button>
 
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-xs font-bold text-emerald-900 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/40 px-2 py-0.5 rounded-md">
                           Order #{order.orderNo}
                         </span>
@@ -936,6 +1129,23 @@ export const ConfirmDeliveryView: React.FC = () => {
                           <Calendar className="w-3.5 h-3.5" />
                           {order.orderDate}
                         </span>
+                        {(() => {
+                          const currentFulfillmentStatus = String(
+                            order.items[0]?.fulfillmentstatus || order.items[0]?.outstatus || order.fulfilmentStatus || 'SHIPPED'
+                          ).toUpperCase();
+                          const isCompleted = currentFulfillmentStatus === 'COMPLETED';
+                          return (
+                            <span
+                              className={`text-xs font-extrabold px-2.5 py-0.5 rounded-md border shadow-2xs ${
+                                isCompleted
+                                  ? 'bg-emerald-500 text-white border-emerald-600'
+                                  : 'bg-amber-400 text-slate-950 border-amber-500'
+                              }`}
+                            >
+                              {currentFulfillmentStatus}
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       <div className="flex items-center gap-3 mt-1 text-xs text-slate-700 dark:text-slate-300">
@@ -951,11 +1161,81 @@ export const ConfirmDeliveryView: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800">
-                      {order.items.length} Product{order.items.length > 1 ? 's' : ''}
-                    </span>
-                  </div>
+                  {/* Header bulk controls: cascade to all child rows */}
+                  {(() => {
+                    const header = headerEdits[order.orderId] || {};
+                    const fullOrder = groupedOrders.find((o) => o.orderId === order.orderId) || order;
+                    const allSaved = fullOrder.items.every((it) => savedItemKeys.has(`${order.orderId}_${it.orderItemId}`));
+                    const isHeaderSaving = headerSavingId === order.orderId;
+                    const lockHeader = allSaved || isHeaderSaving;
+                    const headerStatus = header.outstatus || 'COMPLETED';
+                    const ctl =
+                      'px-2 py-1 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed';
+                    return (
+                      <div onClick={(e) => e.stopPropagation()} className="flex flex-wrap items-center gap-2 cursor-default">
+                        <input
+                          type="text"
+                          value={headerStatus}
+                          disabled
+                          readOnly
+                          title="Fulfillment Status (default: COMPLETED)"
+                          className="px-2.5 py-1 text-xs w-32 font-extrabold text-center rounded-lg bg-emerald-100 text-emerald-950 border-2 border-emerald-500 shadow-2xs disabled:opacity-100 cursor-not-allowed"
+                        />
+
+                        <input
+                          type="date"
+                          value={header.deliverydate || getSystemDate()}
+                          disabled={lockHeader}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'deliverydate', e.target.value)}
+                          title="Delivery Date (applies to all items)"
+                          className={`${ctl} cursor-pointer`}
+                        />
+
+                        <input
+                          type="text"
+                          maxLength={50}
+                          placeholder="Delivery condition (Max 50)"
+                          value={header.deliverycondition ?? ''}
+                          disabled={lockHeader}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'deliverycondition', e.target.value)}
+                          title="Delivery Condition (applies to all items)"
+                          className={`${ctl} w-44`}
+                        />
+
+                        <input
+                          type="text"
+                          maxLength={70}
+                          placeholder="Delay reasons (all items)"
+                          value={header.outdealyreasons || ''}
+                          disabled={lockHeader}
+                          onChange={(e) => handleHeaderFieldChange(order.orderId, 'outdealyreasons', e.target.value)}
+                          title="Delay Reasons (applies to all items)"
+                          className={`${ctl} w-44`}
+                        />
+
+                        <button
+                          type="button"
+                          disabled={lockHeader}
+                          onClick={() => handleRequestSaveOrderHeader(order)}
+                          title={allSaved ? 'All items saved' : 'Save and apply to all items'}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+                            allSaved
+                              ? 'bg-sky-200 text-sky-800 border border-sky-300 cursor-not-allowed'
+                              : isHeaderSaving
+                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                              : 'bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer active:scale-95'
+                          }`}
+                        >
+                          {allSaved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                          <span>{isHeaderSaving ? 'Saving All...' : allSaved ? 'All Saved' : 'Save All'}</span>
+                        </button>
+
+                        <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800">
+                          {order.items.length} Product{order.items.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Child Items Table with Grid-Level Controls */}
@@ -968,18 +1248,18 @@ export const ConfirmDeliveryView: React.FC = () => {
                           <th className="py-2.5 px-2 text-center min-w-[70px]">Qty</th>
                           <th className="py-2.5 px-2 min-w-[140px]">Courier Partner</th>
                           <th className="py-2.5 px-2 min-w-[140px]">Docket No</th>
-                          <th className="py-2.5 px-2 min-w-[140px]">Fulfillment Status</th>
-                          <th className="py-2.5 px-2 min-w-[130px]">Delivery Date</th>
-                          <th className="py-2.5 px-2 min-w-[170px]">Delivery Condition (Max 50)</th>
-                          <th className="py-2.5 px-2 min-w-[170px]">Delay Reasons (Max 70)</th>
-                          <th className="py-2.5 px-3 text-center min-w-[150px]">Action</th>
+                          <th className="hidden py-2.5 px-2 min-w-[140px]">Fulfillment Status</th>
+                          <th className="hidden py-2.5 px-2 min-w-[130px]">Delivery Date</th>
+                          <th className="hidden py-2.5 px-2 min-w-[170px]">Delivery Condition (Max 50)</th>
+                          <th className="hidden py-2.5 px-2 min-w-[170px]">Delay Reasons (Max 70)</th>
+                          <th className="hidden py-2.5 px-3 text-center min-w-[80px]">Action</th>
                         </tr>
                       </thead>
 
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                         {order.items.map((item) => {
                           const itemKey = `${order.orderId}_${item.orderItemId}`;
-                          const isSaving = savingKey === itemKey;
+                          const isSaving = savingKey === itemKey || headerSavingId === order.orderId;
                           const isSaved = savedItemKeys.has(itemKey);
                           const isSendingWa = waSendingKey === itemKey;
 
@@ -1025,7 +1305,7 @@ export const ConfirmDeliveryView: React.FC = () => {
                               </td>
 
                               {/* 5. Out Status / Fulfillment Status (Grid-Level Combo Box) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <select
                                   value={item.outstatus}
                                   onChange={(e) =>
@@ -1048,7 +1328,7 @@ export const ConfirmDeliveryView: React.FC = () => {
                               </td>
 
                               {/* 6. Delivery Date (Grid-Level Date Input) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <input
                                   type="date"
                                   value={item.deliverydate}
@@ -1060,7 +1340,7 @@ export const ConfirmDeliveryView: React.FC = () => {
                               </td>
 
                               {/* 7. Delivery Condition (Grid-Level text input max 50 chars) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <div className="flex flex-col">
                                   <input
                                     type="text"
@@ -1079,7 +1359,7 @@ export const ConfirmDeliveryView: React.FC = () => {
                               </td>
 
                               {/* 8. Delay Reasons (Grid-Level text input max 70 chars) */}
-                              <td className="py-3 px-2 whitespace-nowrap">
+                              <td className="hidden py-3 px-2 whitespace-nowrap">
                                 <div className="flex flex-col">
                                   <input
                                     type="text"
@@ -1098,14 +1378,14 @@ export const ConfirmDeliveryView: React.FC = () => {
                               </td>
 
                               {/* 9. Actions: Save & WhatsApp */}
-                              <td className="py-3 px-3 text-center whitespace-nowrap">
+                              <td className="hidden py-3 px-3 text-center whitespace-nowrap">
                                 <div className="flex items-center justify-center gap-1.5">
                                   <button
                                     type="button"
                                     disabled={isSaving || isSaved}
                                     onClick={() => handleSaveItem(order, item)}
                                     title={isSaved ? 'Record Saved' : 'Save Delivery Status'}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-xs ${
+                                    className={`hidden px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-xs ${
                                       isSaved
                                         ? 'bg-sky-200 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 border border-sky-300 dark:border-sky-700 cursor-not-allowed shadow-none'
                                         : isSaving
@@ -1183,6 +1463,52 @@ export const ConfirmDeliveryView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Save Record Confirmation Popup */}
+      {confirmSaveOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
+          onClick={() => setConfirmSaveOrder(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                <Save className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Save Record</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Order #{confirmSaveOrder.orderNo}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+              Do you want to save the delivery confirmation record for Order #{confirmSaveOrder.orderNo}?
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmSaveOrder(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSaveOrderHeader(confirmSaveOrder)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer active:scale-95"
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

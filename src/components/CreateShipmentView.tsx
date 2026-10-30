@@ -373,48 +373,6 @@ export const CreateShipmentView: React.FC = () => {
             ? 'SHIPPED'
             : 'READY_FOR_DISPATCH';
 
-        // Auto-persist: order is READY_FOR_DISPATCH, so promote any child still at PACKING / PARTIALLY_PACKED
-        // and align the parent deliveryStatus / fulfillmentstatus in shipment_brand_owner_fulfilment.
-        const hasShippedItem = docItemsArr.some(
-          (it: any) =>
-            String(it?.outstatus || '').toUpperCase().trim() === 'SHIPPED' ||
-            String(it?.fulfillmentstatus || '').toUpperCase().trim() === 'SHIPPED'
-        );
-        if (docDeliveryStatus === 'READY_FOR_DISPATCH' && !hasShippedItem && doc.id && docItemsArr.length > 0) {
-          const norm = (s: any) => String(s || '').trim().toUpperCase().replace(/[\s_-]+/g, '_');
-          const isPackingLike = (s: any) => ['PACKING', 'PARTIALLY_PACKED'].includes(norm(s));
-          let changed = false;
-          const promotedItems = docItemsArr.map((it: any) => {
-            if (isPackingLike(it?.fulfillmentstatus) || isPackingLike(it?.outstatus)) {
-              changed = true;
-              return migrateFulfilmentItem({
-                ...it,
-                fulfillmentstatus: 'READY_FOR_DISPATCH',
-                outstatus: 'READY_FOR_DISPATCH',
-                outpackingstatus: 'PACKED',
-                itemstatus: 'PACKED',
-                updatedAt: new Date().toISOString(),
-              });
-            }
-            return it;
-          });
-          const parentNeedsSync =
-            norm(doc.deliveryStatus) !== 'READY_FOR_DISPATCH' || norm(doc.fulfillmentstatus) !== 'READY_FOR_DISPATCH';
-          if (changed || parentNeedsSync) {
-            doc.items = promotedItems;
-            shipmentBrandOwnerAssignmentRepository
-              .update(String(doc.id), {
-                ...doc,
-                items: promotedItems,
-                deliveryStatus: 'READY_FOR_DISPATCH',
-                fulfillmentstatus: 'READY_FOR_DISPATCH',
-                outstatus: 'READY_FOR_DISPATCH',
-                updatedAt: new Date().toISOString(),
-              })
-              .catch((err: any) => console.warn(`[CreateShipmentView] Auto-promote failed for ${doc.id}:`, err));
-          }
-        }
-
         // Display ORDER NO: grid row header value should be shipment_brand_owner_fulfilment->orderNumber
         const orderNo = resolveShipmentOrderNo(doc, matchedOrder, salesOrderId);
         const customerName = String(
@@ -508,24 +466,14 @@ export const CreateShipmentView: React.FC = () => {
             ? Number(item.outquantity)
             : orderqty;
 
-          let outstatus: ShipmentStatusOption = docDeliveryStatus;
-          if (itemDeliveryStatus === 'SHIPPED') outstatus = 'SHIPPED';
-          else if (itemDeliveryStatus === 'CANCELLED' || itemDeliveryStatus === 'CANCELED') outstatus = 'CANCELLED';
-          else if (itemDeliveryStatus === 'READY_FOR_DISPATCH') outstatus = 'READY_FOR_DISPATCH';
-          // Order is eligible for shipment (at least one item READY_FOR_DISPATCH): any item still at
-          // PACKING / PARTIALLY_PACKED is promoted to READY_FOR_DISPATCH so the whole order can be dispatched.
-          else if (itemDeliveryStatus === 'PACKING' || itemDeliveryStatus === 'PARTIALLY_PACKED') outstatus = 'READY_FOR_DISPATCH';
+          // Restrict to records where fulfillmentstatus = 'READY_FOR_DISPATCH' only
+          const rawFulfillmentStatus = String(
+            item.fulfillmentstatus || item.fulfilmentStatus || doc.fulfillmentstatus || doc.fulfilmentStatus || ''
+          ).toUpperCase().trim().replace(/[\s_-]+/g, '_');
+          if (rawFulfillmentStatus !== 'READY_FOR_DISPATCH') continue;
 
-          const explicitFulfillmentRaw = String(item.fulfillmentstatus || '').trim().toUpperCase().replace(/[\s_-]+/g, '_');
-          const explicitFulfillment =
-            explicitFulfillmentRaw === 'PACKING' || explicitFulfillmentRaw === 'PARTIALLY_PACKED'
-              ? 'READY_FOR_DISPATCH'
-              : explicitFulfillmentRaw;
-          const fulfillmentstatus = (
-            explicitFulfillment && (isEligibleShipmentDeliveryStatus(explicitFulfillment) || explicitFulfillment === 'SHIPPED')
-              ? explicitFulfillment
-              : outstatus
-          );
+          const outstatus: ShipmentStatusOption = 'READY_FOR_DISPATCH';
+          const fulfillmentstatus = rawFulfillmentStatus;
           const outpickupdate = item.outpickupdate ? String(item.outpickupdate) : systemDate;
           const outcouriername = String(item.outcouriername || item.couriername || 'Delhivery');
           const outcourierdocketno = String(item.outcourierdocketno || item.courierdocketno || '');
@@ -576,7 +524,7 @@ export const CreateShipmentView: React.FC = () => {
         }
       }
 
-      const allGroups = Array.from(orderGroupsMap.values());
+      const allGroups = Array.from(orderGroupsMap.values()).filter((g) => g.items.length > 0);
       setGroupedOrders(allGroups);
       // Auto expand all orders by default for ease of operations
       setExpandedOrderIds(new Set(allGroups.map((g) => g.orderId)));

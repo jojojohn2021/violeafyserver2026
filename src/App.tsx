@@ -23,15 +23,16 @@ import { BrandOwnerAssignmentView } from './components/BrandOwnerAssignmentView'
 import CompletePackingView from './components/CompletePackingView';
 import CreateShipmentView from './components/CreateShipmentView';
 import ConfirmDeliveryView from './components/ConfirmDeliveryView';
+import ProductReviewsManagementView from './components/ProductReviewsManagementView';
 
 import { 
   BarChart3, Users, Briefcase, Calendar, TrendingUp, MessageSquare, 
   ShieldCheck, LayoutDashboard, Menu, X, HelpCircle, ShieldAlert, UserCheck, Gift,
   LogOut, Receipt, Coins, Layout, Sparkles, ShoppingBag, Settings, Loader2, PackageCheck,
-  Truck, CheckCircle2, RotateCcw, Package
+  Truck, CheckCircle2, RotateCcw, Package, Star
 } from 'lucide-react';
 
-type ModuleTab = 'dashboard' | 'customers' | 'sales_orders' | 'brand_owner_assignment' | 'complete_packing' | 'create_shipment' | 'confirm_delivery' | 'process_return' | 'order_operations' | 'schedules' | 'performance' | 'whatsapp' | 'security' | 'referrals' | 'users' | 'influencer_marketing' | 'shopping' | 'settings';
+type ModuleTab = 'dashboard' | 'customers' | 'sales_orders' | 'brand_owner_assignment' | 'complete_packing' | 'create_shipment' | 'confirm_delivery' | 'process_return' | 'order_operations' | 'schedules' | 'performance' | 'product_reviews' | 'whatsapp' | 'security' | 'referrals' | 'users' | 'influencer_marketing' | 'shopping' | 'settings';
 
 function CRMAppShell() {
   const { 
@@ -133,6 +134,7 @@ function CRMAppShell() {
     { id: 'customers', name: 'Customer Directory', icon: UserCheck, moduleCheck: 'Customer Directory' },
     { id: 'schedules', name: 'Task & Calendar Sync', icon: Calendar, moduleCheck: 'Tasks & Calendar' },
     { id: 'performance', name: 'Products Settings', icon: TrendingUp, moduleCheck: 'Products & Clients' },
+    { id: 'product_reviews', name: 'Product Reviews', icon: Star, moduleCheck: 'Products & Clients' },
     { id: 'whatsapp', name: 'WhatsApp Automation', icon: MessageSquare, moduleCheck: 'WhatsApp Integration' },
     { id: 'influencer_marketing', name: 'Influencer Marketing', icon: Sparkles, moduleCheck: 'Campaigns & ROI' },
     { id: 'security', name: 'Security & Access Grid', icon: ShieldCheck, moduleCheck: 'Security Audit' },
@@ -264,6 +266,7 @@ function CRMAppShell() {
               {activeTab === 'order_operations' && <OrderOperationsView initialStage="all" />}
               {activeTab === 'schedules' && <TasksCalendarView />}
               {activeTab === 'performance' && <PerformanceTrackingView />}
+              {activeTab === 'product_reviews' && <ProductReviewsManagementView />}
               {activeTab === 'whatsapp' && <WhatsAppIntegrationView />}
               {activeTab === 'influencer_marketing' && <InfluencerMarketingView />}
               {activeTab === 'security' && <SecurityControlView />}

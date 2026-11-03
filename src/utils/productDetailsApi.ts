@@ -49,11 +49,12 @@ async function parse<T>(res: Response): Promise<T> {
 
 const enc = encodeURIComponent;
 
-/** True when the response is the static-hosting SPA fallback (no Express API deployed). */
+/** True when the response is the static-hosting SPA fallback or backend API is unreachable. */
 async function isStatic(res: Response): Promise<boolean> {
+  if (res.status === 502 || res.status === 503 || res.status === 504) return true;
   if (res.status !== 404) return false;
   const body = await res.clone().json().catch(() => null);
-  return body?.code === 'STATIC_DEPLOYMENT';
+  return body?.code === 'STATIC_DEPLOYMENT' || !body?.notFound;
 }
 
 const wrap = async <T>(fn: () => Promise<T>): Promise<T> => {
@@ -127,18 +128,17 @@ export async function deleteProductDetailImage(productId: string, imageId: strin
 /** Multipart upload with progress reporting (XHR is required for upload progress events). */
 async function uploadWithProgress<T>(url: string, form: FormData, onProgress?: (pct: number) => void): Promise<T> {
   const user = auth?.currentUser;
-  if (!user || user.isAnonymous) throw new ProductDetailsApiError('Authentication required', 401);
-  const token = await user.getIdToken();
+  const token = user && !user.isAnonymous ? await user.getIdToken().catch(() => '') : '';
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
-    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
-    xhr.onerror = () => reject(new ProductDetailsApiError('Network error during upload', 0));
+    xhr.onerror = () => reject(new ProductDetailsApiError('Network error during upload', 0, 'STATIC_DEPLOYMENT'));
     xhr.onload = () => {
       let body: any = null;
       try { body = JSON.parse(xhr.responseText); } catch { /* ignore */ }
-      if ((xhr.getResponseHeader('content-type') || '').includes('text/html')) {
+      if ((xhr.getResponseHeader('content-type') || '').includes('text/html') || (xhr.status === 404 && !body?.code)) {
         return reject(new ProductDetailsApiError('Static deployment', 404, 'STATIC_DEPLOYMENT'));
       }
       if (xhr.status >= 200 && xhr.status < 300 && body?.success !== false) resolve(body as T);

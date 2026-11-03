@@ -22,6 +22,7 @@ import { OperationsService } from "./src/services/operationsService";
 import { ShipmentOperationsService } from "./src/services/shipmentOperationsService";
 import { sendOrderStageWhatsAppNotification } from "./src/services/whatsappService";
 import { registerProductDetailsRoutes, PRODUCT_DETAILS_COLLECTION } from "./src/services/productDetailsRoutes";
+import { registerCustomerReviewRoutes, CUSTOMER_REVIEWS_COLLECTION, CUSTOMER_REVIEW_AGGREGATES_COLLECTION } from "./src/services/customerReviewService";
 
 dotenv.config();
 
@@ -522,6 +523,7 @@ app.post("/api/db/:col", async (req, res) => {
     const col = req.params.col;
     if (protectedOperationCollections.has(String(col).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     if (String(col).toLowerCase() === PRODUCT_DETAILS_COLLECTION) return res.status(403).json({ error: 'Product details must be modified through /api/product-details.' });
+    if (String(col).toLowerCase() === CUSTOMER_REVIEWS_COLLECTION || String(col).toLowerCase() === CUSTOMER_REVIEW_AGGREGATES_COLLECTION) return res.status(403).json({ error: 'Customer reviews and aggregates must be modified through /api/admin/reviews.' });
 
     // Enforce referral restrictions: NO new referral creation / loop creation via generic DB proxy
     if (col === "referrals" || col === "referral_chains") {
@@ -608,6 +610,7 @@ app.post('/api/uploads', requireAuthenticatedRequest, upload.single('file'), asy
 app.delete("/api/db/:col/:id", async (req, res) => {
   try {
     if (String(req.params.col).toLowerCase() === PRODUCT_DETAILS_COLLECTION) return res.status(403).json({ error: 'Product details must be modified through /api/product-details.' });
+    if (String(req.params.col).toLowerCase() === CUSTOMER_REVIEWS_COLLECTION || String(req.params.col).toLowerCase() === CUSTOMER_REVIEW_AGGREGATES_COLLECTION) return res.status(403).json({ error: 'Customer reviews and aggregates must be modified through /api/admin/reviews.' });
     await deleteCollectionDoc(req.params.col, req.params.id);
     return res.json({ success: true });
   } catch (error: any) {
@@ -715,6 +718,7 @@ app.put('/api/products/:id/image', requireAuthenticatedRequest, upload.single('i
 
 // Product Details (separate product_details collection, linked 1:1 by product document ID)
 registerProductDetailsRoutes(app, { db: adminDb, auth: adminAuth, storage: adminStorage });
+registerCustomerReviewRoutes(app, { db: adminDb, auth: adminAuth, storage: adminStorage });
 
 app.post("/api/payment/test-connection", async (req, res) => {
   try {

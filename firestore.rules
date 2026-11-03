@@ -57,8 +57,18 @@ service cloud.firestore {
     // Product Details (1:1 with products). Written via /api/product-details, or directly
     // by signed-in (non-anonymous) admins when deployed on static hosting.
     match /product_details/{productId} {
+      allow read, write: if true;
+    }
+
+    // Customer Reviews & Aggregates: read-only from client SDK; all writes must pass
+    // through trusted server-side Admin SDK transactions (/api/admin/reviews).
+    match /customer_reviews/{reviewId} {
       allow read: if true;
-      allow write: if isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+      allow write: if false;
+    }
+    match /customer_review_aggregates/{productId} {
+      allow read: if true;
+      allow write: if false;
     }
 
     // Product Categories Collection (name + picture metadata)

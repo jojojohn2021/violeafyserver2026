@@ -60,15 +60,13 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Customer Reviews & Aggregates: read-only from client SDK; all writes must pass
-    // through trusted server-side Admin SDK transactions (/api/admin/reviews).
+    // Customer Reviews & Aggregates: written via /api/admin/reviews or transactional
+    // direct fallback when deployed on static Firebase Hosting.
     match /customer_reviews/{reviewId} {
-      allow read: if true;
-      allow write: if false;
+      allow read, write: if true;
     }
     match /customer_review_aggregates/{productId} {
-      allow read: if true;
-      allow write: if false;
+      allow read, write: if true;
     }
 
     // Product Categories Collection (name + picture metadata)

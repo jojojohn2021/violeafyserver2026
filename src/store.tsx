@@ -22,6 +22,7 @@ import {
 } from 'firebase/auth';
 import { logFirestoreError, createFirestoreException } from './utils/firestoreLogger';
 import { FirestoreErrorState } from './components/FirestoreErrorBanner';
+import { FULL_DEFAULT_ROLE_PERMISSIONS, getEffectivePermissionRule, mergeRolePermissionsFromDocs, resolveSecurityModuleEntry } from './utils/securityCatalog';
 import {
   userRepository,
   productRepository,
@@ -303,7 +304,8 @@ export interface CRMContextType {
   isLoadingFirestore: boolean;
 }
 
-const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
+const DEFAULT_ROLE_PERMISSIONS: RolePermissions = FULL_DEFAULT_ROLE_PERMISSIONS;
+const _LEGACY_DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
   Admin: [
     { module: 'Dashboard', read: true, create: true, edit: true, delete: true },
     { module: 'Tasks & Calendar', read: true, create: true, edit: true, delete: true },
@@ -521,6 +523,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ]);
 
       setRegisteredUsers(fetchedUsers);
+      if (auth.currentUser) { const matchedProfile = fetchedUsers.find(u => u.id === auth.currentUser?.uid || (u.email && auth.currentUser?.email && u.email.toLowerCase() === auth.currentUser.email.toLowerCase())); if (matchedProfile) setCurrentUser(prev => ({ ...prev, ...matchedProfile, id: matchedProfile.id || prev.id })); }
       setProducts(fetchedProducts);
       const mappedOrders = fetchedOrders.map(o => ({
         ...o,
@@ -608,6 +611,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setPartnerLevels(fetchedPartnerLevels);
       setCommissionRules(fetchedCommissionRules);
       setCommissionTransactions(fetchedCommissionTransactions);
+      try { const permDocs = await rolePermissionsRepository.getAll(); if (permDocs.length > 0) setPermissions(mergeRolePermissionsFromDocs(permDocs)); } catch {}
 
       // Attempt to load settings
       try {
@@ -738,18 +742,20 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const hasAccess = useCallback((moduleName: string, action: 'read' | 'create' | 'edit' | 'delete'): boolean => {
     const rolePerms = permissions[currentUser.role];
     if (!rolePerms) return true;
-    const mod = rolePerms.find(p => p.module.toLowerCase() === moduleName.toLowerCase());
-    if (!mod) return true;
-    return mod[action];
+    return getEffectivePermissionRule(permissions, currentUser.role, moduleName)[action];
   }, [permissions, currentUser.role]);
 
   const updatePermission = useCallback((role: UserRole, moduleName: string, action: 'read' | 'create' | 'edit' | 'delete', value: boolean) => {
     setPermissions(prev => {
       const copy = { ...prev };
       const rolePerms = [...(copy[role] || [])];
-      const idx = rolePerms.findIndex(p => p.module === moduleName);
+      const canonicalModule = resolveSecurityModuleEntry(moduleName)?.module || moduleName;
+      const idx = rolePerms.findIndex(p => p.module.toLowerCase() === canonicalModule.toLowerCase());
       if (idx !== -1) {
-        rolePerms[idx] = { ...rolePerms[idx], [action]: value };
+        rolePerms[idx] = { ...rolePerms[idx], module: canonicalModule, [action]: value };
+      } else {
+        const baseRule = getEffectivePermissionRule(copy, role, canonicalModule);
+        rolePerms.push({ ...baseRule, module: canonicalModule, [action]: value });
       }
       copy[role] = rolePerms;
       rolePermissionsRepository.set(role, { id: role, permissions: copy })
@@ -781,7 +787,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         team: 'Management',
         mobileNumber: ''
       };
-      setCurrentUser(userDoc);
+      let matchedUser: User | null = null; try { const allUsers = await userRepository.getAll(); matchedUser = allUsers.find(u => u.id === res.user.uid || (u.email && u.email.toLowerCase() === email.trim().toLowerCase())) || null; } catch {}
+      setCurrentUser(matchedUser ? { ...userDoc, ...matchedUser, id: matchedUser.id || res.user.uid } : userDoc);
       return { success: true, user: userDoc };
     } catch (err: any) {
       const errorMsg = err.message || String(err);

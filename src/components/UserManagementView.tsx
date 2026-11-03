@@ -85,9 +85,14 @@ export default function UserManagementView() {
   const [valError, setValError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null);
+  const [updateConfirmId, setUpdateConfirmId] = useState<string | null>(null);
 
   // Security action validation check
-  const writeAllowed = hasAccess('Security Audit', 'create') || currentUser.role === 'Admin';
+  const writeAllowed =
+    hasAccess('User Management', 'edit') ||
+    hasAccess('User Management', 'create') ||
+    hasAccess('Security Audit', 'create') ||
+    currentUser.role === 'Admin';
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -193,30 +198,41 @@ export default function UserManagementView() {
       return;
     }
 
-    if (!editName.trim() || !editMobile.trim() || !editPassword.trim()) {
-      setValError('Required fields: Name, Mobile Key, and Access Password must not be blank.');
+    if (!editName.trim()) {
+      setValError('Required field: Agent Name must not be blank.');
       return;
     }
 
     const cleanEditMobile = cleanPhone(editMobile);
-    // Unique check
-    const duplicateExists = registeredUsers.some(
-      u => u.id !== id && cleanPhone(u.mobileNumber || '') === cleanEditMobile
-    );
+    // Unique check only when a mobile number is provided
+    if (cleanEditMobile.length > 0) {
+      const duplicateExists = registeredUsers.some(
+        u => u.id !== id && cleanPhone(u.mobileNumber || '') === cleanEditMobile
+      );
 
-    if (duplicateExists) {
-      setValError(`Update failed: Mobile credential ${editMobile} is already bound to another profile.`);
-      return;
+      if (duplicateExists) {
+        setValError(`Update failed: Mobile credential ${editMobile} is already bound to another profile.`);
+        return;
+      }
     }
 
-    const success = updateUser(id, {
+    // Open Yes/No confirmation modal before persisting update
+    setUpdateConfirmId(id);
+  };
+
+  const confirmSaveUpdate = async () => {
+    if (!updateConfirmId) return;
+    const id = updateConfirmId;
+    setUpdateConfirmId(null);
+
+    const success = await updateUser(id, {
       name: editName.trim(),
       role: editRole,
       email: editEmail.trim(),
       avatar: editAvatar,
-      team: editTeam.trim(),
+      team: (editTeam || 'Management').trim(),
       mobileNumber: editMobile.trim(),
-      password: editPassword.trim()
+      password: (editPassword || '1234').trim()
     });
 
     if (success) {
@@ -675,7 +691,7 @@ export default function UserManagementView() {
 
                       {/* Role level */}
                       <td className="p-4">
-                        {isEditing && currentUser?.role === 'Admin' ? (
+                        {isEditing && writeAllowed ? (
                           <select
                             value={editRole}
                             onChange={(e) => setEditRole(e.target.value as UserRole)}
@@ -819,6 +835,45 @@ export default function UserManagementView() {
         </div>
       </div>
       
+      {/* Update User Confirmation Modal (Yes / No) */}
+      {updateConfirmId && (
+        <div className="fixed inset-0 bg-[#08080a]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn" id="update-user-dialog">
+          <div className="bg-[#101014] border border-emerald-900/40 max-w-sm w-full rounded-2xl p-6 space-y-5 shadow-2xl">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-full bg-emerald-950/60 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                <UserCheck className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-black text-white uppercase tracking-wider font-mono">
+                  Update Record?
+                </h4>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Do you want to update <strong className="text-white font-bold">{editName}</strong> with Role Grid <strong className="text-emerald-400 font-bold">{editRole}</strong>?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800/80">
+              <button
+                type="button"
+                onClick={() => setUpdateConfirmId(null)}
+                className="px-4 py-2 bg-slate-900 hover:bg-[#1b1b22] hover:text-white border border-slate-800 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={confirmSaveUpdate}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-600/20"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Yes</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete User Confirmation Modal */}
       {deleteConfirmUser && (
         <div className="fixed inset-0 bg-[#08080a]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn" id="delete-user-dialog">

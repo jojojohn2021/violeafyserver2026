@@ -17,90 +17,24 @@ import {
   Award,
   BarChart3,
 } from 'lucide-react';
-import { apiFetch } from '../utils/apiFetch';
-
-interface ProductOption {
-  productId: string;
-  name: string;
-  sku: string;
-  category: string;
-  imageUrl: string;
-}
-
-interface EligibleCustomerOption {
-  customerId: string;
-  name: string;
-  email: string;
-  mobileNumber: string;
-  userUid: string;
-  qualifyingOrderCount: number;
-}
-
-interface EligibleOrderLineItem {
-  orderItemId: string;
-  productId: string;
-  name: string;
-  quantity: number;
-  price: number;
-  variantLabel: string;
-}
-
-interface EligibleOrderOption {
-  orderId: string;
-  orderNumber: string;
-  orderStatus: string;
-  paymentStatus: string;
-  deliveryStatus: string;
-  purchaseDate: string;
-  lineItems: EligibleOrderLineItem[];
-}
-
-interface ReviewMediaItem {
-  id: string;
-  url: string;
-  storagePath?: string;
-  type: 'image' | 'video';
-  fileName?: string;
-}
-
-interface CustomerReviewRecord {
-  reviewId: string;
-  productId: string;
-  customerId: string;
-  customerDisplayName: string;
-  userUid: string;
-  orderId: string;
-  orderItemId: string;
-  purchaseDate: string | null;
-  verifiedPurchase: boolean;
-  rating: number;
-  title: string;
-  reviewText: string;
-  status: 'published' | 'pending' | 'rejected' | 'hidden';
-  media: ReviewMediaItem[];
-  hasMedia: boolean;
-  mediaCount: number;
-  helpfulCount: number;
-  rankScore: number;
-  createdAt: string | null;
-  updatedAt: string | null;
-}
-
-interface ProductAggregateRecord {
-  productId: string;
-  averageRating: number;
-  distribution: {
-    '1': number;
-    '2': number;
-    '3': number;
-    '4': number;
-    '5': number;
-  };
-  mediaCount: number;
-  ratingCount: number;
-  ratingSum: number;
-  updatedAt: string | null;
-}
+import {
+  fetchReviewProducts,
+  fetchEligibleCustomersForProduct,
+  fetchEligibleOrdersForProductAndCustomer,
+  fetchProductAggregate,
+  fetchCustomerReviews,
+  uploadReviewMediaFile,
+  saveCustomerReview,
+  deleteCustomerReview,
+  reconcileReviewAggregates,
+  ProductOption,
+  EligibleCustomerOption,
+  EligibleOrderLineItem,
+  EligibleOrderOption,
+  ReviewMediaItem,
+  CustomerReviewRecord,
+  ProductAggregateRecord,
+} from '../utils/customerReviewsApi';
 
 const ALLOWED_STATUSES: Array<CustomerReviewRecord['status']> = [
   'published',
@@ -178,18 +112,12 @@ export const ProductReviewsManagementView: React.FC = () => {
     [eligibleOrders, orderId]
   );
 
-  // Fetch products with server-side search
+  // Fetch products with server-side search (with direct Firestore fallback on static hosting)
   const loadProducts = useCallback(async (searchQuery: string) => {
     setLoadingProducts(true);
     try {
-      const res = await apiFetch(
-        `/api/admin/reviews/products?search=${encodeURIComponent(searchQuery.trim())}&limit=100`
-      );
-      const data = await res.json();
-      if (!res.ok || data?.success === false) {
-        throw new Error(data?.error || 'Failed to load products');
-      }
-      setProducts(Array.isArray(data.products) ? data.products : []);
+      const list = await fetchReviewProducts(searchQuery);
+      setProducts(list);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to load products');
     } finally {
@@ -213,23 +141,12 @@ export const ProductReviewsManagementView: React.FC = () => {
     }
     setLoadingCustomers(true);
     try {
-      const [custRes, aggRes] = await Promise.all([
-        apiFetch(`/api/admin/reviews/eligible-customers?productId=${encodeURIComponent(targetProductId)}`),
-        apiFetch(`/api/admin/reviews/aggregates/${encodeURIComponent(targetProductId)}`),
+      const [custList, agg] = await Promise.all([
+        fetchEligibleCustomersForProduct(targetProductId),
+        fetchProductAggregate(targetProductId),
       ]);
-      const custData = await custRes.json();
-      if (custRes.ok && custData?.success !== false) {
-        setEligibleCustomers(Array.isArray(custData.customers) ? custData.customers : []);
-      } else {
-        setEligibleCustomers([]);
-      }
-
-      const aggData = await aggRes.json();
-      if (aggRes.ok && aggData?.aggregate) {
-        setProductAggregate(aggData.aggregate);
-      } else {
-        setProductAggregate(null);
-      }
+      setEligibleCustomers(custList);
+      setProductAggregate(agg);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to load eligible customers for product');
     } finally {
@@ -250,17 +167,11 @@ export const ProductReviewsManagementView: React.FC = () => {
       }
       setLoadingOrders(true);
       try {
-        const res = await apiFetch(
-          `/api/admin/reviews/eligible-orders?productId=${encodeURIComponent(
-            targetProductId
-          )}&customerId=${encodeURIComponent(targetCustomerId)}`
+        const ordList = await fetchEligibleOrdersForProductAndCustomer(
+          targetProductId,
+          targetCustomerId
         );
-        const data = await res.json();
-        if (res.ok && data?.success !== false) {
-          setEligibleOrders(Array.isArray(data.orders) ? data.orders : []);
-        } else {
-          setEligibleOrders([]);
-        }
+        setEligibleOrders(ordList);
       } catch (err: any) {
         setErrorMsg(err?.message || 'Failed to load qualifying customer orders');
       } finally {
@@ -278,16 +189,10 @@ export const ProductReviewsManagementView: React.FC = () => {
   const loadReviews = useCallback(async () => {
     setLoadingReviews(true);
     try {
-      const query =
-        filterProductOnly && productId
-          ? `?productId=${encodeURIComponent(productId)}`
-          : '';
-      const res = await apiFetch(`/api/admin/reviews${query}`);
-      const data = await res.json();
-      if (!res.ok || data?.success === false) {
-        throw new Error(data?.error || 'Failed to load customer reviews');
-      }
-      setReviews(Array.isArray(data.reviews) ? data.reviews : []);
+      const list = await fetchCustomerReviews(
+        filterProductOnly && productId ? productId : undefined
+      );
+      setReviews(list);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to load customer reviews');
     } finally {
@@ -406,7 +311,7 @@ export const ProductReviewsManagementView: React.FC = () => {
     setUpdatedAt(review.updatedAt || null);
   };
 
-  // Upload media file to existing /api/uploads endpoint under reviews/ storage root
+  // Upload media file to /api/uploads or direct Firebase Storage under reviews/ storage root
   const handleMediaFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -415,29 +320,7 @@ export const ProductReviewsManagementView: React.FC = () => {
     setUploadingMedia(true);
     setErrorMsg(null);
     try {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const targetProd = productId || 'general';
-      const storagePath = `reviews/${targetProd}/${Date.now()}_${safeName}`;
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('storagePath', storagePath);
-
-      const res = await apiFetch('/api/uploads', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.file?.downloadUrl) {
-        throw new Error(data?.error || 'Failed to upload review media');
-      }
-
-      const mediaItem: ReviewMediaItem = {
-        id: `media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        url: data.file.downloadUrl,
-        storagePath: data.file.storagePath,
-        type: file.type.startsWith('video/') ? 'video' : 'image',
-        fileName: data.file.fileName || file.name,
-      };
+      const mediaItem = await uploadReviewMediaFile(file, productId);
       setMedia((prev) => [...prev, mediaItem]);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Media upload failed');
@@ -471,42 +354,30 @@ export const ProductReviewsManagementView: React.FC = () => {
 
     setSubmitting(true);
     try {
-      const payload = {
-        productId,
-        customerId,
-        customerDisplayName: customerDisplayName.trim(),
-        orderId,
-        orderItemId,
-        rating,
-        title: title.trim(),
-        reviewText: reviewText.trim(),
-        status,
-        media,
-      };
-
-      const url = editingReviewId
-        ? `/api/admin/reviews/${encodeURIComponent(editingReviewId)}`
-        : '/api/admin/reviews';
-      const method = editingReviewId ? 'PATCH' : 'POST';
-
-      const res = await apiFetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok || data?.success === false) {
-        throw new Error(data?.error || 'Failed to save customer review');
-      }
+      const savedReview = await saveCustomerReview(
+        {
+          productId,
+          customerId,
+          customerDisplayName: customerDisplayName.trim(),
+          orderId,
+          orderItemId,
+          rating,
+          title: title.trim(),
+          reviewText: reviewText.trim(),
+          status,
+          media,
+        },
+        editingReviewId
+      );
 
       setSuccessMsg(
         editingReviewId
           ? `Review ${editingReviewId} updated and product aggregate synchronized.`
-          : `Review ${data.review?.reviewId || ''} created and product aggregate synchronized.`
+          : `Review ${savedReview?.reviewId || ''} created and product aggregate synchronized.`
       );
 
-      if (data.review) {
-        handleEditReview(data.review);
+      if (savedReview) {
+        handleEditReview(savedReview);
       }
       await Promise.all([loadReviews(), loadEligibleCustomersAndAggregate(productId)]);
     } catch (err: any) {
@@ -524,13 +395,7 @@ export const ProductReviewsManagementView: React.FC = () => {
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
-      const res = await apiFetch(`/api/admin/reviews/${encodeURIComponent(targetReviewId)}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (!res.ok || data?.success === false) {
-        throw new Error(data?.error || 'Failed to delete review');
-      }
+      await deleteCustomerReview(targetReviewId);
       if (editingReviewId === targetReviewId) {
         resetForm();
       }
@@ -547,22 +412,14 @@ export const ProductReviewsManagementView: React.FC = () => {
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
-      const res = await apiFetch('/api/admin/reviews/reconcile-aggregates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(productId ? { productId } : {}),
-      });
-      const data = await res.json();
-      if (!res.ok || data?.success === false) {
-        throw new Error(data?.error || 'Failed to reconcile aggregates');
-      }
+      const data = await reconcileReviewAggregates(productId || undefined);
       if (productId) {
         await loadEligibleCustomersAndAggregate(productId);
       }
       setSuccessMsg(
         productId
           ? `Synchronized aggregate for product ${productId}.`
-          : `Reconciled ${data.totalProductsChecked || 0} product aggregates (${data.reconciledProducts?.length || 0} updated).`
+          : `Reconciled ${data.totalProductsChecked || 0} product aggregates.`
       );
     } catch (err: any) {
       setErrorMsg(err?.message || 'Aggregate reconciliation failed');

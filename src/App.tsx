@@ -114,31 +114,27 @@ function CRMAppShell() {
     );
   };
 
-  if (!isLoggedIn) {
-    return <LoginScreen />;
-  }
-
   // Navigations links mapped to module access checks (Section 4)
   const navigationItems: { id: ModuleTab; name: string; icon: any; moduleCheck: string }[] = [
     { id: 'dashboard', name: 'KPI Intelligence', icon: BarChart3, moduleCheck: 'Dashboard' },
-    { id: 'shopping', name: 'Shopping Platform', icon: ShoppingBag, moduleCheck: 'Dashboard' },
-    { id: 'settings', name: 'Settings', icon: Settings, moduleCheck: 'Dashboard' },
+    { id: 'shopping', name: 'Shopping Platform', icon: ShoppingBag, moduleCheck: 'Shopping Platform' },
+    { id: 'settings', name: 'Settings', icon: Settings, moduleCheck: 'Settings' },
     { id: 'referrals', name: 'Dashboard', icon: Gift, moduleCheck: 'Referral Hub' },
     { id: 'sales_orders', name: 'Invoices', icon: Receipt, moduleCheck: 'Sales Orders' },
-    { id: 'brand_owner_assignment', name: 'Brand Owner Assignment', icon: UserCheck, moduleCheck: 'Sales Orders' },
-    { id: 'complete_packing', name: 'COMPLETE PACKING', icon: PackageCheck, moduleCheck: 'Sales Orders' },
-    { id: 'create_shipment', name: 'CREATE SHIPMENT', icon: Truck, moduleCheck: 'Sales Orders' },
-    { id: 'confirm_delivery', name: 'CONFIRM DELIVERY', icon: CheckCircle2, moduleCheck: 'Sales Orders' },
-    { id: 'process_return', name: 'Process Return', icon: RotateCcw, moduleCheck: 'Sales Orders' },
-    { id: 'order_operations', name: 'All Operations Summary', icon: Package, moduleCheck: 'Sales Orders' },
+    { id: 'brand_owner_assignment', name: 'Brand Owner Assignment', icon: UserCheck, moduleCheck: 'Brand Owner Assignment' },
+    { id: 'complete_packing', name: 'COMPLETE PACKING', icon: PackageCheck, moduleCheck: 'Complete Packing' },
+    { id: 'create_shipment', name: 'CREATE SHIPMENT', icon: Truck, moduleCheck: 'Create Shipment' },
+    { id: 'confirm_delivery', name: 'CONFIRM DELIVERY', icon: CheckCircle2, moduleCheck: 'Confirm Delivery' },
+    { id: 'process_return', name: 'Process Return', icon: RotateCcw, moduleCheck: 'Process Return' },
+    { id: 'order_operations', name: 'All Operations Summary', icon: Package, moduleCheck: 'All Operations Summary' },
     { id: 'customers', name: 'Customer Directory', icon: UserCheck, moduleCheck: 'Customer Directory' },
     { id: 'schedules', name: 'Task & Calendar Sync', icon: Calendar, moduleCheck: 'Tasks & Calendar' },
     { id: 'performance', name: 'Products Settings', icon: TrendingUp, moduleCheck: 'Products & Clients' },
-    { id: 'product_reviews', name: 'Product Reviews', icon: Star, moduleCheck: 'Products & Clients' },
+    { id: 'product_reviews', name: 'Product Reviews', icon: Star, moduleCheck: 'Product Reviews' },
     { id: 'whatsapp', name: 'WhatsApp Automation', icon: MessageSquare, moduleCheck: 'WhatsApp Integration' },
     { id: 'influencer_marketing', name: 'Influencer Marketing', icon: Sparkles, moduleCheck: 'Campaigns & ROI' },
     { id: 'security', name: 'Security & Access Grid', icon: ShieldCheck, moduleCheck: 'Security Audit' },
-    { id: 'users', name: 'User Management', icon: Users, moduleCheck: 'Security Audit' },
+    { id: 'users', name: 'User Management', icon: Users, moduleCheck: 'User Management' },
   ];
 
   // If a role does not have READ access to a tab, filter it out
@@ -149,6 +145,22 @@ function CRMAppShell() {
     : currentUser?.role === 'Support'
       ? navigationItems.filter(item => item.id !== 'security' && item.id !== 'users')
       : navigationItems;
+
+  // Automatically switch activeTab to the first permitted menu item when current tab is restricted
+  React.useEffect(() => {
+    if (!isLoggedIn) return;
+    const activeItem = displayedNavs.find(item => item.id === activeTab);
+    if (!activeItem || !hasAccess(activeItem.moduleCheck, 'read')) {
+      const firstPermitted = displayedNavs.find(item => hasAccess(item.moduleCheck, 'read'));
+      if (firstPermitted && firstPermitted.id !== activeTab) {
+        setActiveTab(firstPermitted.id);
+      }
+    }
+  }, [isLoggedIn, activeTab, displayedNavs, hasAccess]);
+
+  if (!isLoggedIn) {
+    return <LoginScreen />;
+  }
 
   // Handler for navigation clicking
   const handleNavigate = (tab: ModuleTab) => {

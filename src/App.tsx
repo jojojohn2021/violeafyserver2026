@@ -24,15 +24,16 @@ import CompletePackingView from './components/CompletePackingView';
 import CreateShipmentView from './components/CreateShipmentView';
 import ConfirmDeliveryView from './components/ConfirmDeliveryView';
 import ProductReviewsManagementView from './components/ProductReviewsManagementView';
+import PreOrderManagementView from './components/PreOrderManagementView';
 
 import { 
   BarChart3, Users, Briefcase, Calendar, TrendingUp, MessageSquare, 
   ShieldCheck, LayoutDashboard, Menu, X, HelpCircle, ShieldAlert, UserCheck, Gift,
   LogOut, Receipt, Coins, Layout, Sparkles, ShoppingBag, Settings, Loader2, PackageCheck,
-  Truck, CheckCircle2, RotateCcw, Package, Star
+  Truck, CheckCircle2, RotateCcw, Package, Star, ClipboardList
 } from 'lucide-react';
 
-type ModuleTab = 'dashboard' | 'customers' | 'sales_orders' | 'brand_owner_assignment' | 'complete_packing' | 'create_shipment' | 'confirm_delivery' | 'process_return' | 'order_operations' | 'schedules' | 'performance' | 'product_reviews' | 'whatsapp' | 'security' | 'referrals' | 'users' | 'influencer_marketing' | 'shopping' | 'settings';
+type ModuleTab = 'dashboard' | 'customers' | 'sales_orders' | 'preorders' | 'brand_owner_assignment' | 'complete_packing' | 'create_shipment' | 'confirm_delivery' | 'process_return' | 'order_operations' | 'schedules' | 'performance' | 'product_reviews' | 'whatsapp' | 'security' | 'referrals' | 'users' | 'influencer_marketing' | 'shopping' | 'settings';
 
 function CRMAppShell() {
   const { 
@@ -121,6 +122,7 @@ function CRMAppShell() {
     { id: 'settings', name: 'Settings', icon: Settings, moduleCheck: 'Settings' },
     { id: 'referrals', name: 'Dashboard', icon: Gift, moduleCheck: 'Referral Hub' },
     { id: 'sales_orders', name: 'Invoices', icon: Receipt, moduleCheck: 'Sales Orders' },
+    { id: 'preorders', name: 'Pre-Order Management', icon: ClipboardList, moduleCheck: 'Pre-Order Management' },
     { id: 'brand_owner_assignment', name: 'Brand Owner Assignment', icon: UserCheck, moduleCheck: 'Brand Owner Assignment' },
     { id: 'complete_packing', name: 'COMPLETE PACKING', icon: PackageCheck, moduleCheck: 'Complete Packing' },
     { id: 'create_shipment', name: 'CREATE SHIPMENT', icon: Truck, moduleCheck: 'Create Shipment' },
@@ -270,6 +272,9 @@ function CRMAppShell() {
               {activeTab === 'customers' && <CustomerManagementView />}
               {activeTab === 'referrals' && <ReferralPartnerHubView />}
               {activeTab === 'sales_orders' && <SalesOrdersView />}
+              {activeTab === 'preorders' && (
+                <PreOrderManagementView onOpenSalesOrder={() => handleNavigate('sales_orders')} />
+              )}
               {activeTab === 'brand_owner_assignment' && <BrandOwnerAssignmentView />}
               {activeTab === 'complete_packing' && <CompletePackingView />}
               {activeTab === 'create_shipment' && <CreateShipmentView />}

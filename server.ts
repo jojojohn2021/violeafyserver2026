@@ -23,6 +23,7 @@ import { ShipmentOperationsService } from "./src/services/shipmentOperationsServ
 import { sendOrderStageWhatsAppNotification } from "./src/services/whatsappService";
 import { registerProductDetailsRoutes, PRODUCT_DETAILS_COLLECTION } from "./src/services/productDetailsRoutes";
 import { registerCustomerReviewRoutes, CUSTOMER_REVIEWS_COLLECTION, CUSTOMER_REVIEW_AGGREGATES_COLLECTION } from "./src/services/customerReviewService";
+import { registerPreorderManagementRoutes, PREORDERS_COLLECTION, PREORDER_IDEMPOTENCY_COLLECTION, PREORDER_EVENTS_COLLECTION, PAYMENT_ALLOCATIONS_COLLECTION } from "./src/services/preorderManagementService";
 
 dotenv.config();
 
@@ -609,6 +610,7 @@ app.post('/api/uploads', requireAuthenticatedRequest, upload.single('file'), asy
 
 app.delete("/api/db/:col/:id", async (req, res) => {
   try {
+    if (protectedOperationCollections.has(String(req.params.col).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
     if (String(req.params.col).toLowerCase() === PRODUCT_DETAILS_COLLECTION) return res.status(403).json({ error: 'Product details must be modified through /api/product-details.' });
     if (String(req.params.col).toLowerCase() === CUSTOMER_REVIEWS_COLLECTION || String(req.params.col).toLowerCase() === CUSTOMER_REVIEW_AGGREGATES_COLLECTION) return res.status(403).json({ error: 'Customer reviews and aggregates must be modified through /api/admin/reviews.' });
     await deleteCollectionDoc(req.params.col, req.params.id);
@@ -626,6 +628,7 @@ app.post('/api/products', requireAuthenticatedRequest, upload.single('image'), a
     const productId = String(body.id || body.productId || Date.now());
 
     const payload: any = { ...body, id: productId };
+    payload.preorderactive = body.preorderactive === true || String(body.preorderactive).toLowerCase() === 'true';
     for (const key of ['uniqueSpec1', 'uniqueSpec2', 'uniqueSpec3', 'uniqueSpec4']) {
       payload[key] = body[key] !== undefined && body[key] !== null ? String(body[key]).trim() : '';
     }
@@ -719,6 +722,14 @@ app.put('/api/products/:id/image', requireAuthenticatedRequest, upload.single('i
 // Product Details (separate product_details collection, linked 1:1 by product document ID)
 registerProductDetailsRoutes(app, { db: adminDb, auth: adminAuth, storage: adminStorage });
 registerCustomerReviewRoutes(app, { db: adminDb, auth: adminAuth, storage: adminStorage });
+registerPreorderManagementRoutes(app, {
+  db: adminDb,
+  auth: adminAuth,
+  onSalesOrderCreated: async (orderId: string) => {
+    await operationsService.syncPaymentRecordForOrder(orderId);
+    await operationsService.triggerStageNotifications('Order Placed', orderId);
+  },
+});
 
 app.post("/api/payment/test-connection", async (req, res) => {
   try {

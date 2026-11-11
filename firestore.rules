@@ -114,6 +114,23 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Pre-Orders, Payment Allocations, Payments & Audit Events
+    match /preorders/{preorderId} {
+      allow read, write: if true;
+    }
+    match /payment_allocations/{allocationId} {
+      allow read, write: if true;
+    }
+    match /payments/{paymentId} {
+      allow read, write: if true;
+    }
+    match /preorder_events/{eventId} {
+      allow read, write: if true;
+    }
+    match /preorder_idempotency/{keyId} {
+      allow read, write: if true;
+    }
+
     // Performance / commission collections
     match /performance_levels/{levelId} {
       allow read, write: if true;

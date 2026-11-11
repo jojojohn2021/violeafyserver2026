@@ -114,6 +114,7 @@ export default function PerformanceTrackingView() {
   const [editGstPercentage, setEditGstPercentage] = useState<number>(18);
   const [editStockIn, setEditStockIn] = useState<number>(0);
   const [editStockOut, setEditStockOut] = useState<number>(0);
+  const [editPreorderActive, setEditPreorderActive] = useState<boolean>(false);
   const [editVamjoWeblink, setEditVamjoWeblink] = useState<string>('');
   const [editAmazonWeblink, setEditAmazonWeblink] = useState<string>('');
   const [editFlipkartWeblink, setEditFlipkartWeblink] = useState<string>('');
@@ -210,6 +211,7 @@ export default function PerformanceTrackingView() {
   const [prodPictureUrl, setProdPictureUrl] = useState<string>('');
   const [prodStockIn, setProdStockIn] = useState<number>(0);
   const [prodStockOut, setProdStockOut] = useState<number>(0);
+  const [prodPreorderActive, setProdPreorderActive] = useState<boolean>(false);
   const [prodVamjoWeblink, setProdVamjoWeblink] = useState('');
   const [prodAmazonWeblink, setProdAmazonWeblink] = useState('');
   const [prodFlipkartWeblink, setProdFlipkartWeblink] = useState('');
@@ -1079,6 +1081,7 @@ export default function PerformanceTrackingView() {
       notes: editNotes,
       stockIn: editStockIn,
       stockOut: editStockOut,
+      preorderactive: editPreorderActive,
       stock: Math.max(0, editStockIn - editStockOut),
       vamjoWeblink: editVamjoWeblink,
       amazonWeblink: editAmazonWeblink,
@@ -1135,6 +1138,7 @@ export default function PerformanceTrackingView() {
     setEditNotes(p.notes || '');
     setEditStockIn(p.stockIn ?? p.stock ?? 0);
     setEditStockOut(p.stockOut ?? getProductVolume(p) ?? 0);
+    setEditPreorderActive(p.preorderactive === true);
     setEditVamjoWeblink(p.vamjoWeblink || '');
     setEditAmazonWeblink(p.amazonWeblink || '');
     setEditFlipkartWeblink(p.flipkartWeblink || '');
@@ -1236,6 +1240,7 @@ export default function PerformanceTrackingView() {
       fd.append('stock', String(Math.max(0, prodStockIn - prodStockOut)));
       fd.append('stockIn', String(prodStockIn));
       fd.append('stockOut', String(prodStockOut));
+      fd.append('preorderactive', String(prodPreorderActive));
       fd.append('vamjoWeblink', prodVamjoWeblink);
       fd.append('amazonWeblink', prodAmazonWeblink);
       fd.append('flipkartWeblink', prodFlipkartWeblink);
@@ -1293,6 +1298,7 @@ export default function PerformanceTrackingView() {
             stock: Math.max(0, prodStockIn - prodStockOut),
             stockIn: prodStockIn,
             stockOut: prodStockOut,
+            preorderactive: prodPreorderActive,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
@@ -1347,6 +1353,7 @@ export default function PerformanceTrackingView() {
             stock: Math.max(0, prodStockIn - prodStockOut),
             stockIn: prodStockIn,
             stockOut: prodStockOut,
+            preorderactive: prodPreorderActive,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
@@ -1399,6 +1406,7 @@ export default function PerformanceTrackingView() {
             stock: Math.max(0, prodStockIn - prodStockOut),
             stockIn: prodStockIn,
             stockOut: prodStockOut,
+            preorderactive: prodPreorderActive,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
@@ -1450,6 +1458,7 @@ export default function PerformanceTrackingView() {
         stock: Math.max(0, prodStockIn - prodStockOut),
         stockIn: prodStockIn,
         stockOut: prodStockOut,
+            preorderactive: prodPreorderActive,
         amazonSales: Math.round(prodOnlinePrice * 40),
         flipkartSales: Math.round(prodOnlinePrice * 30),
         meeshoSales: Math.round(prodOnlinePrice * 20),
@@ -1532,6 +1541,7 @@ export default function PerformanceTrackingView() {
     setProdPictureUrl('');
     setProdStockIn(0);
     setProdStockOut(0);
+    setProdPreorderActive(false);
     setProdVamjoWeblink('');
     setProdAmazonWeblink('');
     setProdFlipkartWeblink('');
@@ -2753,6 +2763,18 @@ export default function PerformanceTrackingView() {
                     min="0"
                     required
                   />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider">Pre-order Active:</label>
+                  <label className="flex items-center gap-2.5 w-full text-xs p-2.5 bg-[#141418] border border-slate-800 rounded-lg cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={prodPreorderActive}
+                      onChange={e => setProdPreorderActive(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500 cursor-pointer"
+                    />
+                    <span className="font-semibold text-slate-205">{prodPreorderActive ? 'Yes (Pre-order enabled)' : 'No'}</span>
+                  </label>
                 </div>
 
                 <div className="sm:col-span-2 md:col-span-3">
@@ -4331,6 +4353,19 @@ export default function PerformanceTrackingView() {
                           min="0"
                           required
                         />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider font-mono">Pre-order Active:</label>
+                        <label className="flex items-center gap-2.5 w-full text-xs p-2.5 bg-[#141418] border border-slate-800 rounded-lg cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={editPreorderActive}
+                            onChange={e => setEditPreorderActive(e.target.checked)}
+                            className="w-4 h-4 accent-amber-500 cursor-pointer"
+                          />
+                          <span className="font-semibold text-slate-205">{editPreorderActive ? 'Yes (Pre-order enabled)' : 'No'}</span>
+                        </label>
                       </div>
                     </div>
 

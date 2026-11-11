@@ -122,6 +122,7 @@ export interface ProductPerformance {
   gstPercentage?: number;
   stockIn?: number;
   stockOut?: number;
+  preorderactive?: boolean;
   vamjoWeblink?: string;
   amazonWeblink?: string;
   flipkartWeblink?: string;

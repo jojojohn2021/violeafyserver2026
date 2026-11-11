@@ -449,7 +449,7 @@ const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ 
       {/* Additional product pictures */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className={labelCls}>Additional Product Pictures</span>
+          <span className={labelCls}>Additional Product Pictures(Pre-order Booking)</span>
           <label className={`px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer ${locked ? 'opacity-40 pointer-events-none' : ''}`}>
             + Add pictures
             <input id={`pd-${mode}-add-images`} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" disabled={locked}

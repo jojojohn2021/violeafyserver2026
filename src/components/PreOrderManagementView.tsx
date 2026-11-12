@@ -4,10 +4,13 @@ import {
   fetchAdminPreorders,
   fetchAdminPreorderDetail,
   convertPreorderToSalesOrder,
+  updateAdminPreorderShippingAddress,
+  formatShippingAddressDetails,
   PreorderFilterStatus,
   PreorderGridRow,
   PreorderDetailResponse,
   ConvertPreorderResponse,
+  PreorderShippingAddressDetails,
 } from '../utils/preorderManagementApi';
 import {
   Search,
@@ -33,6 +36,9 @@ import {
   MessageSquare,
   Loader2,
   Ban,
+  Edit3,
+  MapPin,
+  Save,
 } from 'lucide-react';
 
 interface PreOrderManagementViewProps {
@@ -112,6 +118,24 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  // Details Modal Shipping Address Edit State
+  const [editingDetailAddress, setEditingDetailAddress] = useState<boolean>(false);
+  const [detailAddressForm, setDetailAddressForm] = useState<PreorderShippingAddressDetails>({
+    id: '',
+    name: '',
+    mobileNumber: '',
+    email: '',
+    addressLine: '',
+    city: '',
+    district: '',
+    state: 'Kerala',
+    pincode: '',
+    formattedAddress: '',
+  });
+  const [savingDetailAddress, setSavingDetailAddress] = useState<boolean>(false);
+  const [detailAddressError, setDetailAddressError] = useState<string | null>(null);
+  const [detailAddressSavedMsg, setDetailAddressSavedMsg] = useState<string | null>(null);
+
   // Conversion Confirmation Modal State
   const [convertTarget, setConvertTarget] = useState<PreorderGridRow | null>(null);
   const [convertIdempotencyKey, setConvertIdempotencyKey] = useState<string>('');
@@ -119,6 +143,19 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
   const [converting, setConverting] = useState<boolean>(false);
   const [convertError, setConvertError] = useState<string | null>(null);
   const [convertSuccess, setConvertSuccess] = useState<ConvertPreorderResponse | null>(null);
+  const [editingConvertAddress, setEditingConvertAddress] = useState<boolean>(false);
+  const [convertShippingForm, setConvertShippingForm] = useState<PreorderShippingAddressDetails>({
+    id: '',
+    name: '',
+    mobileNumber: '',
+    email: '',
+    addressLine: '',
+    city: '',
+    district: '',
+    state: 'Kerala',
+    pincode: '',
+    formattedAddress: '',
+  });
 
   // Debounce search input
   useEffect(() => {
@@ -177,10 +214,31 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
     setSelectedPreorderId(preorderId);
     setDetailData(null);
     setDetailError(null);
+    setEditingDetailAddress(false);
+    setDetailAddressError(null);
+    setDetailAddressSavedMsg(null);
     setDetailLoading(true);
     try {
       const res = await fetchAdminPreorderDetail(preorderId);
       setDetailData(res);
+      const ship =
+        res.snapshots?.customer?.shippingAddressDetails ||
+        res.preorder?.shippingAddressDetails || {
+          id: `addr_po_${preorderId}`,
+          name: res.snapshots?.customer?.customerName || res.preorder?.customerName || '',
+          mobileNumber:
+            res.snapshots?.customer?.customerPhone || res.preorder?.customerPhone || '',
+          email: res.snapshots?.customer?.customerEmail || res.preorder?.customerEmail || '',
+          addressLine:
+            res.snapshots?.customer?.addressLine || res.snapshots?.customer?.shippingAddress || '',
+          city: res.snapshots?.customer?.city || '',
+          district: res.snapshots?.customer?.district || '',
+          state: res.snapshots?.customer?.state || 'Kerala',
+          pincode: res.snapshots?.customer?.pincode || '',
+          formattedAddress:
+            res.snapshots?.customer?.shippingAddress || res.preorder?.shippingAddress || '',
+        };
+      setDetailAddressForm(ship);
     } catch (err: any) {
       setDetailError(err?.message || 'Failed to load pre-order details.');
     } finally {
@@ -192,6 +250,36 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
     setSelectedPreorderId(null);
     setDetailData(null);
     setDetailError(null);
+    setEditingDetailAddress(false);
+    setDetailAddressError(null);
+    setDetailAddressSavedMsg(null);
+  };
+
+  const handleSaveDetailShippingAddress = async () => {
+    if (!selectedPreorderId || savingDetailAddress) return;
+    setSavingDetailAddress(true);
+    setDetailAddressError(null);
+    setDetailAddressSavedMsg(null);
+    try {
+      const formatted = formatShippingAddressDetails(detailAddressForm);
+      const payload: PreorderShippingAddressDetails = {
+        ...detailAddressForm,
+        formattedAddress: formatted,
+      };
+      await updateAdminPreorderShippingAddress(selectedPreorderId, payload);
+      const refreshed = await fetchAdminPreorderDetail(selectedPreorderId);
+      setDetailData(refreshed);
+      if (refreshed.snapshots?.customer?.shippingAddressDetails) {
+        setDetailAddressForm(refreshed.snapshots.customer.shippingAddressDetails);
+      }
+      setEditingDetailAddress(false);
+      setDetailAddressSavedMsg('Shipping address updated.');
+      await loadPreorders();
+    } catch (err: any) {
+      setDetailAddressError(err?.message || 'Failed to update shipping address.');
+    } finally {
+      setSavingDetailAddress(false);
+    }
   };
 
   const openConvertModal = (row: PreorderGridRow) => {
@@ -201,6 +289,20 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
     setConvertNotes('');
     setConvertError(null);
     setConvertSuccess(null);
+    setEditingConvertAddress(false);
+    const ship = row.shippingAddressDetails || {
+      id: `addr_po_${row.preorderId}`,
+      name: row.customerName || '',
+      mobileNumber: row.customerPhone || row.customerMobile || '',
+      email: row.customerEmail || '',
+      addressLine: row.shippingAddress || '',
+      city: '',
+      district: '',
+      state: 'Kerala',
+      pincode: '',
+      formattedAddress: row.shippingAddress || '',
+    };
+    setConvertShippingForm(ship);
   };
 
   const closeConvertModal = () => {
@@ -210,6 +312,7 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
     setConvertNotes('');
     setConvertError(null);
     setConvertSuccess(null);
+    setEditingConvertAddress(false);
   };
 
   const handleConfirmConversion = async () => {
@@ -217,12 +320,18 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
     setConverting(true);
     setConvertError(null);
     try {
+      const formattedShip = formatShippingAddressDetails(convertShippingForm);
+      const shippingPayload: PreorderShippingAddressDetails = {
+        ...convertShippingForm,
+        formattedAddress: formattedShip || convertShippingForm.formattedAddress,
+      };
       const res = await convertPreorderToSalesOrder({
         preorderId: convertTarget.preorderId,
         idempotencyKey: convertIdempotencyKey,
         expectedTotalProductValue: convertTarget.totalProductValue,
         expectedVerifiedAmountPaid: convertTarget.verifiedAmountPaid,
         notes: convertNotes.trim(),
+        shippingAddress: shippingPayload,
       });
       setConvertSuccess(res);
       await loadPreorders();
@@ -828,7 +937,7 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
                 <div>
                   <h3
                     id="preorder-detail-modal-title"
-                    className="text-sm font-black uppercase tracking-wider"
+                    className="text-sm font-black uppercase tracking-wider text-white"
                   >
                     Pre-Order Details • {selectedPreorderId}
                   </h3>
@@ -984,11 +1093,35 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
                     </div>
 
                     {/* Customer Snapshot */}
-                    <div className="p-3.5 rounded-xl border border-[#D9E2DA] bg-white space-y-2">
-                      <div className="flex items-center gap-1.5 text-xs font-black uppercase text-[#1F2933] border-b border-[#D9E2DA] pb-1.5">
-                        <User className="w-4 h-4 text-[#2E7D32]" />
-                        <span>Customer Snapshot</span>
+                    <div className="p-3.5 rounded-xl border border-[#D9E2DA] bg-white space-y-2.5">
+                      <div className="flex items-center justify-between border-b border-[#D9E2DA] pb-1.5">
+                        <div className="flex items-center gap-1.5 text-xs font-black uppercase text-[#1F2933]">
+                          <User className="w-4 h-4 text-[#2E7D32]" />
+                          <span>Customer Snapshot</span>
+                        </div>
+                        {canConvertPerm && !editingDetailAddress && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingDetailAddress(true);
+                              setDetailAddressError(null);
+                              setDetailAddressSavedMsg(null);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#EEF6EE] hover:bg-[#DCE9DE] text-[#2E7D32] border border-[#D9E2DA] text-[10px] font-bold transition cursor-pointer"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Update Shipping Address</span>
+                          </button>
+                        )}
                       </div>
+
+                      {detailAddressSavedMsg && !editingDetailAddress && (
+                        <div className="px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex items-center gap-1.5 font-semibold">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{detailAddressSavedMsg}</span>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-2 gap-2 text-[11px]">
                         <div>
                           <span className="text-[#5F6B63] block">Customer Name:</span>
@@ -1011,14 +1144,230 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
                         <div>
                           <span className="text-[#5F6B63] block">Email:</span>
                           <strong className="text-[#1F2933] break-all">
-                            {detailData.snapshots.customer.customerEmail || '—'}
+                            {detailData.snapshots.customer.customerEmail ||
+                              detailData.snapshots.customer.shippingAddressDetails?.email ||
+                              '—'}
                           </strong>
                         </div>
-                        <div className="col-span-2">
-                          <span className="text-[#5F6B63] block">Shipping Address:</span>
-                          <strong className="text-[#1F2933]">
-                            {detailData.snapshots.customer.shippingAddress || '—'}
-                          </strong>
+
+                        <div className="col-span-2 pt-1 border-t border-[#EEF6EE]">
+                          <div className="flex items-center gap-1 text-[#5F6B63] mb-1">
+                            <MapPin className="w-3.5 h-3.5 text-[#2E7D32]" />
+                            <span className="font-semibold">Shipping Address:</span>
+                          </div>
+
+                          {editingDetailAddress ? (
+                            <div className="p-2.5 rounded-xl bg-[#F9FBF9] border border-[#D9E2DA] space-y-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                                    Recipient Name
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={detailAddressForm.name}
+                                    onChange={(e) =>
+                                      setDetailAddressForm((prev) => ({
+                                        ...prev,
+                                        name: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Recipient name"
+                                    className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                                    Mobile Number
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={detailAddressForm.mobileNumber}
+                                    onChange={(e) =>
+                                      setDetailAddressForm((prev) => ({
+                                        ...prev,
+                                        mobileNumber: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Mobile number"
+                                    className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                                  />
+                                </div>
+                                <div className="sm:col-span-2">
+                                  <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                                    Address Line / Street
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={detailAddressForm.addressLine}
+                                    onChange={(e) =>
+                                      setDetailAddressForm((prev) => ({
+                                        ...prev,
+                                        addressLine: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="House / Street / Locality"
+                                    className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                                    City / Town
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={detailAddressForm.city}
+                                    onChange={(e) =>
+                                      setDetailAddressForm((prev) => ({
+                                        ...prev,
+                                        city: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="City"
+                                    className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                                    District
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={detailAddressForm.district}
+                                    onChange={(e) =>
+                                      setDetailAddressForm((prev) => ({
+                                        ...prev,
+                                        district: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="District"
+                                    className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                                    State
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={detailAddressForm.state}
+                                    onChange={(e) =>
+                                      setDetailAddressForm((prev) => ({
+                                        ...prev,
+                                        state: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="State"
+                                    className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                                    Pincode
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={detailAddressForm.pincode}
+                                    onChange={(e) =>
+                                      setDetailAddressForm((prev) => ({
+                                        ...prev,
+                                        pincode: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Pincode"
+                                    className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                                  />
+                                </div>
+                              </div>
+
+                              {detailAddressError && (
+                                <div className="text-[11px] text-red-600 font-semibold">
+                                  {detailAddressError}
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-end gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  disabled={savingDetailAddress}
+                                  onClick={() => {
+                                    setEditingDetailAddress(false);
+                                    setDetailAddressError(null);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-white border border-[#D9E2DA] text-[#1F2933] text-[11px] font-bold hover:bg-[#EEF6EE] cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={savingDetailAddress}
+                                  onClick={handleSaveDetailShippingAddress}
+                                  className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-[#2E7D32] hover:bg-[#1B5E20] text-white text-[11px] font-extrabold cursor-pointer disabled:opacity-50"
+                                >
+                                  {savingDetailAddress ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    <Save className="w-3 h-3" />
+                                  )}
+                                  <span>Save Shipping Address</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-2.5 rounded-lg bg-[#F9FBF9] border border-[#D9E2DA] space-y-1">
+                              <strong className="text-[#1F2933] block leading-relaxed">
+                                {detailData.snapshots.customer.shippingAddress ||
+                                  detailData.preorder.shippingAddress ||
+                                  '—'}
+                              </strong>
+                              {(detailData.snapshots.customer.shippingAddressDetails?.addressLine ||
+                                detailData.snapshots.customer.district ||
+                                detailData.snapshots.customer.pincode) && (
+                                <div className="text-[10px] text-[#5F6B63] flex flex-wrap gap-x-3 gap-y-0.5">
+                                  {detailData.snapshots.customer.shippingAddressDetails?.name && (
+                                    <span>
+                                      Recipient:{' '}
+                                      <strong className="text-[#1F2933]">
+                                        {detailData.snapshots.customer.shippingAddressDetails.name}
+                                      </strong>
+                                    </span>
+                                  )}
+                                  {detailData.snapshots.customer.shippingAddressDetails?.city && (
+                                    <span>
+                                      City:{' '}
+                                      <strong className="text-[#1F2933]">
+                                        {detailData.snapshots.customer.shippingAddressDetails.city}
+                                      </strong>
+                                    </span>
+                                  )}
+                                  {detailData.snapshots.customer.district && (
+                                    <span>
+                                      District:{' '}
+                                      <strong className="text-[#1F2933]">
+                                        {detailData.snapshots.customer.district}
+                                      </strong>
+                                    </span>
+                                  )}
+                                  {detailData.snapshots.customer.state && (
+                                    <span>
+                                      State:{' '}
+                                      <strong className="text-[#1F2933]">
+                                        {detailData.snapshots.customer.state}
+                                      </strong>
+                                    </span>
+                                  )}
+                                  {detailData.snapshots.customer.pincode && (
+                                    <span>
+                                      PIN:{' '}
+                                      <strong className="font-mono text-[#1F2933]">
+                                        {detailData.snapshots.customer.pincode}
+                                      </strong>
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1303,11 +1652,14 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
           aria-modal="true"
           aria-labelledby="convert-modal-title"
         >
-          <div className="bg-white border border-[#D9E2DA] rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
+          <div className="bg-white border border-[#D9E2DA] rounded-2xl max-w-xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
             <div className="px-5 py-3.5 bg-[#173F1B] text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ArrowRightCircle className="w-5 h-5 text-[#81C784]" />
-                <h3 id="convert-modal-title" className="text-sm font-black uppercase tracking-wider">
+                <h3
+                  id="convert-modal-title"
+                  className="text-sm font-black uppercase tracking-wider text-white"
+                >
                   Convert Pre-Order to Sales Order
                 </h3>
               </div>
@@ -1321,7 +1673,7 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-xs">
+            <div className="p-5 overflow-y-auto space-y-4 text-xs">
               {convertSuccess ? (
                 <div className="space-y-3">
                   <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 space-y-1.5">
@@ -1418,6 +1770,179 @@ export const PreOrderManagementView: React.FC<PreOrderManagementViewProps> = ({
                         mark Pre-Order <span className="uppercase">Processed</span>
                       </strong>
                     </div>
+                  </div>
+
+                  {/* Shipping Address Details Section in Convert to Sales Order Modal */}
+                  <div className="bg-[#F9FBF9] p-3.5 rounded-xl border border-[#D9E2DA] space-y-2.5">
+                    <div className="flex items-center justify-between border-b border-[#D9E2DA] pb-1.5">
+                      <div className="flex items-center gap-1.5 text-[11px] font-black uppercase text-[#1F2933]">
+                        <MapPin className="w-3.5 h-3.5 text-[#2E7D32]" />
+                        <span>Shipping Address Details</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditingConvertAddress((prev) => !prev)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white hover:bg-[#EEF6EE] text-[#2E7D32] border border-[#D9E2DA] text-[10px] font-bold transition cursor-pointer"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>{editingConvertAddress ? 'Done Editing' : 'Edit Shipping Address'}</span>
+                      </button>
+                    </div>
+
+                    {editingConvertAddress ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                            Recipient Name
+                          </label>
+                          <input
+                            type="text"
+                            value={convertShippingForm.name}
+                            onChange={(e) =>
+                              setConvertShippingForm((prev) => ({ ...prev, name: e.target.value }))
+                            }
+                            placeholder="Recipient name"
+                            className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                            Mobile Number
+                          </label>
+                          <input
+                            type="text"
+                            value={convertShippingForm.mobileNumber}
+                            onChange={(e) =>
+                              setConvertShippingForm((prev) => ({
+                                ...prev,
+                                mobileNumber: e.target.value,
+                              }))
+                            }
+                            placeholder="Mobile number"
+                            className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                            Address Line / Street
+                          </label>
+                          <input
+                            type="text"
+                            value={convertShippingForm.addressLine}
+                            onChange={(e) =>
+                              setConvertShippingForm((prev) => ({
+                                ...prev,
+                                addressLine: e.target.value,
+                              }))
+                            }
+                            placeholder="House / Street / Locality"
+                            className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                            City / Town
+                          </label>
+                          <input
+                            type="text"
+                            value={convertShippingForm.city}
+                            onChange={(e) =>
+                              setConvertShippingForm((prev) => ({ ...prev, city: e.target.value }))
+                            }
+                            placeholder="City"
+                            className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                            District
+                          </label>
+                          <input
+                            type="text"
+                            value={convertShippingForm.district}
+                            onChange={(e) =>
+                              setConvertShippingForm((prev) => ({
+                                ...prev,
+                                district: e.target.value,
+                              }))
+                            }
+                            placeholder="District"
+                            className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                            State
+                          </label>
+                          <input
+                            type="text"
+                            value={convertShippingForm.state}
+                            onChange={(e) =>
+                              setConvertShippingForm((prev) => ({ ...prev, state: e.target.value }))
+                            }
+                            placeholder="State"
+                            className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-[#5F6B63] mb-0.5">
+                            Pincode
+                          </label>
+                          <input
+                            type="text"
+                            value={convertShippingForm.pincode}
+                            onChange={(e) =>
+                              setConvertShippingForm((prev) => ({
+                                ...prev,
+                                pincode: e.target.value,
+                              }))
+                            }
+                            placeholder="Pincode"
+                            className="w-full px-2.5 py-1.5 bg-white border border-[#D9E2DA] rounded-lg text-[11px] text-[#1F2933] focus:outline-none focus:border-[#2E7D32]"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
+                        <div>
+                          <span className="text-[#5F6B63] block">Recipient Name:</span>
+                          <strong className="text-[#1F2933]">
+                            {convertShippingForm.name || convertTarget.customerName || '—'}
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-[#5F6B63] block">Mobile Number:</span>
+                          <strong className="text-[#1F2933]">
+                            {convertShippingForm.mobileNumber || convertTarget.customerPhone || '—'}
+                          </strong>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-[#5F6B63] block">Address Line:</span>
+                          <strong className="text-[#1F2933]">
+                            {convertShippingForm.addressLine ||
+                              formatShippingAddressDetails(convertShippingForm) ||
+                              convertTarget.shippingAddress ||
+                              '—'}
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-[#5F6B63] block">City / District:</span>
+                          <strong className="text-[#1F2933]">
+                            {[convertShippingForm.city, convertShippingForm.district]
+                              .filter(Boolean)
+                              .join(', ') || '—'}
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-[#5F6B63] block">State & Pincode:</span>
+                          <strong className="text-[#1F2933]">
+                            {[convertShippingForm.state, convertShippingForm.pincode]
+                              .filter(Boolean)
+                              .join(' - ') || '—'}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div>

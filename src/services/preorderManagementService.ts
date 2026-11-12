@@ -151,6 +151,19 @@ export interface PreorderConversionEligibility {
   paymentReconciliation: PreorderPaymentReconciliation;
 }
 
+export interface PreorderShippingAddressDetails {
+  id: string;
+  name: string;
+  mobileNumber: string;
+  email: string;
+  addressLine: string;
+  city: string;
+  district: string;
+  state: string;
+  pincode: string;
+  formattedAddress: string;
+}
+
 export interface PreorderGridRow {
   id: string;
   preorderId: string;
@@ -161,6 +174,8 @@ export interface PreorderGridRow {
   customerName: string;
   customerMobile: string;
   customerEmail: string;
+  shippingAddress: string;
+  shippingAddressDetails: PreorderShippingAddressDetails;
   productId: string;
   productName: string;
   sku: string;
@@ -1188,6 +1203,220 @@ export function evaluateConversionEligibility(params: {
 }
 
 /**
+ * Formats a `PreorderShippingAddressDetails` object into a human-readable single-line shipping address.
+ */
+export function formatShippingAddressDetails(addr: Partial<PreorderShippingAddressDetails>): string {
+  const name = String(addr.name || '').trim();
+  const mobile = String(addr.mobileNumber || '').trim();
+  const addressLine = String(addr.addressLine || '').trim();
+  const city = String(addr.city || '').trim();
+  const district = String(addr.district || '').trim();
+  const state = String(addr.state || '').trim();
+  const pincode = String(addr.pincode || '').trim();
+
+  const locationParts: string[] = [];
+  for (const part of [addressLine, city, district, state]) {
+    if (part && !locationParts.some((existing) => existing.toLowerCase() === part.toLowerCase())) {
+      locationParts.push(part);
+    }
+  }
+
+  const recipientPrefix =
+    name && mobile ? `${name} (${mobile})` : name || mobile || '';
+  const body = locationParts.join(', ');
+  const pinSuffix = pincode ? ` - ${pincode}` : '';
+
+  if (body) {
+    return `${recipientPrefix ? `${recipientPrefix}, ` : ''}${body}${pinSuffix}`;
+  }
+  if (addr.formattedAddress && String(addr.formattedAddress).trim()) {
+    return String(addr.formattedAddress).trim();
+  }
+  return recipientPrefix ? `${recipientPrefix}${pinSuffix}` : '';
+}
+
+/**
+ * Resolves the authoritative shipping address for a pre-order from:
+ * 1) `preorder.shippingAddress` / `preorder.deliveryAddress` / `preorder.formattedDeliveryAddress` / `preorder.deliveryAddress*`
+ * 2) Linked `payments` documents (`orderPayload.shippingAddress`, `shippingAddress`, `deliveryAddress`, `customerAddress`)
+ * 3) Customer record fallback (`customer.address`, `customer.district`, `customer.state`, `customer.pincode`)
+ */
+export function resolvePreorderShippingAddress(params: {
+  preorder: any;
+  customer?: any;
+  payments?: any[];
+}): PreorderShippingAddressDetails {
+  const { preorder, customer, payments = [] } = params;
+  const preorderId = String(preorder?.preorderId || preorder?.id || '').trim();
+
+  const poShipObj =
+    preorder?.shippingAddress && typeof preorder.shippingAddress === 'object'
+      ? preorder.shippingAddress
+      : preorder?.deliveryAddress && typeof preorder.deliveryAddress === 'object'
+      ? preorder.deliveryAddress
+      : null;
+
+  const poShipString =
+    typeof preorder?.shippingAddress === 'string'
+      ? preorder.shippingAddress.trim()
+      : typeof preorder?.deliveryAddress === 'string'
+      ? preorder.deliveryAddress.trim()
+      : '';
+
+  let paymentShipObj: any = null;
+  let paymentShipString = '';
+  for (const p of payments) {
+    if (!p || typeof p !== 'object') continue;
+    const matchesPreorder =
+      (preorder?.checkoutReference &&
+        (String(p.id || '') === String(preorder.checkoutReference) ||
+          String(p.orderId || '') === String(preorder.checkoutReference))) ||
+      (Array.isArray(p.preorderIds) &&
+        p.preorderIds.some((id: any) => String(id).trim() === preorderId)) ||
+      String(p.orderPayload?.preorderId || '').trim() === preorderId ||
+      (Array.isArray(p.orderPayload?.products) &&
+        p.orderPayload.products.some(
+          (prod: any) => String(prod?.preorderId || '').trim() === preorderId
+        ));
+    if (!matchesPreorder) continue;
+    const candidateObj =
+      p.orderPayload?.shippingAddress ||
+      p.orderPayload?.deliveryAddress ||
+      (typeof p.shippingAddress === 'object' ? p.shippingAddress : null) ||
+      (typeof p.deliveryAddress === 'object' ? p.deliveryAddress : null);
+    if (candidateObj && typeof candidateObj === 'object') {
+      paymentShipObj = candidateObj;
+      break;
+    }
+    const candidateStr = String(
+      p.customerAddress ||
+        (typeof p.shippingAddress === 'string' ? p.shippingAddress : '') ||
+        (typeof p.deliveryAddress === 'string' ? p.deliveryAddress : '') ||
+        ''
+    ).trim();
+    if (candidateStr && !paymentShipString) {
+      paymentShipString = candidateStr;
+    }
+  }
+
+  const id = String(
+    poShipObj?.id || paymentShipObj?.id || `addr_po_${preorderId || 'default'}`
+  ).trim();
+
+  const name = String(
+    poShipObj?.name ||
+      preorder?.deliveryAddressName ||
+      paymentShipObj?.name ||
+      preorder?.customerDisplayName ||
+      preorder?.customerName ||
+      customer?.name ||
+      ''
+  ).trim();
+
+  const mobileNumber = String(
+    poShipObj?.mobileNumber ||
+      poShipObj?.phone ||
+      preorder?.deliveryAddressMobile ||
+      paymentShipObj?.mobileNumber ||
+      paymentShipObj?.phone ||
+      preorder?.customerMobile ||
+      preorder?.customerPhone ||
+      customer?.mobileNumberpluscode ||
+      customer?.mobileNumber ||
+      ''
+  ).trim();
+
+  const email = String(
+    poShipObj?.email ||
+      preorder?.deliveryAddressEmail ||
+      paymentShipObj?.email ||
+      preorder?.customerEmail ||
+      customer?.email ||
+      ''
+  ).trim();
+
+  const addressLine = String(
+    poShipObj?.addressLine ||
+      poShipObj?.address ||
+      preorder?.deliveryAddressLine ||
+      paymentShipObj?.addressLine ||
+      paymentShipObj?.address ||
+      poShipString ||
+      paymentShipString ||
+      customer?.address ||
+      ''
+  ).trim();
+
+  const city = String(
+    poShipObj?.city ||
+      preorder?.deliveryCity ||
+      paymentShipObj?.city ||
+      customer?.city ||
+      ''
+  ).trim();
+
+  const district = String(
+    poShipObj?.district ||
+      preorder?.deliveryDistrict ||
+      paymentShipObj?.district ||
+      customer?.district ||
+      ''
+  ).trim();
+
+  const state = String(
+    poShipObj?.state ||
+      preorder?.deliveryState ||
+      paymentShipObj?.state ||
+      customer?.state ||
+      ''
+  ).trim();
+
+  const pincode = String(
+    poShipObj?.pincode ||
+      preorder?.deliveryPincode ||
+      paymentShipObj?.pincode ||
+      customer?.pincode ||
+      ''
+  ).trim();
+
+  const explicitFormatted = String(
+    preorder?.formattedDeliveryAddress ||
+      poShipObj?.formattedAddress ||
+      paymentShipObj?.formattedAddress ||
+      ''
+  ).trim();
+
+  const computedFormatted = formatShippingAddressDetails({
+    name,
+    mobileNumber,
+    addressLine,
+    city,
+    district,
+    state,
+    pincode,
+    formattedAddress: explicitFormatted,
+  });
+
+  const formattedAddress =
+    addressLine || city || district || state || pincode
+      ? computedFormatted || explicitFormatted
+      : explicitFormatted;
+
+  return {
+    id,
+    name,
+    mobileNumber,
+    email,
+    addressLine,
+    city,
+    district,
+    state,
+    pincode,
+    formattedAddress,
+  };
+}
+
+/**
  * Builds a normalized `PreorderGridRow` for the Admin Grid & Details API.
  */
 export function buildPreorderGridRow(params: {
@@ -1197,16 +1426,34 @@ export function buildPreorderGridRow(params: {
   customer?: any;
   product?: any;
   salesOrder?: any;
+  payments?: any[];
   actorRole: UserRole;
   canConvert: boolean;
 }): PreorderGridRow {
-  const { preorder, reconciliation, eligibility, customer, product, salesOrder, actorRole, canConvert } = params;
+  const {
+    preorder,
+    reconciliation,
+    eligibility,
+    customer,
+    product,
+    salesOrder,
+    payments = [],
+    actorRole,
+    canConvert,
+  } = params;
   const preorderId = String(preorder.preorderId || preorder.id || '').trim();
+
+  const shippingAddressDetails = resolvePreorderShippingAddress({
+    preorder,
+    customer,
+    payments,
+  });
 
   const rawCustomerName = String(
     preorder.customerDisplayName ||
       preorder.customerName ||
       customer?.name ||
+      shippingAddressDetails.name ||
       reconciliation.paymentsTableTransactions[0]?.checkoutReference ||
       'Customer'
   ).trim();
@@ -1215,9 +1462,12 @@ export function buildPreorderGridRow(params: {
       customer?.mobileNumberpluscode ||
       customer?.mobileNumber ||
       customer?.phone ||
+      shippingAddressDetails.mobileNumber ||
       ''
   ).trim();
-  const rawEmail = String(preorder.customerEmail || customer?.email || '').trim();
+  const rawEmail = String(
+    preorder.customerEmail || customer?.email || shippingAddressDetails.email || ''
+  ).trim();
 
   const salesOrderId = String(preorder.salesOrderId || salesOrder?.id || '').trim() || null;
   const salesOrderNumber =
@@ -1233,6 +1483,8 @@ export function buildPreorderGridRow(params: {
     customerName: rawCustomerName,
     customerMobile: maskSensitiveValue(rawMobile, 'phone', actorRole),
     customerEmail: maskSensitiveValue(rawEmail, 'email', actorRole),
+    shippingAddress: shippingAddressDetails.formattedAddress,
+    shippingAddressDetails,
     productId: String(preorder.productId || product?.id || ''),
     productName: String(
       preorder.productNameSnapshot || preorder.productName || product?.name || 'Product'
@@ -1344,44 +1596,52 @@ export function buildSalesOrderFromPreorder(params: {
     gstRate > 0 ? roundCurrency(totalValue / (1 + gstRate / 100)) : totalValue;
   const gstAmount = roundCurrency(totalValue - taxableValue);
 
-  const shippingFromPayment = primaryPaymentDoc?.orderPayload?.shippingAddress || null;
+  const resolvedShipping = resolvePreorderShippingAddress({
+    preorder,
+    customer,
+    payments: primaryPaymentDoc ? [primaryPaymentDoc] : [],
+  });
   const customerId = String(
     preorder.customerId || customer?.id || customer?.customerId || preorder.userId || ''
   ).trim();
   const customerName = String(
     customer?.name ||
       preorder.customerDisplayName ||
+      resolvedShipping.name ||
       primaryPaymentDoc?.customerName ||
-      shippingFromPayment?.name ||
       'Customer'
   ).trim();
   const customerEmail = String(
     customer?.email ||
+      preorder.customerEmail ||
+      resolvedShipping.email ||
       primaryPaymentDoc?.customerEmail ||
-      shippingFromPayment?.email ||
       ''
   ).trim();
   const customerMobile = String(
     customer?.mobileNumberpluscode ||
       customer?.mobileNumber ||
+      preorder.customerMobile ||
+      resolvedShipping.mobileNumber ||
       primaryPaymentDoc?.customerMobile ||
       primaryPaymentDoc?.phone ||
-      shippingFromPayment?.mobileNumber ||
       ''
   ).trim();
 
-  const shippingAddress = shippingFromPayment || {
-    id: `addr_po_${preorderId}`,
+  const shippingAddress = {
+    id: resolvedShipping.id || `addr_po_${preorderId}`,
     customerId,
     userId: String(preorder.userId || customer?.authUid || customerId),
-    name: customerName,
-    mobileNumber: customerMobile,
-    email: customerEmail,
-    addressLine: String(customer?.address || primaryPaymentDoc?.deliveryAddress || ''),
-    city: String(customer?.district || ''),
-    district: String(customer?.district || ''),
-    state: String(customer?.state || 'Kerala'),
-    pincode: String(customer?.pincode || ''),
+    name: resolvedShipping.name || customerName,
+    mobileNumber: resolvedShipping.mobileNumber || customerMobile,
+    email: resolvedShipping.email || customerEmail,
+    addressLine: resolvedShipping.addressLine,
+    address: resolvedShipping.formattedAddress || resolvedShipping.addressLine,
+    city: resolvedShipping.city || resolvedShipping.district,
+    district: resolvedShipping.district || resolvedShipping.city,
+    state: resolvedShipping.state || 'Kerala',
+    pincode: resolvedShipping.pincode,
+    formattedAddress: resolvedShipping.formattedAddress,
     isDefault: true,
   };
 
@@ -1801,6 +2061,7 @@ export class PreorderManagementService {
         customer,
         product,
         salesOrder,
+        payments,
         actorRole: actor.role,
         canConvert: actor.canConvertPreorders,
       });
@@ -1995,6 +2256,7 @@ export class PreorderManagementService {
       customer,
       product,
       salesOrder: linkedSalesOrder,
+      payments,
       actorRole: actor.role,
       canConvert: actor.canConvertPreorders,
     });
@@ -2046,15 +2308,18 @@ export class PreorderManagementService {
           customerEmail: row.customerEmail,
           shippingAddress:
             actor.role === 'Admin' || actor.role === 'Sales' || actor.role === 'Support'
-              ? String(customer?.address || '')
+              ? row.shippingAddress || String(customer?.address || '')
               : '***',
           address:
             actor.role === 'Admin' || actor.role === 'Sales' || actor.role === 'Support'
-              ? String(customer?.address || '')
+              ? row.shippingAddress || String(customer?.address || '')
               : '***',
-          district: String(customer?.district || ''),
-          state: String(customer?.state || ''),
-          pincode: String(customer?.pincode || ''),
+          addressLine: row.shippingAddressDetails.addressLine,
+          city: row.shippingAddressDetails.city,
+          district: row.shippingAddressDetails.district || String(customer?.district || ''),
+          state: row.shippingAddressDetails.state || String(customer?.state || ''),
+          pincode: row.shippingAddressDetails.pincode || String(customer?.pincode || ''),
+          shippingAddressDetails: row.shippingAddressDetails,
         },
       },
       paymentSummary: reconciliation,
@@ -2186,7 +2451,13 @@ export class PreorderManagementService {
     const preorderId = validatePreorderIdParam(rawId);
 
     // Reject unknown or forbidden client-supplied authoritative fields (Section 7)
-    const allowedBodyFields = new Set(['idempotencyKey', 'notes', 'bookingId', 'preorderId']);
+    const allowedBodyFields = new Set([
+      'idempotencyKey',
+      'notes',
+      'bookingId',
+      'preorderId',
+      'shippingAddress',
+    ]);
     if (body && typeof body === 'object' && !Array.isArray(body)) {
       const unknownKeys = Object.keys(body as Record<string, any>).filter(
         (k) => !allowedBodyFields.has(k)
@@ -2207,6 +2478,11 @@ export class PreorderManagementService {
         );
       }
     }
+
+    const bodyShippingAddress =
+      body && typeof body === 'object' && (body as any).shippingAddress && typeof (body as any).shippingAddress === 'object'
+        ? (body as any).shippingAddress
+        : null;
 
     const idempotencyKey = String(
       (body as any)?.idempotencyKey || headerIdempotencyKey || ''
@@ -2449,8 +2725,53 @@ export class PreorderManagementService {
           : null;
 
         const nowIso = new Date().toISOString();
+        let shippingUpdatesOnPreorder: Record<string, any> = {};
+        let effectivePreorderData = preorderData;
+        if (bodyShippingAddress) {
+          const mergedShip = resolvePreorderShippingAddress({
+            preorder: {
+              ...preorderData,
+              shippingAddress: {
+                ...(typeof preorderData.shippingAddress === 'object'
+                  ? preorderData.shippingAddress
+                  : {}),
+                ...bodyShippingAddress,
+              },
+              deliveryAddressLine:
+                bodyShippingAddress.addressLine ?? preorderData.deliveryAddressLine,
+              deliveryCity: bodyShippingAddress.city ?? preorderData.deliveryCity,
+              deliveryDistrict: bodyShippingAddress.district ?? preorderData.deliveryDistrict,
+              deliveryState: bodyShippingAddress.state ?? preorderData.deliveryState,
+              deliveryPincode: bodyShippingAddress.pincode ?? preorderData.deliveryPincode,
+              deliveryAddressName: bodyShippingAddress.name ?? preorderData.deliveryAddressName,
+              deliveryAddressMobile:
+                bodyShippingAddress.mobileNumber ?? preorderData.deliveryAddressMobile,
+              deliveryAddressEmail: bodyShippingAddress.email ?? preorderData.deliveryAddressEmail,
+            },
+            customer: customerData,
+            payments: primaryPaymentDoc ? [primaryPaymentDoc] : [],
+          });
+          shippingUpdatesOnPreorder = {
+            shippingAddress: mergedShip,
+            deliveryAddress: mergedShip,
+            formattedDeliveryAddress: mergedShip.formattedAddress,
+            deliveryAddressName: mergedShip.name,
+            deliveryAddressMobile: mergedShip.mobileNumber,
+            deliveryAddressEmail: mergedShip.email,
+            deliveryAddressLine: mergedShip.addressLine,
+            deliveryCity: mergedShip.city,
+            deliveryDistrict: mergedShip.district,
+            deliveryState: mergedShip.state,
+            deliveryPincode: mergedShip.pincode,
+          };
+          effectivePreorderData = {
+            ...preorderData,
+            ...shippingUpdatesOnPreorder,
+          };
+        }
+
         const salesOrderPayload = buildSalesOrderFromPreorder({
-          preorder: preorderData,
+          preorder: effectivePreorderData,
           reconciliation,
           customer: customerData,
           product: productData,
@@ -2473,6 +2794,7 @@ export class PreorderManagementService {
 
         // Update preorders/{preorderId} with minimal additive conversion fields
         const preorderUpdates = {
+          ...shippingUpdatesOnPreorder,
           processingStatus: 'processed',
           conversionStatus: 'CONVERTED',
           salesOrderId: salesOrderPayload.id,
@@ -2637,6 +2959,114 @@ export class PreorderManagementService {
       );
     }
   }
+  /**
+   * Updates the shipping / delivery address on a pre-order record and appends an audit event.
+   */
+  async updatePreorderShippingAddress(
+    actor: AuthenticatedAdminActor,
+    rawId: unknown,
+    body: unknown
+  ): Promise<{
+    preorderId: string;
+    shippingAddress: string;
+    shippingAddressDetails: PreorderShippingAddressDetails;
+    updatedAt: string;
+  }> {
+    if (!actor.canConvertPreorders && actor.role !== 'Admin') {
+      throw new PreorderHttpError(
+        403,
+        'FORBIDDEN',
+        'Your role does not have permission to update pre-order shipping addresses.'
+      );
+    }
+
+    const preorderId = validatePreorderIdParam(rawId);
+    const preorderRef = this.deps.db.collection(PREORDERS_COLLECTION).doc(preorderId);
+    const preorderSnap = await preorderRef.get();
+    if (!preorderSnap.exists) {
+      throw new PreorderHttpError(404, 'NOT_FOUND', `Pre-order '${preorderId}' not found.`);
+    }
+
+    const preorderData: any = { id: preorderSnap.id, ...preorderSnap.data() };
+    const input: any =
+      body && typeof body === 'object'
+        ? (body as any).shippingAddress && typeof (body as any).shippingAddress === 'object'
+          ? (body as any).shippingAddress
+          : body
+        : {};
+
+    const currentShip = resolvePreorderShippingAddress({ preorder: preorderData });
+    const updatedDetails: PreorderShippingAddressDetails = {
+      id: String(input.id || currentShip.id || `addr_po_${preorderId}`).trim(),
+      name: String(input.name ?? currentShip.name ?? '').trim(),
+      mobileNumber: String(input.mobileNumber ?? input.phone ?? currentShip.mobileNumber ?? '').trim(),
+      email: String(input.email ?? currentShip.email ?? '').trim(),
+      addressLine: String(input.addressLine ?? input.address ?? currentShip.addressLine ?? '').trim(),
+      city: String(input.city ?? currentShip.city ?? '').trim(),
+      district: String(input.district ?? currentShip.district ?? '').trim(),
+      state: String(input.state ?? currentShip.state ?? 'Kerala').trim(),
+      pincode: String(input.pincode ?? currentShip.pincode ?? '').trim(),
+      formattedAddress: '',
+    };
+    updatedDetails.formattedAddress =
+      formatShippingAddressDetails(updatedDetails) ||
+      String(input.formattedAddress || currentShip.formattedAddress || '').trim();
+
+    const nowIso = new Date().toISOString();
+    const updates: Record<string, any> = {
+      shippingAddress: updatedDetails,
+      deliveryAddress: updatedDetails,
+      formattedDeliveryAddress: updatedDetails.formattedAddress,
+      deliveryAddressName: updatedDetails.name,
+      deliveryAddressMobile: updatedDetails.mobileNumber,
+      deliveryAddressEmail: updatedDetails.email,
+      deliveryAddressLine: updatedDetails.addressLine,
+      deliveryCity: updatedDetails.city,
+      deliveryDistrict: updatedDetails.district,
+      deliveryState: updatedDetails.state,
+      deliveryPincode: updatedDetails.pincode,
+      updatedAt: nowIso,
+    };
+
+    await preorderRef.update(updates);
+
+    if (preorderData.salesOrderId) {
+      const soRef = this.deps.db
+        .collection(SALES_ORDERS_COLLECTION)
+        .doc(String(preorderData.salesOrderId));
+      const soSnap = await soRef.get().catch(() => null);
+      if (soSnap && soSnap.exists) {
+        await soRef
+          .update({
+            shippingAddress: {
+              ...updatedDetails,
+              customerId: String(preorderData.customerId || ''),
+              userId: String(preorderData.userId || ''),
+              address: updatedDetails.formattedAddress || updatedDetails.addressLine,
+              isDefault: true,
+            },
+            updatedAt: nowIso,
+          })
+          .catch(() => {});
+      }
+    }
+
+    await this.appendPreorderEvent({
+      preorderId,
+      actorId: actor.uid,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      eventType: 'preorder.shipping_address_updated',
+      message: `Shipping address updated to: ${updatedDetails.formattedAddress}`,
+    }).catch(() => {});
+
+    return {
+      preorderId,
+      shippingAddress: updatedDetails.formattedAddress,
+      shippingAddressDetails: updatedDetails,
+      updatedAt: nowIso,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2772,6 +3202,24 @@ export function registerPreorderManagementRoutes(
   };
   app.post('/api/admin/preorders/:id/convert-to-sales-order', handleConvertToSalesOrder);
   app.post('/api/v1/admin/preorders/:id/convert-to-sales-order', handleConvertToSalesOrder);
+
+  // 6. PUT/PATCH /api/admin/preorders/:id/shipping-address — Authorized shipping address update
+  const handleUpdateShippingAddress = async (req: express.Request, res: express.Response) => {
+    try {
+      const actor = await service.resolveAuthenticatedAdmin(req);
+      const result = await service.updatePreorderShippingAddress(actor, req.params.id, req.body);
+      return res.json({
+        success: true,
+        ...result,
+      });
+    } catch (err) {
+      return sendError(res, err);
+    }
+  };
+  app.put('/api/admin/preorders/:id/shipping-address', handleUpdateShippingAddress);
+  app.patch('/api/admin/preorders/:id/shipping-address', handleUpdateShippingAddress);
+  app.put('/api/v1/admin/preorders/:id/shipping-address', handleUpdateShippingAddress);
+  app.patch('/api/v1/admin/preorders/:id/shipping-address', handleUpdateShippingAddress);
 
   return service;
 }

@@ -40,9 +40,99 @@ export class UserRepository extends BaseRepository<User> {
   }
 }
 
+import { doc, getDoc, getDocs, collection, runTransaction, query, where, limit } from 'firebase/firestore';
+import { db } from '../firebase';
+
+const EIGHT_DIGIT_SKU_REGEX = /^[0-9]{8}$/;
+const MIN_EIGHT_DIGIT_SKU = 10000001;
+const MAX_EIGHT_DIGIT_SKU = 99999999;
+
+export async function allocateClientEightDigitSku(): Promise<string> {
+  try {
+    const res = await fetch('/api/admin/products/allocate-sku', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.sku && EIGHT_DIGIT_SKU_REGEX.test(String(data.sku))) {
+        return String(data.sku);
+      }
+    }
+  } catch {
+    // Fall back to direct Firestore transaction
+  }
+
+  const productsSnap = await getDocs(collection(db, 'products'));
+  let highest = MIN_EIGHT_DIGIT_SKU - 1;
+  const used = new Set<string>();
+  productsSnap.docs.forEach((d) => {
+    const raw = String(d.data()?.sku ?? '').trim();
+    if (raw) used.add(raw);
+    if (EIGHT_DIGIT_SKU_REGEX.test(raw)) {
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n) && n > highest && n < MAX_EIGHT_DIGIT_SKU) {
+        highest = n;
+      }
+    }
+  });
+
+  const seqRef = doc(db, 'product_sku_sequences', 'default');
+  return runTransaction(db, async (tx) => {
+    const seqSnap = await tx.get(seqRef);
+    const stored = seqSnap.exists() ? Number(seqSnap.data()?.currentSkuNumber || 0) : 0;
+    let candidate = Math.max(MIN_EIGHT_DIGIT_SKU - 1, highest, stored) + 1;
+    while (candidate <= MAX_EIGHT_DIGIT_SKU) {
+      const candStr = String(candidate).padStart(8, '0');
+      if (!used.has(candStr)) {
+        const colSnap = await getDocs(query(collection(db, 'products'), where('sku', '==', candStr), limit(1)));
+        if (colSnap.empty) {
+          tx.set(
+            seqRef,
+            {
+              currentSkuNumber: candidate,
+              lastAllocatedSku: candStr,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+          return candStr;
+        }
+        used.add(candStr);
+      }
+      candidate += 1;
+    }
+    throw new Error('SKU_RANGE_EXHAUSTED: 8-digit numeric SKU range is exhausted.');
+  });
+}
+
 export class ProductRepository extends BaseRepository<ProductPerformance> {
   constructor() {
     super('products');
+  }
+
+  override async create(data: Omit<ProductPerformance, 'id'> & { id?: string }): Promise<ProductPerformance> {
+    const incomingSku = String(data.sku ?? '').trim();
+    const finalSku = EIGHT_DIGIT_SKU_REGEX.test(incomingSku)
+      ? incomingSku
+      : await allocateClientEightDigitSku();
+    return super.create({ ...data, sku: finalSku });
+  }
+
+  override async update(id: string, updates: Partial<ProductPerformance>): Promise<void> {
+    const sanitized = { ...updates };
+    if (sanitized.sku !== undefined) {
+      try {
+        const existingSnap = await getDoc(doc(db, 'products', id));
+        if (existingSnap.exists()) {
+          const existingSku = String(existingSnap.data()?.sku ?? '').trim();
+          if (existingSku) {
+            // Section 19.2: Existing SKU is immutable once assigned
+            sanitized.sku = existingSku;
+          }
+        }
+      } catch {
+        // Keep sanitized.sku if doc check fails
+      }
+    }
+    return super.update(id, sanitized);
   }
 }
 

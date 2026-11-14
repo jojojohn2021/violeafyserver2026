@@ -24,6 +24,8 @@ import { sendOrderStageWhatsAppNotification } from "./src/services/whatsappServi
 import { registerProductDetailsRoutes, PRODUCT_DETAILS_COLLECTION } from "./src/services/productDetailsRoutes";
 import { registerCustomerReviewRoutes, CUSTOMER_REVIEWS_COLLECTION, CUSTOMER_REVIEW_AGGREGATES_COLLECTION } from "./src/services/customerReviewService";
 import { registerPreorderManagementRoutes, PREORDERS_COLLECTION, PREORDER_IDEMPOTENCY_COLLECTION, PREORDER_EVENTS_COLLECTION, PAYMENT_ALLOCATIONS_COLLECTION } from "./src/services/preorderManagementService";
+import { registerAIProductContentRoutes } from "./src/services/aiProductContentService";
+import { allocateUniqueEightDigitSku, enforceSkuImmutabilityOnUpdate, isValidEightDigitNumericSku } from "./src/services/skuAllocationService";
 
 dotenv.config();
 
@@ -627,8 +629,15 @@ app.post('/api/products', requireAuthenticatedRequest, upload.single('image'), a
     const body = req.body || {};
     const productId = String(body.id || body.productId || Date.now());
 
-    const payload: any = { ...body, id: productId };
+    // Section 19: Auto-generate unique 8-digit numeric SKU on new product creation
+    let assignedSku = String(body.sku || '').trim();
+    if (!isValidEightDigitNumericSku(assignedSku) && adminDb) {
+      assignedSku = await allocateUniqueEightDigitSku(adminDb);
+    }
+
+    const payload: any = { ...body, id: productId, sku: assignedSku };
     payload.preorderactive = body.preorderactive === true || String(body.preorderactive).toLowerCase() === 'true';
+    payload.isAyurvedicProduct = body.isAyurvedicProduct === true || String(body.isAyurvedicProduct).toLowerCase() === 'true';
     for (const key of ['uniqueSpec1', 'uniqueSpec2', 'uniqueSpec3', 'uniqueSpec4']) {
       payload[key] = body[key] !== undefined && body[key] !== null ? String(body[key]).trim() : '';
     }
@@ -730,6 +739,24 @@ registerPreorderManagementRoutes(app, {
     await operationsService.triggerStageNotifications('Order Placed', orderId);
   },
 });
+registerAIProductContentRoutes(app, {
+  db: adminDb,
+  auth: adminAuth,
+  storage: adminStorage,
+});
+
+// Section 19: Next Unique 8-Digit Numeric SKU Allocation Endpoint
+const handleAllocateNextProductSku = async (_req: express.Request, res: express.Response) => {
+  try {
+    if (!adminDb) return res.status(500).json({ error: 'Firestore Admin DB not initialized' });
+    const sku = await allocateUniqueEightDigitSku(adminDb);
+    return res.json({ success: true, sku });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Failed to allocate unique 8-digit SKU' });
+  }
+};
+app.post('/api/admin/products/allocate-sku', handleAllocateNextProductSku);
+app.post('/api/v1/admin/products/allocate-sku', handleAllocateNextProductSku);
 
 app.post("/api/payment/test-connection", async (req, res) => {
   try {
@@ -3163,9 +3190,24 @@ app.get("/api/db/:collection/:id", async (req, res) => {
 
 app.post("/api/db/:collection", async (req, res) => {
   try {
-    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
-    await saveCollectionDoc(req.params.collection, req.body);
-    return res.json({ success: true });
+    const colName = String(req.params.collection);
+    if (protectedOperationCollections.has(colName.toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
+    let docBody = { ...(req.body || {}) };
+    if (colName === 'products' && adminDb) {
+      const prodId = String(docBody.id || docBody._id || '');
+      const existingSnap = prodId ? await adminDb.collection('products').doc(prodId).get() : null;
+      if (existingSnap && existingSnap.exists) {
+        const immutability = enforceSkuImmutabilityOnUpdate(existingSnap.data() as any, docBody, true);
+        if (!immutability.allowed) {
+          return res.status(400).json({ error: immutability.error });
+        }
+        docBody = immutability.sanitizedPatch;
+      } else if (!isValidEightDigitNumericSku(docBody.sku)) {
+        docBody.sku = await allocateUniqueEightDigitSku(adminDb);
+      }
+    }
+    await saveCollectionDoc(colName, docBody);
+    return res.json({ success: true, sku: docBody.sku });
   } catch (err: any) {
     return res.status(400).json({ error: err?.message });
   }

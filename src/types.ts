@@ -151,6 +151,65 @@ export interface ProductPerformance {
   rating?: number;
   reviewsCount?: number;
   videos?: string[];
+
+  // =========================================================================
+  // V5 Product Master Extension: General E-Commerce & Multilingual Fields (17)
+  // =========================================================================
+  title?: string;
+  botanicalName?: string;
+  botanicalFamily?: string;
+  productForm?: string;
+  englishName?: string;
+  malayalamName?: string;
+  hindiName?: string;
+  tamilName?: string;
+  kannadaName?: string;
+  teluguName?: string;
+  keyFeatures?: string[];
+  culinaryUses?: string[];
+  storageInstructions?: string;
+  healthBenefits?: AIHealthBenefit[] | string[];
+  nutritionalBenefits?: string[];
+  generalPrecautions?: string[];
+  healthReferences?: AIContentReference[] | string[];
+  isAyurvedicProduct?: boolean;
+
+  // =========================================================================
+  // V5 Product Master Extension: Conditional Ayurvedic Fields (21)
+  // =========================================================================
+  sanskritName?: string;
+  ayurvedicClassification?: string;
+  ayurvedicDescription?: string;
+  rasa?: string[];
+  guna?: string[];
+  virya?: string;
+  vipaka?: string;
+  prabhava?: string;
+  vataEffect?: string;
+  pittaEffect?: string;
+  kaphaEffect?: string;
+  medicinalPartsUsed?: string[];
+  ayurvedicMedicinalUses?: string[];
+  ayurvedicFormulations?: string[];
+  ayurvedicUsageMethods?: string[];
+  anupana?: string[];
+  ayurvedicDosage?: string;
+  ayurvedicPrecautions?: string[];
+  contraindications?: string[];
+  drugInteractions?: string[];
+  ayurvedicReferences?: AIContentReference[] | string[];
+
+  // =========================================================================
+  // V8 Product Master Extension: Taxation, Web Price Research & Pack Sizes (8)
+  // =========================================================================
+  lowestWebPrice?: number | null;
+  highestWebPrice?: number | null;
+  webPriceCurrency?: string;
+  webPriceSources?: WebPriceSourceOffer[];
+  webPriceCheckedAt?: string | null;
+  availablePackingSizes?: string[];
+  gstReference?: string;
+  gstVerifiedAt?: string | null;
 }
 
 export interface CustomerPerformance {
@@ -697,6 +756,303 @@ export interface CommissionTransaction {
     reversal_transaction_id?: string;
   };
 }
+
+// ============================================================================
+// LeafyEarth | AI Product Content Module – V8 Types
+// ============================================================================
+
+export type AIProductDraftStatus =
+  | 'DRAFT'
+  | 'IN_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'APPLIED'
+  | 'FAILED';
+
+export type AIProductImageStatus = 'GENERATED' | 'APPROVED' | 'REJECTED' | 'FAILED';
+
+export type AIProductResearchStatus = 'DRAFT' | 'APPROVED' | 'REJECTED' | 'FAILED';
+
+export type AIEvidenceLevel =
+  | 'traditional_use'
+  | 'nutritional'
+  | 'preliminary_study'
+  | 'human_study'
+  | 'insufficient_evidence';
+
+export type AIReviewStatus = 'pending_review' | 'approved' | 'rejected';
+
+export type AIAyurvedaApplicability = 'applicable' | 'not_applicable' | 'uncertain';
+
+export interface AIContentReference {
+  id: string;
+  source_type: string;
+  title: string;
+  author_or_body: string;
+  section_or_citation: string;
+  url: string | null;
+  verification_note: string;
+}
+
+export interface AIHealthBenefit {
+  claim: string;
+  evidence_level: AIEvidenceLevel;
+  reference_ids: string[];
+  review_status: AIReviewStatus;
+}
+
+export interface AIAyurvedaDoshaEffects {
+  vata: string;
+  pitta: string;
+  kapha: string;
+}
+
+export interface AIAyurvedaContent {
+  sanskrit_name: string;
+  classification: string;
+  classical_description: string;
+  rasa: string[];
+  guna: string[];
+  virya: string;
+  vipaka: string;
+  prabhava: string;
+  dosha_effects: AIAyurvedaDoshaEffects;
+  parts_used: string[];
+  medicinal_uses: string[];
+  classical_formulations: string[];
+  usage_methods: string[];
+  anupana: string[];
+  typical_dosage_note: string;
+  precautions: string[];
+  contraindications: string[];
+  interactions: string[];
+  references: AIContentReference[];
+}
+
+export interface AIProductTranslations {
+  en: { name: string };
+  ml: { name: string };
+  hi: { name: string };
+  ta: { name: string };
+  kn: { name: string };
+  te: { name: string };
+}
+
+export interface AIProductContentPayload {
+  english_product_name: string;
+  botanical_name: string;
+  family: string;
+  category: string;
+  form: string;
+  title: string;
+  description: string;
+  key_features: string[];
+  culinary_uses: string[];
+  storage_instructions: string;
+  translations: AIProductTranslations;
+  health_benefits: AIHealthBenefit[];
+  nutritional_benefits: string[];
+  safety_precautions: string[];
+  ayurveda_applicability: AIAyurvedaApplicability;
+  ayurveda: AIAyurvedaContent | null;
+  references: AIContentReference[];
+  review_flags: string[];
+}
+
+export interface AIUsageMetadata {
+  provider: string;
+  project_name: string;
+  model: string;
+  prompt_version: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  latency_ms: number;
+  live_api_used: boolean;
+}
+
+export interface AIProductVersion {
+  id: string;
+  draft_id: string;
+  version_no: number;
+  generated_payload: AIProductContentPayload;
+  edited_payload: AIProductContentPayload;
+  model: string;
+  prompt_version: string;
+  usage_metadata: AIUsageMetadata;
+  generated_at: string;
+  edited_by?: string | null;
+  edited_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+}
+
+export interface AIProductImage {
+  id: string;
+  draft_id: string;
+  version_id: string;
+  storage_key: string;
+  preview_url: string;
+  mime_type: string;
+  width: number;
+  height: number;
+  background_hex: string;
+  checksum: string;
+  prompt: string;
+  model: string;
+  generation_metadata: {
+    provider: string;
+    project_name: string;
+    product_form: string;
+    packaging_style: string;
+    estimated_cost_usd: number;
+    latency_ms: number;
+    live_api_used: boolean;
+    source_type: 'ai_generated' | 'manual_upload';
+  };
+  status: AIProductImageStatus;
+  rejection_reason?: string | null;
+  created_by: string;
+  created_at: string;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+}
+
+export interface WebPriceSourceOffer {
+  siteName: string;
+  productTitle: string;
+  packSize: string;
+  price: number;
+  mrp: number | null;
+  currency: string;
+  inStock: boolean;
+  sourceUrl: string;
+  checkedAt: string;
+  included: boolean;
+  matchConfidence: 'high' | 'medium' | 'low';
+}
+
+export interface AIProductTaxationResearch {
+  hsnCode: string;
+  gstRatePercent: number;
+  gstReference: string;
+  confidence: 'high' | 'medium' | 'low';
+  needsManualVerification: boolean;
+  verifiedBy: string | null;
+  verifiedAt: string | null;
+}
+
+export interface AIProductPackingResearch {
+  selectedPackingSize: string;
+  unit: string;
+  availablePackingSizes: string[];
+}
+
+export interface AIProductMarketResearch {
+  comparedPackingSize: string;
+  currency: string;
+  lowestPrice: number | null;
+  highestPrice: number | null;
+  checkedAt: string;
+  searchStatus: 'verified_offers' | 'manual_entry' | 'insufficient_verified_web_price_data';
+  offers: WebPriceSourceOffer[];
+}
+
+export interface AIProductResearchRecord {
+  id: string;
+  draft_id: string;
+  version_id: string;
+  taxation: AIProductTaxationResearch;
+  packing: AIProductPackingResearch;
+  marketResearch: AIProductMarketResearch;
+  status: AIProductResearchStatus;
+  rejection_reason?: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+}
+
+export interface AIProductDraft {
+  id: string;
+  source_product_name: string;
+  master_product_id: string | null;
+  master_product_name?: string | null;
+  master_product_sku?: string | null;
+  category_hint?: string | null;
+  brand_hint?: string | null;
+  status: AIProductDraftStatus;
+  current_version_id: string;
+  approved_version_id: string | null;
+  approved_image_id: string | null;
+  approved_research_id: string | null;
+  rejection_reason?: string | null;
+  last_synced_at?: string | null;
+  created_by: string;
+  created_by_email?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIProductSyncLog {
+  id: string;
+  draft_id: string;
+  version_id: string;
+  master_product_id: string;
+  idempotency_key: string;
+  selected_fields: string[];
+  image_action?: 'none' | 'replace_primary' | 'append_gallery';
+  approved_image_id?: string | null;
+  approved_research_id?: string | null;
+  before_snapshot: Record<string, any>;
+  after_snapshot: Record<string, any>;
+  result: 'SUCCESS' | 'FAILED';
+  error_message?: string | null;
+  applied_by: string;
+  applied_by_email?: string;
+  applied_at: string;
+}
+
+export interface AIProductEvent {
+  id: string;
+  draft_id: string;
+  event_type:
+    | 'DRAFT_GENERATED'
+    | 'DRAFT_EDITED'
+    | 'DRAFT_REGENERATED'
+    | 'SUBMITTED_FOR_REVIEW'
+    | 'CONTENT_APPROVED'
+    | 'CONTENT_REJECTED'
+    | 'IMAGE_GENERATED'
+    | 'IMAGE_UPLOADED'
+    | 'IMAGE_APPROVED'
+    | 'IMAGE_REJECTED'
+    | 'RESEARCH_GENERATED'
+    | 'RESEARCH_UPDATED'
+    | 'RESEARCH_APPROVED'
+    | 'RESEARCH_REJECTED'
+    | 'MASTER_SYNC_APPLIED'
+    | 'MASTER_SYNC_FAILED';
+  actor_id: string;
+  actor_email?: string;
+  actor_role?: string;
+  metadata: Record<string, any>;
+  created_at: string;
+}
+
+export type AIProductSubmenuId =
+  | 'generate'
+  | 'drafts'
+  | 'review'
+  | 'images'
+  | 'sync'
+  | 'history'
+  | 'usage'
+  | 'config'
+  | 'research';
+
 
 
 

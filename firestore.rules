@@ -131,6 +131,29 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // AI Product Content Module (V8) isolated staging & audit collections + SKU sequences
+    match /ai_product_drafts/{draftId} {
+      allow read, write: if true;
+    }
+    match /ai_product_versions/{versionId} {
+      allow read, write: if true;
+    }
+    match /ai_product_images/{imageId} {
+      allow read, write: if true;
+    }
+    match /ai_product_research/{researchId} {
+      allow read, write: if true;
+    }
+    match /ai_product_sync_logs/{logId} {
+      allow read, write: if true;
+    }
+    match /ai_product_events/{eventId} {
+      allow read, write: if true;
+    }
+    match /product_sku_sequences/{seqId} {
+      allow read, write: if true;
+    }
+
     // Performance / commission collections
     match /performance_levels/{levelId} {
       allow read, write: if true;

@@ -1971,6 +1971,110 @@ export default function ShoppingPlatformView() {
               </div>
             </div>
 
+            {/* V5 & V8 Synchronized Product Master Profile (General, 6-Language, Health & Conditional Ayurveda) */}
+            {(selectedProduct.botanicalName ||
+              selectedProduct.malayalamName ||
+              selectedProduct.hindiName ||
+              (selectedProduct.keyFeatures && selectedProduct.keyFeatures.length > 0) ||
+              (selectedProduct.healthBenefits && selectedProduct.healthBenefits.length > 0) ||
+              selectedProduct.isAyurvedicProduct) && (
+              <div className="border-t pt-4 dark:border-slate-800 space-y-4 text-xs">
+                {(selectedProduct.botanicalName || selectedProduct.productForm) && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedProduct.botanicalName && (
+                      <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 font-semibold italic">
+                        Botanical: {selectedProduct.botanicalName}{' '}
+                        {selectedProduct.botanicalFamily ? `(${selectedProduct.botanicalFamily})` : ''}
+                      </span>
+                    )}
+                    {selectedProduct.productForm && (
+                      <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold">
+                        Form: {selectedProduct.productForm}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {(selectedProduct.malayalamName ||
+                  selectedProduct.hindiName ||
+                  selectedProduct.tamilName ||
+                  selectedProduct.kannadaName ||
+                  selectedProduct.teluguName) && (
+                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+                    {selectedProduct.englishName && (
+                      <div>
+                        <span className="font-bold text-slate-400">EN:</span> {selectedProduct.englishName}
+                      </div>
+                    )}
+                    {selectedProduct.malayalamName && (
+                      <div>
+                        <span className="font-bold text-slate-400">ML:</span> {selectedProduct.malayalamName}
+                      </div>
+                    )}
+                    {selectedProduct.hindiName && (
+                      <div>
+                        <span className="font-bold text-slate-400">HI:</span> {selectedProduct.hindiName}
+                      </div>
+                    )}
+                    {selectedProduct.tamilName && (
+                      <div>
+                        <span className="font-bold text-slate-400">TA:</span> {selectedProduct.tamilName}
+                      </div>
+                    )}
+                    {selectedProduct.kannadaName && (
+                      <div>
+                        <span className="font-bold text-slate-400">KN:</span> {selectedProduct.kannadaName}
+                      </div>
+                    )}
+                    {selectedProduct.teluguName && (
+                      <div>
+                        <span className="font-bold text-slate-400">TE:</span> {selectedProduct.teluguName}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selectedProduct.isAyurvedicProduct && (
+                  <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-2">
+                    <div className="font-black text-emerald-900 uppercase tracking-wider text-[11px]">
+                      Traditional Ayurvedic Profile • {selectedProduct.sanskritName || selectedProduct.name}
+                    </div>
+                    {selectedProduct.ayurvedicDescription && (
+                      <p className="text-slate-700 leading-relaxed">
+                        {selectedProduct.ayurvedicDescription}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-emerald-950">
+                      {selectedProduct.rasa && selectedProduct.rasa.length > 0 && (
+                        <div>
+                          <strong>Rasa:</strong> {selectedProduct.rasa.join(', ')}
+                        </div>
+                      )}
+                      {selectedProduct.guna && selectedProduct.guna.length > 0 && (
+                        <div>
+                          <strong>Guna:</strong> {selectedProduct.guna.join(', ')}
+                        </div>
+                      )}
+                      {selectedProduct.virya && (
+                        <div>
+                          <strong>Virya:</strong> {selectedProduct.virya}
+                        </div>
+                      )}
+                      {selectedProduct.vipaka && (
+                        <div>
+                          <strong>Vipaka:</strong> {selectedProduct.vipaka}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-500 italic pt-1">
+                      Traditional Ayurvedic & wellness information is for educational purposes and is not a
+                      substitute for professional medical advice.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Additional product details (product_details collection); renders nothing if absent */}
             <ProductDetailsDisplay productId={selectedProduct.id} />
 

@@ -5,6 +5,7 @@ import ProductReviewsSection from './ProductReviewsSection';
 import { uploadFileToStorage, uploadProductImage } from '../utils/storageUpload';
 import { auth } from '../firebase';
 import ProductDetailsSection, { ProductDetailsSectionHandle } from './ProductDetailsSection';
+import ProductMasterV8Section, { extractV8FieldsFromProduct, ProductMasterV8Fields } from './ProductMasterV8Section';
 import { 
   LineChart, ShoppingBag, Heart, BarChart3, TrendingUp, Grid, 
   Trash2, Plus, Edit, DollarSign, HelpCircle, Check, Award,
@@ -141,6 +142,7 @@ export default function PerformanceTrackingView() {
   const [editDiscount, setEditDiscount] = useState<number>(0);
   const [editRating, setEditRating] = useState<number>(5);
   const [editReviewsCount, setEditReviewsCount] = useState<number>(0);
+  const [editV8Fields, setEditV8Fields] = useState<ProductMasterV8Fields>(() => extractV8FieldsFromProduct(null));
 
   // New Category Master picture upload states
   const [newMasterCategoryFile, setNewMasterCategoryFile] = useState<File | null>(null);
@@ -238,6 +240,7 @@ export default function PerformanceTrackingView() {
   const [prodDiscount, setProdDiscount] = useState<number>(0);
   const [prodRating, setProdRating] = useState<number>(5);
   const [prodReviewsCount, setProdReviewsCount] = useState<number>(0);
+  const [prodV8Fields, setProdV8Fields] = useState<ProductMasterV8Fields>(() => extractV8FieldsFromProduct(null));
 
   const handleImageUploadAsync = async (file: File, callback: (downloadUrl: string) => void) => {
     if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) {
@@ -1106,7 +1109,8 @@ export default function PerformanceTrackingView() {
       mrp: editMrp,
       discount: editDiscount,
       rating: editRating,
-      reviewsCount: editReviewsCount
+      reviewsCount: editReviewsCount,
+      ...editV8Fields
     });
     if (!productSaved) {
       setIsSavingProduct(false);
@@ -1182,6 +1186,7 @@ export default function PerformanceTrackingView() {
     setEditDiscount(p.discount ?? (p.shopPrice && p.onlinePrice ? Math.max(0, Math.round(((p.shopPrice - p.onlinePrice) / p.shopPrice) * 100)) : 0));
     setEditRating(p.rating ?? 5);
     setEditReviewsCount(p.reviewsCount ?? 0);
+    setEditV8Fields(extractV8FieldsFromProduct(p));
     setProductSaveNotice(null);
   };
 
@@ -1197,8 +1202,8 @@ export default function PerformanceTrackingView() {
       return;
     }
 
-    if (!prodName || !prodSku || !prodHsnCode.trim()) {
-      setSkuError('HSN Code is required.');
+    if (!prodName || !prodHsnCode.trim()) {
+      setSkuError('Product Name and HSN Code are required.');
       return;
     }
     if (prodMrp <= 0) {
@@ -1207,10 +1212,12 @@ export default function PerformanceTrackingView() {
     }
 
     const cleanedSku = prodSku.trim().toUpperCase();
-    const isDuplicate = products.some(p => p.sku.trim().toUpperCase() === cleanedSku);
-    if (isDuplicate) {
-      setSkuError(`SKU PREFIX "${cleanedSku}" is already taken. SKU PREFIX must be unique.`);
-      return;
+    if (cleanedSku) {
+      const isDuplicate = products.some(p => (p.sku || '').trim().toUpperCase() === cleanedSku);
+      if (isDuplicate) {
+        setSkuError(`SKU PREFIX "${cleanedSku}" is already taken. SKU PREFIX must be unique.`);
+        return;
+      }
     }
 
     setSkuError(null);
@@ -1487,7 +1494,8 @@ export default function PerformanceTrackingView() {
         mrp: prodMrp || prodShopPrice,
         discount: prodDiscount || (prodShopPrice && prodOnlinePrice ? Math.max(0, Math.round(((prodShopPrice - prodOnlinePrice) / prodShopPrice) * 100)) : 0),
         rating: prodRating,
-        reviewsCount: prodReviewsCount
+        reviewsCount: prodReviewsCount,
+        ...prodV8Fields
       });
     }
 
@@ -2317,14 +2325,14 @@ export default function PerformanceTrackingView() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">SKU PREFIX:</label>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">SKU (8-DIGIT AUTO):</label>
                   <input 
                     type="text" 
-                    placeholder="e.g. HC-LGC-005" 
-                    value={prodSku}
-                    onChange={e => setProdSku(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    required
+                    placeholder="Auto-generated on save" 
+                    value={prodSku || 'Auto-generated on save'}
+                    readOnly
+                    className="w-full text-xs p-2.5 bg-[#0d0d10] border border-slate-800 text-emerald-400 font-mono rounded-lg cursor-not-allowed opacity-90"
+                    title="8-digit numeric SKU is automatically allocated by the backend on save (Section 19)"
                   />
                 </div>
                 <div>
@@ -3159,6 +3167,9 @@ export default function PerformanceTrackingView() {
                 </div>
               </div>
 
+              {/* Product Master V8 Section (Botanical, 6-Language, Ayurvedic Monograph & Taxation/Market Research) */}
+              <ProductMasterV8Section value={prodV8Fields} onChange={setProdV8Fields} idPrefix="create" />
+
               {/* Product Details (separate product_details collection) */}
               <ProductDetailsSection ref={createDetailsRef} mode="create" disabled={isSavingProduct} />
 
@@ -3909,13 +3920,13 @@ export default function PerformanceTrackingView() {
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">SKU PREFIX:</label>
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">SKU (READ-ONLY):</label>
                         <input 
                           type="text" 
                           value={editSku}
-                          onChange={e => setEditSku(e.target.value)}
-                          className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          required
+                          readOnly
+                          className="w-full text-xs p-2.5 bg-[#0d0d10] border border-slate-800 text-emerald-400 font-mono rounded-lg cursor-not-allowed opacity-90"
+                          title="Existing product SKUs are immutable per Section 19.3"
                         />
                       </div>
                       <div>
@@ -4765,6 +4776,9 @@ export default function PerformanceTrackingView() {
                         />
                       </div>
                     </div>
+
+                    {/* Product Master V8 Section (Botanical, 6-Language, Ayurvedic Monograph & Taxation/Market Research) */}
+                    <ProductMasterV8Section value={editV8Fields} onChange={setEditV8Fields} idPrefix="edit" />
 
                     {/* Product Details (separate product_details collection) */}
                     <ProductDetailsSection key={editingProductId} ref={editDetailsRef} mode="edit" productId={editingProductId} disabled={isSavingProduct} />

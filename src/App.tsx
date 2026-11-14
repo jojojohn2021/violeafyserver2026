@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CRMProvider, useCRM } from './store';
-import { BrandConfig } from './types';
+import { AIProductSubmenuId, BrandConfig } from './types';
 import RoleSelector from './components/RoleSelector';
 import DashboardView from './components/DashboardView';
 import TasksCalendarView from './components/TasksCalendarView';
@@ -25,15 +25,28 @@ import CreateShipmentView from './components/CreateShipmentView';
 import ConfirmDeliveryView from './components/ConfirmDeliveryView';
 import ProductReviewsManagementView from './components/ProductReviewsManagementView';
 import PreOrderManagementView from './components/PreOrderManagementView';
+import AIProductContentView from './components/AIProductContentView';
 
 import { 
   BarChart3, Users, Briefcase, Calendar, TrendingUp, MessageSquare, 
   ShieldCheck, LayoutDashboard, Menu, X, HelpCircle, ShieldAlert, UserCheck, Gift,
   LogOut, Receipt, Coins, Layout, Sparkles, ShoppingBag, Settings, Loader2, PackageCheck,
-  Truck, CheckCircle2, RotateCcw, Package, Star, ClipboardList
+  Truck, CheckCircle2, RotateCcw, Package, Star, ClipboardList, ChevronDown, ChevronRight
 } from 'lucide-react';
 
-type ModuleTab = 'dashboard' | 'customers' | 'sales_orders' | 'preorders' | 'brand_owner_assignment' | 'complete_packing' | 'create_shipment' | 'confirm_delivery' | 'process_return' | 'order_operations' | 'schedules' | 'performance' | 'product_reviews' | 'whatsapp' | 'security' | 'referrals' | 'users' | 'influencer_marketing' | 'shopping' | 'settings';
+type ModuleTab = 'dashboard' | 'customers' | 'sales_orders' | 'preorders' | 'brand_owner_assignment' | 'complete_packing' | 'create_shipment' | 'confirm_delivery' | 'process_return' | 'order_operations' | 'schedules' | 'performance' | 'ai_product_content' | 'product_reviews' | 'whatsapp' | 'security' | 'referrals' | 'users' | 'influencer_marketing' | 'shopping' | 'settings';
+
+const AI_PRODUCT_SUBMENUS: { id: AIProductSubmenuId; label: string }[] = [
+  { id: 'generate', label: 'Generate Product Content' },
+  { id: 'drafts', label: 'AI Generated Content' },
+  { id: 'review', label: 'Review & Edit Content' },
+  { id: 'images', label: 'AI Product Images' },
+  { id: 'sync', label: 'Update Product Master' },
+  { id: 'history', label: 'Generation History' },
+  { id: 'usage', label: 'AI Usage & Cost' },
+  { id: 'config', label: 'AI Configuration' },
+  { id: 'research', label: 'Taxation & Market Research' },
+];
 
 function CRMAppShell() {
   const { 
@@ -50,6 +63,8 @@ function CRMAppShell() {
     isLoadingFirestore
   } = useCRM();
   const [activeTab, setActiveTab] = useState<ModuleTab>('dashboard');
+  const [aiSubmenu, setAiSubmenu] = useState<AIProductSubmenuId>('generate');
+  const [aiMenuExpanded, setAiMenuExpanded] = useState<boolean>(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSelfieModalOpen, setIsSelfieModalOpen] = useState(false);
 
@@ -132,6 +147,7 @@ function CRMAppShell() {
     { id: 'customers', name: 'Customer Directory', icon: UserCheck, moduleCheck: 'Customer Directory' },
     { id: 'schedules', name: 'Task & Calendar Sync', icon: Calendar, moduleCheck: 'Tasks & Calendar' },
     { id: 'performance', name: 'Products Settings', icon: TrendingUp, moduleCheck: 'Products & Clients' },
+    { id: 'ai_product_content', name: 'AI Product Content', icon: Sparkles, moduleCheck: 'AI Product Content' },
     { id: 'product_reviews', name: 'Product Reviews', icon: Star, moduleCheck: 'Product Reviews' },
     { id: 'whatsapp', name: 'WhatsApp Automation', icon: MessageSquare, moduleCheck: 'WhatsApp Integration' },
     { id: 'influencer_marketing', name: 'Influencer Marketing', icon: Sparkles, moduleCheck: 'Campaigns & ROI' },
@@ -234,6 +250,70 @@ function CRMAppShell() {
                 const permitted = hasAccess(item.moduleCheck, 'read');
                 const active = activeTab === item.id;
 
+                if (item.id === 'ai_product_content') {
+                  return (
+                    <div key={item.id} className="flex flex-col gap-1">
+                      <button
+                        disabled={!permitted}
+                        onClick={() => {
+                          handleNavigate(item.id);
+                          setAiMenuExpanded((prev) => (active ? !prev : true));
+                        }}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-left transition cursor-pointer shrink-0 relative ${
+                          active
+                            ? 'bg-[#2E7D32] text-[#FFFFFF] shadow-sm font-extrabold border-l-4 border-[#81C784]'
+                            : permitted
+                              ? 'bg-transparent text-[#DCE9DE] hover:bg-[#245B2A] hover:text-[#FFFFFF]'
+                              : 'bg-[#173F1B]/60 text-[#DCE9DE]/40 opacity-50 cursor-not-allowed border border-[#245B2A]/40'
+                        }`}
+                        id={`side-nav-${item.id}`}
+                      >
+                        <span className="flex items-center gap-2.5 truncate">
+                          <item.icon className={`w-4 h-4 shrink-0 ${active ? 'text-[#FFFFFF]' : 'text-[#B8D3BA]'}`} />
+                          <span className="truncate">{item.name}</span>
+                        </span>
+                        {permitted && (
+                          aiMenuExpanded && active ? (
+                            <ChevronDown className="w-3.5 h-3.5 shrink-0 text-[#FFFFFF]" />
+                          ) : (
+                            <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[#B8D3BA]" />
+                          )
+                        )}
+                      </button>
+
+                      {permitted && (active || aiMenuExpanded) && (
+                        <div
+                          className="ml-4 pl-2.5 border-l border-[#2E7D32]/60 flex flex-col gap-0.5 py-0.5"
+                          id="side-nav-ai-product-submenus"
+                        >
+                          {AI_PRODUCT_SUBMENUS.map((sub) => {
+                            const subActive = active && aiSubmenu === sub.id;
+                            return (
+                              <button
+                                key={sub.id}
+                                type="button"
+                                onClick={() => {
+                                  setActiveTab('ai_product_content');
+                                  setAiSubmenu(sub.id);
+                                  setMobileMenuOpen(false);
+                                }}
+                                className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold tracking-wide transition cursor-pointer truncate ${
+                                  subActive
+                                    ? 'bg-[#81C784]/25 text-[#FFFFFF] font-extrabold'
+                                    : 'text-[#B8D3BA] hover:bg-[#245B2A]/70 hover:text-[#FFFFFF]'
+                                }`}
+                                id={`side-nav-ai-sub-${sub.id}`}
+                              >
+                                • {sub.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
                 return (
                   <button
                     key={item.id}
@@ -283,6 +363,9 @@ function CRMAppShell() {
               {activeTab === 'order_operations' && <OrderOperationsView initialStage="all" />}
               {activeTab === 'schedules' && <TasksCalendarView />}
               {activeTab === 'performance' && <PerformanceTrackingView />}
+              {activeTab === 'ai_product_content' && (
+                <AIProductContentView activeSubmenu={aiSubmenu} onSubmenuChange={setAiSubmenu} />
+              )}
               {activeTab === 'product_reviews' && <ProductReviewsManagementView />}
               {activeTab === 'whatsapp' && <WhatsAppIntegrationView />}
               {activeTab === 'influencer_marketing' && <InfluencerMarketingView />}

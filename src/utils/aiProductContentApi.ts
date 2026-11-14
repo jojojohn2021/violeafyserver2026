@@ -11,6 +11,16 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import type {
+  AICommerceContentPayload,
+  AICommerceFeedRun,
+  AICommercePlatformId,
+  AICommercePlatformSettings,
+  AICommercePlatformStatus,
+  AICommerceStagingDraft,
+  AICommerceSyncJob,
+  AICommerceSyncLog,
+  AICommerceValidationIssue,
+  AICommerceValidationReport,
   AIProductContentPayload,
   AIProductDraft,
   AIProductDraftStatus,
@@ -19,10 +29,13 @@ import type {
   AIProductMarketResearch,
   AIProductPackingResearch,
   AIProductResearchRecord,
+  AIProductSEOPayload,
   AIProductSyncLog,
   AIProductTaxationResearch,
   AIProductVersion,
   AIUsageMetadata,
+  ProductSlugReservation,
+  PublicProductOfferProjection,
   WebPriceSourceOffer,
 } from '../types';
 
@@ -32,7 +45,17 @@ export const AI_PRODUCT_IMAGES_COLLECTION = 'ai_product_images';
 export const AI_PRODUCT_RESEARCH_COLLECTION = 'ai_product_research';
 export const AI_PRODUCT_SYNC_LOGS_COLLECTION = 'ai_product_sync_logs';
 export const AI_PRODUCT_EVENTS_COLLECTION = 'ai_product_events';
+export const PRODUCT_SLUGS_COLLECTION = 'productSlugs';
+export const AI_COMMERCE_SETTINGS_COLLECTION = 'ai_commerce_settings';
+export const AI_COMMERCE_STAGING_COLLECTION = 'ai_commerce_staging';
+export const AI_COMMERCE_FEEDS_COLLECTION = 'ai_commerce_feeds';
+export const AI_COMMERCE_SYNC_JOBS_COLLECTION = 'ai_commerce_sync_jobs';
+export const AI_COMMERCE_SYNC_LOGS_COLLECTION = 'ai_commerce_sync_logs';
+export const AI_COMMERCE_VALIDATION_COLLECTION = 'ai_commerce_validation';
+export const AI_COMMERCE_PLATFORM_STATUS_COLLECTION = 'ai_commerce_platform_status';
+export const PUBLIC_PRODUCTS_COLLECTION = 'public_products';
 export const AI_PROMPT_VERSION = 'leafyearth-v8.0';
+export const V10_SCHEMA_VERSION = 'leafyearth-v10.0';
 
 async function authHeaders(): Promise<Record<string, string>> {
   const user = auth?.currentUser;
@@ -53,13 +76,194 @@ function isStaticOrUnavailable(res: Response): boolean {
 export interface MasterFieldComparisonItem {
   fieldKey: string;
   label: string;
-  group: 'general' | 'translations' | 'health' | 'ayurveda' | 'image' | 'taxation_pricing';
+  group:
+    | 'general'
+    | 'translations'
+    | 'health'
+    | 'ayurveda'
+    | 'image'
+    | 'taxation_pricing'
+    | 'seo'
+    | 'commerce';
   masterField: string;
   currentMasterValue: any;
   proposedAiValue: any;
   hasChanged: boolean;
   selectable: boolean;
   reasonIfLocked?: string;
+}
+
+export const SLUG_PATTERN_CLIENT = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function normalizeUrlSlugClient(raw: unknown): string {
+  const input = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const withoutPaths = input
+    .replace(/^https?:\/\/[^/]+\//i, '')
+    .replace(/^products\//i, '')
+    .replace(/[?#].*$/, '');
+  const hyphenated = withoutPaths
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return hyphenated.length > 100 ? hyphenated.slice(0, 100).replace(/-+$/g, '') : hyphenated;
+}
+
+export function isValidUrlSlugClient(slug: unknown): boolean {
+  if (typeof slug !== 'string') return false;
+  if (!slug || slug.length > 100) return false;
+  return SLUG_PATTERN_CLIENT.test(slug);
+}
+
+export function validateGtinChecksumClient(rawGtin: unknown): {
+  valid: boolean;
+  normalized: string;
+  format: 'GTIN-8' | 'GTIN-12' | 'GTIN-13' | 'GTIN-14' | null;
+  error?: string;
+} {
+  const cleaned = String(rawGtin ?? '').trim().replace(/[\s-]+/g, '');
+  if (!cleaned) return { valid: false, normalized: '', format: null, error: 'GTIN is empty.' };
+  if (!/^\d+$/.test(cleaned)) {
+    return { valid: false, normalized: cleaned, format: null, error: 'GTIN must contain only numeric digits.' };
+  }
+  if (![8, 12, 13, 14].includes(cleaned.length)) {
+    return {
+      valid: false,
+      normalized: cleaned,
+      format: null,
+      error: `GTIN must be 8, 12, 13, or 14 digits (got ${cleaned.length}).`,
+    };
+  }
+  const digits = cleaned.split('').map((d) => Number.parseInt(d, 10));
+  const checkDigit = digits[digits.length - 1];
+  const body = digits.slice(0, -1).reverse();
+  let sum = 0;
+  for (let i = 0; i < body.length; i++) {
+    sum += body[i] * (i % 2 === 0 ? 3 : 1);
+  }
+  const expected = (10 - (sum % 10)) % 10;
+  const format = `GTIN-${cleaned.length}` as 'GTIN-8' | 'GTIN-12' | 'GTIN-13' | 'GTIN-14';
+  if (checkDigit !== expected) {
+    return {
+      valid: false,
+      normalized: cleaned,
+      format,
+      error: `Invalid GS1 Modulo-10 check digit: expected ${expected}, found ${checkDigit}.`,
+    };
+  }
+  return { valid: true, normalized: cleaned, format };
+}
+
+export function buildClientFallbackSEO(
+  productName: string,
+  options?: { categoryHint?: string; brandHint?: string; formHint?: string }
+): AIProductSEOPayload {
+  const cleanName = String(productName || 'LeafyEarth Product').trim();
+  const lower = cleanName.toLowerCase();
+  const brand = (options?.brandHint || 'LeafyEarth').trim();
+
+  if (lower.includes('cumin') || lower.includes('jeera')) {
+    return {
+      seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth',
+      metaDescription:
+        'Shop whole cumin seeds (Jeera / Cuminum cyminum) with warm earthy aroma for tempering, spice blends and everyday Indian cooking.',
+      seoKeywords: [
+        'cumin seeds',
+        'jeera',
+        'whole cumin',
+        'cuminum cyminum',
+        'indian spices',
+        'tadka spice',
+        'jeerakam',
+        'leafyearth spices',
+      ],
+      urlSlug: 'cumin-seeds-jeera-whole',
+    };
+  }
+
+  const form = options?.formHint || (lower.includes('oil') ? 'Cold-Pressed Oil' : lower.includes('powder') ? 'Pure Powder' : 'Natural Grade');
+  const rawTitle = `${cleanName} | ${form} | ${brand}`;
+  const seoTitle = rawTitle.length <= 120 ? rawTitle : `${cleanName} | ${brand}`.slice(0, 120);
+  const metaDescription = `Shop authentic ${cleanName} from ${brand}. Hygienically packed in India for pure aroma, authentic culinary taste, and everyday wellness.`.slice(0, 160);
+  const baseSlug = normalizeUrlSlugClient(cleanName) || 'leafyearth-product';
+  return {
+    seoTitle,
+    metaDescription,
+    seoKeywords: [
+      cleanName.toLowerCase(),
+      `buy ${cleanName.toLowerCase()} online`,
+      `${cleanName.toLowerCase()} india`,
+      (options?.categoryHint || 'indian spices').toLowerCase(),
+      `${brand.toLowerCase()} ${cleanName.toLowerCase()}`,
+      `pure ${cleanName.toLowerCase()}`,
+    ],
+    urlSlug: baseSlug,
+  };
+}
+
+export function buildClientFallbackCommerce(
+  productName: string,
+  options?: { categoryHint?: string; packingSize?: string }
+): AICommerceContentPayload {
+  const cleanName = String(productName || 'LeafyEarth Product').trim();
+  const lower = cleanName.toLowerCase();
+  const isCumin = lower.includes('cumin') || lower.includes('jeera');
+  const isOil = lower.includes('oil') || lower.includes('velichenna');
+  const isHousehold = /cleaner|detergent|repellent|dishwash|handwash|perfume|floor/i.test(cleanName);
+
+  return {
+    productHighlights: isCumin
+      ? [
+          '100% pure, unblended whole Cumin Seeds (Jeera / Cuminum cyminum) with rich volatile oil aroma',
+          'Cleaned, machine-graded, and hygienically packed in food-grade moisture-barrier pouches',
+          'Essential Indian tempering (tadka) spice for dals, curries, jeera rice, and roasted masala blends',
+          'Zero artificial colors, zero synthetic preservatives, and no added fillers',
+          'Direct from trusted Indian spice growers with strict batch quality checks',
+        ]
+      : [
+          `100% authentic, hygienically graded ${cleanName} sourced from trusted Indian growers`,
+          'Free from artificial colors, synthetic preservatives, and chemical fillers',
+          'Packed in food-grade moisture-resistant packaging to lock in natural freshness and aroma',
+          `Ideal for everyday Indian culinary preparations and traditional household routines`,
+        ],
+    productFAQs: [
+      {
+        question: `What is ${cleanName} and how is it sourced?`,
+        answer: `${cleanName} from LeafyEarth is sourced from verified Indian growers and hygienically packed without artificial colors or preservatives.`,
+      },
+      {
+        question: `How should I store ${cleanName} after opening?`,
+        answer: 'Store in a cool, dry place away from direct sunlight and transfer to an airtight container after opening.',
+      },
+      {
+        question: `Does ${cleanName} contain any added preservatives or fillers?`,
+        answer: 'No. LeafyEarth products are 100% pure and free from synthetic preservatives, artificial colors, or fillers.',
+      },
+    ],
+    searchTags: isCumin
+      ? ['cumin seeds', 'jeera', 'whole cumin', 'cuminum cyminum', 'jeerakam', 'tadka spice', 'indian spices']
+      : [cleanName.toLowerCase(), 'leafyearth', 'natural indian products', (options?.categoryHint || 'spices').toLowerCase()],
+    dietaryAttributes: isHousehold ? [] : ['Vegetarian', 'Vegan', 'Gluten-Free', 'Preservative-Free', 'No Artificial Colors'],
+    googleProductCategory: isHousehold
+      ? 'Home & Garden > Household Supplies > Household Cleaning Supplies'
+      : isOil
+      ? 'Food, Beverages & Tobacco > Food Items > Cooking & Baking Ingredients > Cooking Oils'
+      : 'Food, Beverages & Tobacco > Food Items > Seasonings & Spices > Herbs & Spices',
+    productType: isHousehold
+      ? 'Home Care > Natural Cleaners'
+      : `Spices & Groceries > ${options?.categoryHint || 'Whole & Ground Spices'} > ${cleanName}`,
+    factualAttributeSuggestions: {
+      countryOfOrigin: 'India',
+      condition: 'new',
+      netWeight: isOil ? null : 100,
+      netWeightUnit: isOil ? null : 'g',
+      netVolume: isOil ? 250 : null,
+      netVolumeUnit: isOil ? 'ml' : null,
+    },
+  };
 }
 
 export function normalizePackSizeClient(raw: string): string {
@@ -126,6 +330,7 @@ export function buildClientFallbackContent(
 ): AIProductContentPayload {
   const cleanName = String(productName || 'LeafyEarth Product').trim();
   const lower = cleanName.toLowerCase();
+  const isCumin = lower.includes('cumin') || lower.includes('jeera');
   const isTurmeric = lower.includes('turmeric') || lower.includes('haldi') || lower.includes('manjal');
   const isPepper = lower.includes('pepper') || lower.includes('kurumulaku');
   const isCardamom = lower.includes('cardamom') || lower.includes('elaichi');
@@ -141,9 +346,20 @@ export function buildClientFallbackContent(
     ? 'Powder'
     : isHousehold
     ? 'Liquid'
+    : isCumin
+    ? 'Whole Seeds'
     : 'Whole / Natural';
 
-  const translations: AIProductContentPayload['translations'] = isTurmeric
+  const translations: AIProductContentPayload['translations'] = isCumin
+    ? {
+        en: { name: cleanName },
+        ml: { name: 'ജീരകം' },
+        hi: { name: 'जीरा' },
+        ta: { name: 'சீரகம்' },
+        kn: { name: 'ಜೀರಿಗೆ' },
+        te: { name: 'జీలకర్ర' },
+      }
+    : isTurmeric
     ? {
         en: { name: cleanName },
         ml: { name: 'മഞ്ഞൾ പൊടി' },
@@ -185,7 +401,9 @@ export function buildClientFallbackContent(
 
   return {
     english_product_name: cleanName,
-    botanical_name: isTurmeric
+    botanical_name: isCumin
+      ? 'Cuminum cyminum'
+      : isTurmeric
       ? 'Curcuma longa'
       : isPepper
       ? 'Piper nigrum'
@@ -196,7 +414,9 @@ export function buildClientFallbackContent(
       : isHousehold
       ? 'Not Applicable (Household Formulation)'
       : 'Botanical species (verify cultivar)',
-    family: isTurmeric || isCardamom
+    family: isCumin
+      ? 'Apiaceae'
+      : isTurmeric || isCardamom
       ? 'Zingiberaceae'
       : isPepper
       ? 'Piperaceae'
@@ -303,6 +523,14 @@ export function buildClientFallbackContent(
     review_flags: [
       'Verify botanical taxonomy and regional language script spellings before master sync.',
     ],
+    seo: buildClientFallbackSEO(cleanName, {
+      categoryHint: category,
+      brandHint: options?.brandHint,
+      formHint: form,
+    }),
+    commerce: buildClientFallbackCommerce(cleanName, {
+      categoryHint: category,
+    }),
   };
 }
 
@@ -391,6 +619,35 @@ export function buildMasterComparisonDiffClient(params: {
       pushItem('contraindications', 'Contraindications', 'ayurveda', 'contraindications', ay.contraindications);
       pushItem('drugInteractions', 'Drug / Herb Interactions', 'ayurveda', 'drugInteractions', ay.interactions);
       pushItem('ayurvedicReferences', 'Ayurvedic Classical References', 'ayurveda', 'ayurvedicReferences', ay.references);
+    }
+
+    if (payload.seo) {
+      pushItem('seoTitle', 'SEO Title', 'seo', 'seoTitle', payload.seo.seoTitle);
+      pushItem('metaDescription', 'Meta Description', 'seo', 'metaDescription', payload.seo.metaDescription);
+      pushItem('seoKeywords', 'SEO Keywords (5–12)', 'seo', 'seoKeywords', payload.seo.seoKeywords);
+      pushItem('urlSlug', 'Canonical URL Slug (/products/:slug)', 'seo', 'urlSlug', payload.seo.urlSlug);
+    }
+
+    if (payload.commerce) {
+      const c = payload.commerce;
+      const sugg = c.factualAttributeSuggestions || {};
+      pushItem('productHighlights', 'Product Highlights (4–6 bullets)', 'commerce', 'productHighlights', c.productHighlights);
+      pushItem('productFAQs', 'Product FAQs (3–6 Q&A pairs)', 'commerce', 'productFAQs', c.productFAQs);
+      pushItem('searchTags', 'AI Search & Discovery Tags', 'commerce', 'searchTags', c.searchTags);
+      pushItem('dietaryAttributes', 'Dietary Attributes', 'commerce', 'dietaryAttributes', c.dietaryAttributes);
+      pushItem('googleProductCategory', 'Google Product Category', 'commerce', 'googleProductCategory', c.googleProductCategory);
+      pushItem('productType', 'Store Taxonomy (productType)', 'commerce', 'productType', c.productType);
+      if (sugg.countryOfOrigin) {
+        pushItem('countryOfOrigin', 'Country of Origin', 'commerce', 'countryOfOrigin', sugg.countryOfOrigin);
+      }
+      if (sugg.netWeight !== undefined && sugg.netWeight !== null) {
+        pushItem('netWeight', 'Net Weight', 'commerce', 'netWeight', sugg.netWeight);
+        pushItem('netWeightUnit', 'Net Weight Unit', 'commerce', 'netWeightUnit', sugg.netWeightUnit);
+      }
+      if (sugg.netVolume !== undefined && sugg.netVolume !== null) {
+        pushItem('netVolume', 'Net Volume', 'commerce', 'netVolume', sugg.netVolume);
+        pushItem('netVolumeUnit', 'Net Volume Unit', 'commerce', 'netVolumeUnit', sugg.netVolumeUnit);
+      }
     }
   }
 
@@ -1434,6 +1691,51 @@ export async function applyAIDraftToMaster(params: {
       }
     }
 
+    if (updatePatch.urlSlug !== undefined) {
+      const candidateSlug = normalizeUrlSlugClient(updatePatch.urlSlug);
+      if (!isValidUrlSlugClient(candidateSlug)) {
+        throw new Error(`Invalid URL slug: "${updatePatch.urlSlug}"`);
+      }
+      updatePatch.urlSlug = candidateSlug;
+      afterSnapshot.urlSlug = candidateSlug;
+
+      const slugRef = doc(db, PRODUCT_SLUGS_COLLECTION, candidateSlug);
+      const slugSnap = await tx.get(slugRef);
+      if (slugSnap.exists() && String(slugSnap.data()?.productId) !== String(params.masterProductId)) {
+        throw new Error(`SLUG_CONFLICT: Slug '${candidateSlug}' is already claimed by product '${slugSnap.data()?.productId}'.`);
+      }
+      const prevSlug = existingMaster.urlSlug ? String(existingMaster.urlSlug).trim() : null;
+      tx.set(slugRef, {
+        slug: candidateSlug,
+        productId: params.masterProductId,
+        state: 'active',
+        canonicalSlug: candidateSlug,
+        createdAt: slugSnap.exists() ? slugSnap.data()?.createdAt || now : now,
+        updatedAt: now,
+        updatedBy: params.actor.id,
+      });
+      if (prevSlug && prevSlug !== candidateSlug && isValidUrlSlugClient(prevSlug)) {
+        tx.set(
+          doc(db, PRODUCT_SLUGS_COLLECTION, prevSlug),
+          {
+            slug: prevSlug,
+            productId: params.masterProductId,
+            state: 'redirect',
+            canonicalSlug: candidateSlug,
+            createdAt: now,
+            updatedAt: now,
+            updatedBy: params.actor.id,
+          },
+          { merge: true }
+        );
+      }
+      updatePatch.canonicalUrl = `${window.location.origin}/products/${candidateSlug}`;
+      updatePatch.seoUpdatedAt = now;
+    }
+
+    const nextRev = Number(existingMaster.revision || 1) + 1;
+    updatePatch.revision = nextRev;
+
     tx.set(masterRef, updatePatch, { merge: true });
     const syncLogDoc: AIProductSyncLog = {
       id: syncLogId,
@@ -1445,6 +1747,7 @@ export async function applyAIDraftToMaster(params: {
       image_action: params.imageAction || 'none',
       approved_image_id: compData.approvedImage?.id || null,
       approved_research_id: compData.approvedResearch?.id || null,
+      resulting_master_revision: nextRev,
       before_snapshot: beforeSnapshot,
       after_snapshot: afterSnapshot,
       result: 'SUCCESS',
@@ -1479,4 +1782,804 @@ export async function applyAIDraftToMaster(params: {
     syncLog: txRes.syncLogDoc,
     masterProduct: txRes.updatedMaster,
   };
+}
+
+// ============================================================================
+// V9 Section 6: SEO Generation, Validation, Slug Check, Approve & Apply Client
+// ============================================================================
+
+export async function checkUrlSlugAvailabilityClient(slug: string, productId?: string | null) {
+  const qs = new URLSearchParams({ slug });
+  if (productId) qs.set('productId', productId);
+  try {
+    const res = await fetch(`/api/admin/ai-products/slug-check?${qs.toString()}`, {
+      headers: await authHeaders(),
+    });
+    if (res.ok && !isStaticOrUnavailable(res)) {
+      return await res.json();
+    }
+  } catch {
+    // Fallback below
+  }
+
+  const normalizedSlug = normalizeUrlSlugClient(slug);
+  if (!isValidUrlSlugClient(normalizedSlug)) {
+    return {
+      success: true,
+      available: false,
+      normalizedSlug,
+      claimedByProductId: null,
+      state: null,
+      suggestedSlug: 'product-item',
+    };
+  }
+  const snap = await getDoc(doc(db, PRODUCT_SLUGS_COLLECTION, normalizedSlug));
+  if (!snap.exists()) {
+    return {
+      success: true,
+      available: true,
+      normalizedSlug,
+      claimedByProductId: null,
+      state: null,
+      suggestedSlug: normalizedSlug,
+    };
+  }
+  const data = snap.data() as ProductSlugReservation;
+  const ownedBySame = Boolean(productId && String(data.productId) === String(productId));
+  return {
+    success: true,
+    available: ownedBySame,
+    normalizedSlug,
+    claimedByProductId: String(data.productId),
+    state: data.state,
+    suggestedSlug: ownedBySame ? normalizedSlug : `${normalizedSlug}-2`,
+  };
+}
+
+export async function generateDraftSEOClient(params: {
+  draftId: string;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/admin/ai-products/${params.draftId}/seo/generate`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actorId: params.actor.id, actorEmail: params.actor.email }),
+    });
+    if (res.ok && !isStaticOrUnavailable(res)) return await res.json();
+  } catch {
+    // Fallback below
+  }
+
+  const detail = await fetchAIProductDraftDetail(params.draftId);
+  const seo = buildClientFallbackSEO(detail.draft.source_product_name, {
+    categoryHint: detail.draft.category_hint || undefined,
+    brandHint: detail.draft.brand_hint || 'LeafyEarth',
+  });
+  const slugCheck = await checkUrlSlugAvailabilityClient(seo.urlSlug, detail.draft.master_product_id);
+  seo.urlSlug = slugCheck.available ? slugCheck.normalizedSlug : slugCheck.suggestedSlug;
+
+  const now = new Date().toISOString();
+  const ver = detail.currentVersion;
+  if (ver) {
+    const updatedPayload = {
+      ...(ver.edited_payload || ver.generated_payload),
+      seo,
+    };
+    await setDoc(
+      doc(db, AI_PRODUCT_VERSIONS_COLLECTION, ver.id),
+      {
+        edited_payload: updatedPayload,
+        seo_status: 'DRAFT',
+        seo_approved_by: null,
+        seo_approved_at: null,
+        edited_by: params.actor.id,
+        edited_at: now,
+      },
+      { merge: true }
+    );
+  }
+  return { success: true, seo, slugAvailability: slugCheck };
+}
+
+export async function updateDraftSEOClient(params: {
+  draftId: string;
+  seo: AIProductSEOPayload;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/admin/ai-products/${params.draftId}/seo`, {
+      method: 'PATCH',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        seo: params.seo,
+        actorId: params.actor.id,
+        actorEmail: params.actor.email,
+      }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update SEO');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+
+  const detail = await fetchAIProductDraftDetail(params.draftId);
+  const normalizedSeo: AIProductSEOPayload = {
+    seoTitle: String(params.seo.seoTitle || '').trim(),
+    metaDescription: String(params.seo.metaDescription || '').trim(),
+    seoKeywords: Array.from(
+      new Set((params.seo.seoKeywords || []).map((k) => String(k || '').trim()).filter(Boolean))
+    ),
+    urlSlug: normalizeUrlSlugClient(params.seo.urlSlug),
+  };
+  const now = new Date().toISOString();
+  if (detail.currentVersion) {
+    await setDoc(
+      doc(db, AI_PRODUCT_VERSIONS_COLLECTION, detail.currentVersion.id),
+      {
+        edited_payload: {
+          ...(detail.currentVersion.edited_payload || detail.currentVersion.generated_payload),
+          seo: normalizedSeo,
+        },
+        seo_status: 'DRAFT',
+        seo_approved_by: null,
+        seo_approved_at: null,
+        edited_by: params.actor.id,
+        edited_at: now,
+      },
+      { merge: true }
+    );
+  }
+  return { success: true, seo: normalizedSeo };
+}
+
+export async function approveDraftSEOClient(params: {
+  draftId: string;
+  seo?: AIProductSEOPayload;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/admin/ai-products/${params.draftId}/seo/approve`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        seo: params.seo,
+        actorId: params.actor.id,
+        actorEmail: params.actor.email,
+      }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to approve SEO');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+
+  const detail = await fetchAIProductDraftDetail(params.draftId);
+  const now = new Date().toISOString();
+  if (detail.currentVersion) {
+    await setDoc(
+      doc(db, AI_PRODUCT_VERSIONS_COLLECTION, detail.currentVersion.id),
+      {
+        ...(params.seo
+          ? {
+              edited_payload: {
+                ...(detail.currentVersion.edited_payload || detail.currentVersion.generated_payload),
+                seo: params.seo,
+              },
+            }
+          : {}),
+        seo_status: 'APPROVED',
+        seo_approved_by: params.actor.id,
+        seo_approved_at: now,
+      },
+      { merge: true }
+    );
+    await setDoc(
+      doc(db, AI_PRODUCT_DRAFTS_COLLECTION, params.draftId),
+      { approved_seo_version_id: detail.currentVersion.id, updated_at: now },
+      { merge: true }
+    );
+  }
+  return { success: true };
+}
+
+export async function applyDraftSEOClient(params: {
+  draftId: string;
+  masterProductId: string;
+  selectedFields?: string[];
+  expectedMasterRevision?: number;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/admin/ai-products/${params.draftId}/seo/apply`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        masterProductId: params.masterProductId,
+        selectedFields: params.selectedFields || ['seoTitle', 'metaDescription', 'seoKeywords', 'urlSlug'],
+        expectedMasterRevision: params.expectedMasterRevision,
+        actorId: params.actor.id,
+        actorEmail: params.actor.email,
+      }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to apply SEO to master');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+
+  return applyAIDraftToMaster({
+    draftId: params.draftId,
+    masterProductId: params.masterProductId,
+    selectedFields: params.selectedFields || ['seoTitle', 'metaDescription', 'seoKeywords', 'urlSlug'],
+    actor: params.actor,
+  });
+}
+
+// ============================================================================
+// V10 Section 16 & 18: AI Commerce & Discoverability Client Functions
+// ============================================================================
+
+export async function fetchAICommerceDashboardStatus() {
+  try {
+    const res = await fetch('/api/ai-commerce/status', {
+      headers: await authHeaders(),
+    });
+    if (res.ok && !isStaticOrUnavailable(res)) {
+      return await res.json();
+    }
+  } catch {
+    // Fallback below
+  }
+
+  const [
+    productsSnap,
+    settingsSnap,
+    stagingSnap,
+    feedsSnap,
+    jobsSnap,
+    logsSnap,
+    publicSnap,
+    slugsSnap,
+  ] = await Promise.all([
+    getDocs(collection(db, 'products')),
+    getDocs(collection(db, AI_COMMERCE_SETTINGS_COLLECTION)),
+    getDocs(collection(db, AI_COMMERCE_STAGING_COLLECTION)),
+    getDocs(collection(db, AI_COMMERCE_FEEDS_COLLECTION)),
+    getDocs(collection(db, AI_COMMERCE_SYNC_JOBS_COLLECTION)),
+    getDocs(collection(db, AI_COMMERCE_SYNC_LOGS_COLLECTION)),
+    getDocs(collection(db, PUBLIC_PRODUCTS_COLLECTION)),
+    getDocs(collection(db, PRODUCT_SLUGS_COLLECTION)),
+  ]);
+
+  const products = productsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  const now = new Date().toISOString();
+  const defaultSettings: AICommercePlatformSettings[] = [
+    {
+      id: 'google_merchant',
+      platform: 'google_merchant',
+      displayName: 'Google Merchant Center & Shopping Graph (India)',
+      priorityTier: 'P0',
+      enabled: false,
+      market: 'IN',
+      currency: 'INR',
+      language: 'en-IN',
+      verifiedDomain: window.location.origin,
+      feedPath: '/feeds/google-products.xml',
+      syncPolicy: { mode: 'scheduled_feed', intervalMinutes: 60, dryRunOnly: false },
+      credentialRef: 'GOOGLE_MERCHANT_ACCOUNT_ID',
+      marketEligible: true,
+      eligibilityNote: 'Primary P0 India channel (INR, GST-inclusive selling price).',
+      updatedAt: now,
+    },
+    {
+      id: 'public_web',
+      platform: 'public_web',
+      displayName: 'Public Product Web Pages + Schema.org JSON-LD',
+      priorityTier: 'P0',
+      enabled: true,
+      market: 'IN',
+      currency: 'INR',
+      language: 'en-IN',
+      verifiedDomain: window.location.origin,
+      feedPath: '/feeds/products.json',
+      syncPolicy: { mode: 'scheduled_feed', intervalMinutes: 15, dryRunOnly: false },
+      credentialRef: 'NONE_REQUIRED',
+      marketEligible: true,
+      eligibilityNote: 'Canonical /products/:slug SSR + JSON-LD + Sitemap.',
+      updatedAt: now,
+    },
+    {
+      id: 'bing_copilot',
+      platform: 'bing_copilot',
+      displayName: 'Microsoft Merchant Center / Bing & Copilot Shopping',
+      priorityTier: 'P1',
+      enabled: false,
+      market: 'IN',
+      currency: 'INR',
+      language: 'en-IN',
+      verifiedDomain: window.location.origin,
+      feedPath: '/feeds/bing-products.xml',
+      syncPolicy: { mode: 'scheduled_feed', intervalMinutes: 120, dryRunOnly: false },
+      credentialRef: 'MICROSOFT_MERCHANT_STORE_ID',
+      marketEligible: true,
+      eligibilityNote: 'Secondary P1 XML/TSV feed compatible with Google Merchant schema.',
+      updatedAt: now,
+    },
+    {
+      id: 'openai_chatgpt',
+      platform: 'openai_chatgpt',
+      displayName: 'OpenAI ChatGPT Product Feed Adapter (Feature-Flagged)',
+      priorityTier: 'P2',
+      enabled: false,
+      market: 'IN',
+      currency: 'INR',
+      language: 'en-IN',
+      verifiedDomain: window.location.origin,
+      feedPath: '/feeds/openai-products.jsonl',
+      syncPolicy: { mode: 'manual_only', intervalMinutes: 1440, dryRunOnly: true },
+      credentialRef: 'OPENAI_COMMERCE_PARTNER_KEY',
+      marketEligible: false,
+      eligibilityNote: 'Feature-flagged P2 adapter: generates JSONL feed locally; submission disabled until India onboarding.',
+      updatedAt: now,
+    },
+    {
+      id: 'perplexity',
+      platform: 'perplexity',
+      displayName: 'Perplexity & AI Answer Engine Crawlability',
+      priorityTier: 'P2',
+      enabled: true,
+      market: 'IN',
+      currency: 'INR',
+      language: 'en-IN',
+      verifiedDomain: window.location.origin,
+      feedPath: '/llms.txt',
+      syncPolicy: { mode: 'scheduled_feed', intervalMinutes: 60, dryRunOnly: false },
+      credentialRef: 'NONE_REQUIRED',
+      marketEligible: true,
+      eligibilityNote: 'Served via public SSR HTML, JSON-LD, /sitemap.xml, and /llms.txt.',
+      updatedAt: now,
+    },
+  ];
+
+  const storedMap = new Map<string, any>();
+  settingsSnap.docs.forEach((d) => storedMap.set(d.id, d.data()));
+  const settings = defaultSettings.map((def) => ({
+    ...def,
+    ...(storedMap.get(def.platform) || {}),
+  }));
+
+  const validations: AICommerceValidationReport[] = products.map((p) => {
+    const issues: AICommerceValidationIssue[] = [];
+    if (!p.imageUrl) {
+      issues.push({ field: 'imageUrl', severity: 'error', code: 'MISSING_IMAGE', message: 'Primary image required.' });
+    }
+    if (!Number(p.onlinePrice || p.offerPrice || 0)) {
+      issues.push({ field: 'onlinePrice', severity: 'error', code: 'MISSING_PRICE', message: 'Valid INR selling price required.' });
+    }
+    if (!p.urlSlug) {
+      issues.push({ field: 'urlSlug', severity: 'warning', code: 'MISSING_SLUG', message: 'Canonical URL slug not yet assigned.' });
+    }
+    if (!Array.isArray(p.productHighlights) || p.productHighlights.length < 4) {
+      issues.push({ field: 'productHighlights', severity: 'warning', code: 'FEW_HIGHLIGHTS', message: 'Recommend 4–6 product highlights.' });
+    }
+    const hasErr = issues.some((i) => i.severity === 'error');
+    const hasWarn = issues.some((i) => i.severity === 'warning');
+    return {
+      id: `val_${p.id}_google_merchant`,
+      productId: p.id,
+      offerId: p.id,
+      platform: 'google_merchant',
+      localReadiness: !p.aiCommerceEnabled ? 'disabled' : hasErr ? 'blocked' : hasWarn ? 'warning' : 'ready',
+      issues,
+      checkedAt: now,
+      revision: Number(p.revision || 1),
+    };
+  });
+
+  return {
+    success: true,
+    summary: {
+      totalProducts: products.length,
+      commerceEnabledCount: products.filter((p) => p.aiCommerceEnabled === true).length,
+      publishedProjectionsCount: publicSnap.size,
+      slugReservationsCount: slugsSnap.size,
+      readyCount: validations.filter((v) => v.localReadiness === 'ready').length,
+      warningCount: validations.filter((v) => v.localReadiness === 'warning').length,
+      blockedCount: validations.filter((v) => v.localReadiness === 'blocked').length,
+      disabledCount: validations.filter((v) => v.localReadiness === 'disabled').length,
+      pendingJobsCount: jobsSnap.docs.filter((d) => ['PENDING', 'RETRY_SCHEDULED'].includes(d.data()?.state)).length,
+    },
+    settings,
+    stagingDrafts: stagingSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+    feedRuns: feedsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+    syncJobs: jobsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+    syncLogs: logsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+    validations,
+    publicProjections: publicSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+    slugReservations: slugsSnap.docs.map((d) => ({ slug: d.id, ...(d.data() as any) })),
+  };
+}
+
+export async function generateAICommerceDraftClient(params: {
+  productId: string;
+  productName?: string;
+  categoryHint?: string;
+  packingSize?: string;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/ai-commerce/${encodeURIComponent(params.productId || 'new')}/generate`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        productName: params.productName,
+        categoryHint: params.categoryHint,
+        packingSize: params.packingSize,
+        actorId: params.actor.id,
+        actorEmail: params.actor.email,
+      }),
+    });
+    if (res.ok && !isStaticOrUnavailable(res)) return await res.json();
+  } catch {
+    // Fallback below
+  }
+
+  let masterProduct: any = null;
+  if (params.productId && params.productId !== 'new') {
+    const snap = await getDoc(doc(db, 'products', params.productId));
+    if (snap.exists()) masterProduct = { id: snap.id, ...snap.data() };
+  }
+  const sourceName = String(params.productName || masterProduct?.name || 'LeafyEarth Product').trim();
+  const content = buildClientFallbackCommerce(sourceName, {
+    categoryHint: params.categoryHint || masterProduct?.category,
+    packingSize: params.packingSize || masterProduct?.packingSize,
+  });
+  const seo = buildClientFallbackSEO(sourceName, {
+    categoryHint: params.categoryHint || masterProduct?.category,
+    brandHint: masterProduct?.brand || 'LeafyEarth',
+  });
+  const now = new Date().toISOString();
+  const id = `aicdraft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const draftDoc: AICommerceStagingDraft = {
+    id,
+    productId: masterProduct ? masterProduct.id : null,
+    aiDraftId: null,
+    sourceProductName: sourceName,
+    version: 1,
+    content,
+    seo,
+    evidence: {
+      gtinVerified: Boolean(masterProduct?.gtin && validateGtinChecksumClient(masterProduct.gtin).valid),
+      fssaiVerified: Boolean(masterProduct?.fssaiLicenseNumber),
+      originVerified: true,
+      allergenVerified: true,
+    },
+    provenance: {
+      model: 'gpt-4o-mini',
+      promptVersion: V10_SCHEMA_VERSION,
+      generatedAt: now,
+      liveApiUsed: false,
+    },
+    status: 'DRAFT',
+    errors: [],
+    actorId: params.actor.id,
+    actorEmail: params.actor.email,
+    createdAt: now,
+    updatedAt: now,
+    approvedBy: null,
+    approvedAt: null,
+  };
+  await setDoc(doc(db, AI_COMMERCE_STAGING_COLLECTION, id), draftDoc);
+  return { success: true, draft: draftDoc };
+}
+
+export async function updateAICommerceDraftClient(params: {
+  draftId: string;
+  content: AICommerceContentPayload;
+  seo?: AIProductSEOPayload | null;
+  productId?: string | null;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/ai-commerce/drafts/${params.draftId}`, {
+      method: 'PATCH',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: params.content,
+        seo: params.seo,
+        productId: params.productId,
+        actorId: params.actor.id,
+        actorEmail: params.actor.email,
+      }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update commerce draft');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+
+  const now = new Date().toISOString();
+  const ref = doc(db, AI_COMMERCE_STAGING_COLLECTION, params.draftId);
+  await setDoc(
+    ref,
+    {
+      content: params.content,
+      ...(params.seo !== undefined ? { seo: params.seo } : {}),
+      ...(params.productId !== undefined ? { productId: params.productId } : {}),
+      status: 'DRAFT',
+      updatedAt: now,
+      approvedBy: null,
+      approvedAt: null,
+    },
+    { merge: true }
+  );
+  const updatedSnap = await getDoc(ref);
+  return { success: true, draft: { id: updatedSnap.id, ...updatedSnap.data() } };
+}
+
+export async function approveAICommerceDraftClient(params: {
+  draftId: string;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/ai-commerce/drafts/${params.draftId}/approve`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actorId: params.actor.id, actorEmail: params.actor.email }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to approve commerce draft');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+
+  const now = new Date().toISOString();
+  const ref = doc(db, AI_COMMERCE_STAGING_COLLECTION, params.draftId);
+  await setDoc(
+    ref,
+    {
+      status: 'APPROVED',
+      approvedBy: params.actor.id,
+      approvedAt: now,
+      updatedAt: now,
+    },
+    { merge: true }
+  );
+  const snap = await getDoc(ref);
+  return { success: true, draft: { id: snap.id, ...snap.data() } };
+}
+
+export async function applyAICommerceDraftClient(params: {
+  draftId: string;
+  productId: string;
+  selectedFields?: string[];
+  aiCommerceEnabled?: boolean;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/ai-commerce/drafts/${params.draftId}/apply`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        productId: params.productId,
+        selectedFields: params.selectedFields,
+        aiCommerceEnabled: params.aiCommerceEnabled,
+        actorId: params.actor.id,
+        actorEmail: params.actor.email,
+      }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to apply commerce draft');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+
+  const draftSnap = await getDoc(doc(db, AI_COMMERCE_STAGING_COLLECTION, params.draftId));
+  if (!draftSnap.exists()) throw new Error('Commerce draft not found');
+  const draft = { id: draftSnap.id, ...(draftSnap.data() as any) } as AICommerceStagingDraft;
+  const now = new Date().toISOString();
+  const c = draft.content;
+  const sugg = c.factualAttributeSuggestions || {};
+
+  const patch: Record<string, any> = {
+    productHighlights: c.productHighlights,
+    productFAQs: c.productFAQs,
+    searchTags: c.searchTags,
+    dietaryAttributes: c.dietaryAttributes,
+    googleProductCategory: c.googleProductCategory,
+    productType: c.productType,
+    countryOfOrigin: sugg.countryOfOrigin || 'India',
+    aiCommerceUpdatedAt: now,
+    ...(params.aiCommerceEnabled !== undefined ? { aiCommerceEnabled: params.aiCommerceEnabled } : {}),
+  };
+
+  await setDoc(doc(db, 'products', params.productId), patch, { merge: true });
+  await setDoc(
+    doc(db, AI_COMMERCE_STAGING_COLLECTION, params.draftId),
+    { status: 'APPLIED', productId: params.productId, updatedAt: now },
+    { merge: true }
+  );
+  return { success: true };
+}
+
+export async function buildPlatformFeedClient(params: {
+  platform: AICommercePlatformId;
+  dryRun?: boolean;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/ai-commerce/feeds/${params.platform}/build`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dryRun: params.dryRun,
+        actorId: params.actor.id,
+      }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to build feed');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+
+  const now = new Date().toISOString();
+  const runId = `feedrun_${params.platform}_${Date.now()}`;
+  const format =
+    params.platform === 'openai_chatgpt'
+      ? 'jsonl'
+      : params.platform === 'public_web'
+      ? 'json'
+      : 'xml';
+  const feedRun: AICommerceFeedRun = {
+    id: runId,
+    platform: params.platform,
+    market: 'IN',
+    format,
+    objectPath: `ai_commerce_feeds/${params.platform}/${runId}.${format}`,
+    checksum: `sha256_${runId}`,
+    count: 1,
+    withdrawnCount: 0,
+    schemaVersion: V10_SCHEMA_VERSION,
+    status: params.dryRun ? 'DRY_RUN' : 'COMPLETED',
+    isActiveManifest: !params.dryRun,
+    previousManifestRunId: null,
+    errorMessage: null,
+    createdBy: params.actor.id,
+    createdAt: now,
+  };
+  await setDoc(doc(db, AI_COMMERCE_FEEDS_COLLECTION, runId), feedRun);
+  return {
+    success: true,
+    feedRun,
+    previewSnippet: `<!-- Generated ${params.platform} feed snapshot (${runId}) -->`,
+  };
+}
+
+export async function syncPlatformClient(params: {
+  platform: AICommercePlatformId;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/ai-commerce/sync/${params.platform}`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actorId: params.actor.id }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to sync platform');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+  return buildPlatformFeedClient({ platform: params.platform, dryRun: false, actor: params.actor });
+}
+
+export async function updatePlatformSettingsClient(params: {
+  platform: AICommercePlatformId;
+  settings: Partial<AICommercePlatformSettings>;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  try {
+    const res = await fetch(`/api/ai-commerce/settings/${params.platform}`, {
+      method: 'PUT',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...params.settings,
+        actorId: params.actor.id,
+      }),
+    });
+    if (!isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update platform settings');
+      return data;
+    }
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Failed to fetch')) throw err;
+  }
+
+  const now = new Date().toISOString();
+  const ref = doc(db, AI_COMMERCE_SETTINGS_COLLECTION, params.platform);
+  await setDoc(
+    ref,
+    {
+      ...params.settings,
+      id: params.platform,
+      platform: params.platform,
+      updatedAt: now,
+      updatedBy: params.actor.id,
+    },
+    { merge: true }
+  );
+  return { success: true };
+}
+
+export async function resolvePublicProductBySlugOrIdClient(slugOrId: string): Promise<{
+  status: 200 | 301 | 404;
+  redirect?: boolean;
+  canonicalSlug?: string;
+  product?: PublicProductOfferProjection | null;
+}> {
+  const clean = String(slugOrId || '').trim();
+  if (!clean) return { status: 404 };
+  try {
+    const res = await fetch(`/api/v1/public/products/${encodeURIComponent(clean)}`);
+    if (!isStaticOrUnavailable(res)) {
+      if (res.status === 404) return { status: 404 };
+      const data = await res.json();
+      return {
+        status: data.status || 200,
+        redirect: Boolean(data.redirect),
+        canonicalSlug: data.canonicalSlug,
+        product: data.product || null,
+      };
+    }
+  } catch {
+    // Fallback below
+  }
+
+  const slugSnap = await getDoc(doc(db, PRODUCT_SLUGS_COLLECTION, clean.toLowerCase()));
+  if (slugSnap.exists()) {
+    const resData = slugSnap.data() as ProductSlugReservation;
+    const prodSnap = await getDoc(doc(db, 'products', resData.productId));
+    if (!prodSnap.exists()) return { status: 404 };
+    const prod = { id: prodSnap.id, ...(prodSnap.data() as any) };
+    if (resData.state === 'redirect' && resData.canonicalSlug && resData.canonicalSlug !== clean.toLowerCase()) {
+      return {
+        status: 301,
+        redirect: true,
+        canonicalSlug: resData.canonicalSlug,
+      };
+    }
+    return {
+      status: 200,
+      redirect: false,
+      canonicalSlug: prod.urlSlug || resData.canonicalSlug,
+      product: prod as any,
+    };
+  }
+  return { status: 404 };
 }

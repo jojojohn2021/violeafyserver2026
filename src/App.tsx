@@ -41,11 +41,12 @@ const AI_PRODUCT_SUBMENUS: { id: AIProductSubmenuId; label: string }[] = [
   { id: 'drafts', label: 'AI Generated Content' },
   { id: 'review', label: 'Review & Edit Content' },
   { id: 'images', label: 'AI Product Images' },
+  { id: 'research', label: 'Taxation & Market Research' },
+  { id: 'commerce', label: 'AI Commerce & Discoverability' },
   { id: 'sync', label: 'Update Product Master' },
   { id: 'history', label: 'Generation History' },
   { id: 'usage', label: 'AI Usage & Cost' },
   { id: 'config', label: 'AI Configuration' },
-  { id: 'research', label: 'Taxation & Market Research' },
 ];
 
 function CRMAppShell() {
@@ -62,7 +63,12 @@ function CRMAppShell() {
     reloadFirestoreData,
     isLoadingFirestore
   } = useCRM();
-  const [activeTab, setActiveTab] = useState<ModuleTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<ModuleTab>(() => {
+    if (typeof window !== 'undefined' && /^\/products\/[^/]+/i.test(window.location.pathname)) {
+      return 'shopping';
+    }
+    return 'dashboard';
+  });
   const [aiSubmenu, setAiSubmenu] = useState<AIProductSubmenuId>('generate');
   const [aiMenuExpanded, setAiMenuExpanded] = useState<boolean>(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

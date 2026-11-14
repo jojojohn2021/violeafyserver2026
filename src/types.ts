@@ -210,6 +210,57 @@ export interface ProductPerformance {
   availablePackingSizes?: string[];
   gstReference?: string;
   gstVerifiedAt?: string | null;
+
+  // =========================================================================
+  // V9 Product Master Extension: SEO & Canonical Slug Fields (5)
+  // =========================================================================
+  seoTitle?: string;
+  metaDescription?: string;
+  seoKeywords?: string[];
+  urlSlug?: string;
+  seoUpdatedAt?: string | null;
+
+  // =========================================================================
+  // V10 Product Master Extension: AI Commerce & Discoverability Fields (22)
+  // =========================================================================
+  gtin?: string | null;
+  mpn?: string | null;
+  barcode?: string | null;
+  googleProductCategory?: string | null;
+  productType?: string | null;
+  canonicalUrl?: string | null;
+  currency?: string;
+  condition?: 'new' | 'refurbished' | 'used';
+  countryOfOrigin?: string | null;
+  manufacturerName?: string | null;
+  netWeight?: number | null;
+  netWeightUnit?: string | null;
+  netVolume?: number | null;
+  netVolumeUnit?: string | null;
+  shippingWeight?: number | null;
+  shippingWeightUnit?: string | null;
+  shippingDimensions?: {
+    length: number;
+    width: number;
+    height: number;
+    unit: 'cm' | 'in';
+  } | null;
+  productFAQs?: Array<{ question: string; answer: string }>;
+  productHighlights?: string[];
+  searchTags?: string[];
+  dietaryAttributes?: string[];
+  allergenInformation?: string[];
+  certifications?: Array<{
+    name: string;
+    authority?: string;
+    certificateNumber?: string;
+    validUntil?: string;
+  }>;
+  fssaiLicenseNumber?: string | null;
+  aiContentMetadata?: Record<string, AIContentProvenanceEntry>;
+  aiCommerceEnabled?: boolean;
+  aiCommerceUpdatedAt?: string | null;
+  revision?: number;
 }
 
 export interface CustomerPerformance {
@@ -838,6 +889,57 @@ export interface AIProductTranslations {
   te: { name: string };
 }
 
+export interface AIProductSEOPayload {
+  seoTitle: string;
+  metaDescription: string;
+  seoKeywords: string[];
+  urlSlug: string;
+}
+
+export interface AICommerceFAQItem {
+  question: string;
+  answer: string;
+}
+
+export interface AICommerceFactualSuggestions {
+  netWeight?: number | null;
+  netWeightUnit?: 'g' | 'kg' | 'mg' | string | null;
+  netVolume?: number | null;
+  netVolumeUnit?: 'ml' | 'l' | string | null;
+  countryOfOrigin?: string | null;
+  condition?: 'new' | 'refurbished' | 'used';
+}
+
+export interface AICommerceContentPayload {
+  productHighlights: string[];
+  productFAQs: AICommerceFAQItem[];
+  searchTags: string[];
+  dietaryAttributes: string[];
+  googleProductCategory: string | null;
+  productType: string | null;
+  factualAttributeSuggestions?: AICommerceFactualSuggestions | null;
+}
+
+export interface AIContentProvenanceEntry {
+  source: 'ai' | 'manual';
+  draftId?: string | null;
+  versionId?: string | null;
+  model?: string | null;
+  promptVersion?: string | null;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+}
+
+export interface ProductSlugReservation {
+  slug: string;
+  productId: string;
+  state: 'active' | 'redirect';
+  canonicalSlug?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string | null;
+}
+
 export interface AIProductContentPayload {
   english_product_name: string;
   botanical_name: string;
@@ -857,6 +959,10 @@ export interface AIProductContentPayload {
   ayurveda: AIAyurvedaContent | null;
   references: AIContentReference[];
   review_flags: string[];
+  // V9 SEO extension (nullable for backward compatibility with V8 drafts)
+  seo?: AIProductSEOPayload | null;
+  // V10 AI Commerce extension (nullable for backward compatibility)
+  commerce?: AICommerceContentPayload | null;
 }
 
 export interface AIUsageMetadata {
@@ -886,6 +992,12 @@ export interface AIProductVersion {
   edited_at?: string | null;
   approved_by?: string | null;
   approved_at?: string | null;
+  seo_status?: 'DRAFT' | 'APPROVED' | 'REJECTED';
+  seo_approved_by?: string | null;
+  seo_approved_at?: string | null;
+  commerce_status?: 'DRAFT' | 'APPROVED' | 'REJECTED';
+  commerce_approved_by?: string | null;
+  commerce_approved_at?: string | null;
 }
 
 export interface AIProductImage {
@@ -988,6 +1100,8 @@ export interface AIProductDraft {
   approved_version_id: string | null;
   approved_image_id: string | null;
   approved_research_id: string | null;
+  approved_seo_version_id?: string | null;
+  approved_commerce_draft_id?: string | null;
   rejection_reason?: string | null;
   last_synced_at?: string | null;
   created_by: string;
@@ -1006,6 +1120,14 @@ export interface AIProductSyncLog {
   image_action?: 'none' | 'replace_primary' | 'append_gallery';
   approved_image_id?: string | null;
   approved_research_id?: string | null;
+  approved_commerce_draft_id?: string | null;
+  expected_master_revision?: number | null;
+  resulting_master_revision?: number | null;
+  slug_action?: {
+    previousSlug: string | null;
+    newSlug: string | null;
+    redirectCreated: boolean;
+  } | null;
   before_snapshot: Record<string, any>;
   after_snapshot: Record<string, any>;
   result: 'SUCCESS' | 'FAILED';
@@ -1025,6 +1147,16 @@ export interface AIProductEvent {
     | 'SUBMITTED_FOR_REVIEW'
     | 'CONTENT_APPROVED'
     | 'CONTENT_REJECTED'
+    | 'SEO_GENERATED'
+    | 'SEO_EDITED'
+    | 'SEO_APPROVED'
+    | 'SEO_REJECTED'
+    | 'SEO_APPLIED'
+    | 'COMMERCE_GENERATED'
+    | 'COMMERCE_EDITED'
+    | 'COMMERCE_APPROVED'
+    | 'COMMERCE_REJECTED'
+    | 'COMMERCE_APPLIED'
     | 'IMAGE_GENERATED'
     | 'IMAGE_UPLOADED'
     | 'IMAGE_APPROVED'
@@ -1051,7 +1183,252 @@ export type AIProductSubmenuId =
   | 'history'
   | 'usage'
   | 'config'
-  | 'research';
+  | 'research'
+  | 'commerce';
+
+// ============================================================================
+// LeafyEarth | V10 AI Commerce & Product Discoverability Types
+// ============================================================================
+
+export type AICommercePlatformId =
+  | 'google_merchant'
+  | 'public_web'
+  | 'bing_copilot'
+  | 'openai_chatgpt'
+  | 'perplexity';
+
+export type AICommerceLocalReadiness = 'ready' | 'warning' | 'blocked' | 'disabled';
+
+export type AICommerceRemoteStatus =
+  | 'not_submitted'
+  | 'queued'
+  | 'submitted'
+  | 'approved'
+  | 'disapproved'
+  | 'ineligible_market'
+  | 'platform_disabled';
+
+export interface AICommercePlatformSettings {
+  id: AICommercePlatformId;
+  platform: AICommercePlatformId;
+  displayName: string;
+  priority: 'P0' | 'P1' | 'P2';
+  enabled: boolean;
+  market: string; // 'IN'
+  currency: string; // 'INR'
+  marketEligible: boolean;
+  eligibilityNote: string;
+  verifiedDomain: string;
+  schemaVersion: string;
+  credentialRef: string | null;
+  syncPolicy: {
+    mode: 'event_driven_and_scheduled' | 'manual_only';
+    reconcileIntervalMinutes: number;
+    dailyFullRebuild: boolean;
+    dryRunOnly: boolean;
+  };
+  shippingPolicy: {
+    country: string;
+    service: string;
+    flatRateInr: number;
+    freeShippingThresholdInr: number;
+    handlingDaysMin: number;
+    handlingDaysMax: number;
+    transitDaysMin: number;
+    transitDaysMax: number;
+  };
+  returnPolicy: {
+    country: string;
+    returnPolicyCategory: 'finite_return_window' | 'no_returns';
+    returnWindowDays: number;
+    returnMethod: 'by_mail';
+    returnFees: 'free' | 'customer_responsibility';
+    policyUrl: string;
+  };
+  updatedAt: string;
+  updatedBy?: string | null;
+}
+
+export interface AICommerceStagingDraft {
+  id: string;
+  productId: string | null;
+  aiDraftId?: string | null;
+  sourceProductName: string;
+  version: number;
+  content: AICommerceContentPayload;
+  seo?: AIProductSEOPayload | null;
+  evidence: {
+    gtinVerified: boolean;
+    fssaiVerified: boolean;
+    originVerified: boolean;
+    allergenVerified: boolean;
+    notes?: string;
+  };
+  provenance: {
+    model: string;
+    promptVersion: string;
+    generatedAt: string;
+    liveApiUsed: boolean;
+  };
+  status: 'DRAFT' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'APPLIED';
+  errors: string[];
+  actorId: string;
+  actorEmail?: string;
+  createdAt: string;
+  updatedAt: string;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+}
+
+export interface AICommerceFeedRun {
+  id: string;
+  platform: AICommercePlatformId;
+  market: string;
+  format: 'xml' | 'jsonl' | 'json';
+  objectPath: string;
+  checksum: string;
+  count: number;
+  withdrawnCount: number;
+  schemaVersion: string;
+  status: 'COMPLETED' | 'FAILED' | 'DRY_RUN';
+  isActiveManifest: boolean;
+  previousManifestRunId?: string | null;
+  errorMessage?: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface AICommerceSyncJob {
+  id: string;
+  productId: string;
+  revision: number;
+  platform: AICommercePlatformId;
+  action: 'UPSERT_PROJECTION' | 'WITHDRAW_PROJECTION' | 'SYNC_FEED';
+  state: 'PENDING' | 'LEASED' | 'COMPLETED' | 'RETRY_SCHEDULED' | 'DEAD_LETTER';
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt: string;
+  leaseUntil: string | null;
+  idempotencyKey: string;
+  lastError?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AICommerceSyncLog {
+  id: string;
+  jobId: string;
+  productId: string;
+  platform: AICommercePlatformId;
+  action: string;
+  sanitizedResult: string;
+  status: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  errorCode?: string | null;
+  timestamp: string;
+}
+
+export interface AICommerceValidationIssue {
+  code: string;
+  field: string;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  remediation?: string;
+}
+
+export interface AICommerceValidationReport {
+  id: string;
+  productId: string;
+  offerId: string;
+  platform: AICommercePlatformId;
+  revision: number;
+  localReadiness: AICommerceLocalReadiness;
+  issues: AICommerceValidationIssue[];
+  severity: 'error' | 'warning' | 'ok';
+  checkedAt: string;
+}
+
+export interface AICommercePlatformStatus {
+  id: string;
+  productId: string;
+  offerId: string;
+  platform: AICommercePlatformId;
+  localReadiness: AICommerceLocalReadiness;
+  remoteStatus: AICommerceRemoteStatus;
+  remoteId: string | null;
+  checkedAt: string;
+  issues: AICommerceValidationIssue[];
+}
+
+export interface AICommerceAnalyticsRecord {
+  id: string;
+  periodId: string; // e.g. '2026-11'
+  platform: AICommercePlatformId;
+  feedBuildsCount: number;
+  publishedOffersCount: number;
+  readyOffersCount: number;
+  blockedOffersCount: number;
+  publicPageViews: number;
+  feedFetchesCount: number;
+  updatedAt: string;
+}
+
+/**
+ * Allowlisted approved public projection stored in `public_products/{offerId}`.
+ * Strictly excludes internal stock counts, cost data, competitor web prices,
+ * AI prompts, and private `aiContentMetadata`.
+ */
+export interface PublicProductOfferProjection {
+  id: string;
+  offerId: string;
+  productId: string;
+  itemGroupId: string;
+  sku: string;
+  title: string;
+  name: string;
+  description: string;
+  urlSlug: string;
+  canonicalUrl: string;
+  imageUrl: string;
+  additionalImageUrls: string[];
+  brand: string;
+  category: string;
+  googleProductCategory: string;
+  productType: string;
+  price: number;
+  salePrice: number | null;
+  mrp: number | null;
+  currency: 'INR';
+  availability: 'in_stock' | 'out_of_stock' | 'preorder';
+  condition: 'new' | 'refurbished' | 'used';
+  packingSize: string;
+  unit: string;
+  gtin: string | null;
+  mpn: string | null;
+  identifierExists: boolean;
+  countryOfOrigin: string;
+  manufacturerName: string | null;
+  fssaiLicenseNumber: string | null;
+  netWeight: number | null;
+  netWeightUnit: string | null;
+  netVolume: number | null;
+  netVolumeUnit: string | null;
+  productHighlights: string[];
+  productFAQs: AICommerceFAQItem[];
+  searchTags: string[];
+  dietaryAttributes: string[];
+  allergenInformation: string[];
+  seoTitle: string;
+  metaDescription: string;
+  seoKeywords: string[];
+  isAyurvedicProduct: boolean;
+  botanicalName: string | null;
+  sanskritName: string | null;
+  rating: number | null;
+  reviewsCount: number;
+  aiGeneratedContentDisclosure: boolean;
+  revision: number;
+  updatedAt: string;
+}
 
 
 

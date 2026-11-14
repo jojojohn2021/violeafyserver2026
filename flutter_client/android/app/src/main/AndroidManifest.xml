@@ -1,0 +1,27 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.leafyearth.app">
+
+    <application
+        android:label="LeafyEarth"
+        android:name="${applicationName}">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+            <!-- V9/V10 Android App Links for Canonical Product URLs (/products/<slug>) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="leafyearth.com" android:pathPrefix="/products/" />
+                <data android:scheme="https" android:host="www.leafyearth.com" android:pathPrefix="/products/" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

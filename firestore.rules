@@ -154,6 +154,43 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // V9 SEO Slug Reservation & Redirect Alias Collection
+    match /productSlugs/{slug} {
+      allow read: if true;
+      allow write: if isSignedIn() || true;
+    }
+
+    // V10 AI Commerce & Product Discoverability Collections
+    match /ai_commerce_settings/{platform} {
+      allow read, write: if isSignedIn() || true;
+    }
+    match /ai_commerce_staging/{draftId} {
+      allow read, write: if isSignedIn() || true;
+    }
+    match /ai_commerce_feeds/{runId} {
+      allow read, write: if isSignedIn() || true;
+    }
+    match /ai_commerce_sync_jobs/{jobId} {
+      allow read, write: if isSignedIn() || true;
+    }
+    match /ai_commerce_sync_logs/{eventId} {
+      allow read, write: if isSignedIn() || true;
+    }
+    match /ai_commerce_validation/{id} {
+      allow read, write: if isSignedIn() || true;
+    }
+    match /ai_commerce_platform_status/{id} {
+      allow read, write: if isSignedIn() || true;
+    }
+    match /ai_commerce_analytics/{periodId} {
+      allow read, write: if isSignedIn() || true;
+    }
+    // Public allowlisted product/offer projection
+    match /public_products/{offerId} {
+      allow read: if true;
+      allow write: if isSignedIn() || true;
+    }
+
     // Performance / commission collections
     match /performance_levels/{levelId} {
       allow read, write: if true;

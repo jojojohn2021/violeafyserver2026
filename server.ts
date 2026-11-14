@@ -25,6 +25,7 @@ import { registerProductDetailsRoutes, PRODUCT_DETAILS_COLLECTION } from "./src/
 import { registerCustomerReviewRoutes, CUSTOMER_REVIEWS_COLLECTION, CUSTOMER_REVIEW_AGGREGATES_COLLECTION } from "./src/services/customerReviewService";
 import { registerPreorderManagementRoutes, PREORDERS_COLLECTION, PREORDER_IDEMPOTENCY_COLLECTION, PREORDER_EVENTS_COLLECTION, PAYMENT_ALLOCATIONS_COLLECTION } from "./src/services/preorderManagementService";
 import { registerAIProductContentRoutes } from "./src/services/aiProductContentService";
+import { registerAICommerceAndDiscoveryRoutes, syncProductToPublicProjectionAndQueueJobs } from "./src/services/aiCommerceService";
 import { allocateUniqueEightDigitSku, enforceSkuImmutabilityOnUpdate, isValidEightDigitNumericSku } from "./src/services/skuAllocationService";
 
 dotenv.config();
@@ -740,6 +741,11 @@ registerPreorderManagementRoutes(app, {
   },
 });
 registerAIProductContentRoutes(app, {
+  db: adminDb,
+  auth: adminAuth,
+  storage: adminStorage,
+});
+registerAICommerceAndDiscoveryRoutes(app, {
   db: adminDb,
   auth: adminAuth,
   storage: adminStorage,
@@ -2477,9 +2483,30 @@ app.get("/api/db/:collection/:id", async (req: express.Request, res: express.Res
 
 app.post("/api/db/:collection", async (req: express.Request, res: express.Response) => {
   try {
-    if (protectedOperationCollections.has(String(req.params.collection).toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
-    await saveCollectionDoc(req.params.collection, req.body);
-    return res.json({ success: true });
+    const colName = String(req.params.collection);
+    if (protectedOperationCollections.has(colName.toLowerCase())) return res.status(403).json({ error: 'Operational records must be accessed through the order operations API.' });
+    let docBody = { ...(req.body || {}) };
+    if (colName === 'products' && adminDb) {
+      const prodId = String(docBody.id || docBody._id || '');
+      const existingSnap = prodId ? await adminDb.collection('products').doc(prodId).get() : null;
+      if (existingSnap && existingSnap.exists) {
+        const immutability = enforceSkuImmutabilityOnUpdate(existingSnap.data() as any, docBody, true);
+        if (!immutability.allowed) {
+          return res.status(400).json({ error: immutability.error });
+        }
+        docBody = immutability.sanitizedPatch;
+      } else if (!isValidEightDigitNumericSku(docBody.sku)) {
+        docBody.sku = await allocateUniqueEightDigitSku(adminDb);
+      }
+    }
+    await saveCollectionDoc(colName, docBody);
+    if (colName === 'products' && adminDb && (docBody.id || docBody._id)) {
+      await syncProductToPublicProjectionAndQueueJobs(adminDb, {
+        ...docBody,
+        id: String(docBody.id || docBody._id),
+      }).catch((err) => console.warn('[AI-COMMERCE] Projection sync warning:', err));
+    }
+    return res.json({ success: true, sku: docBody.sku });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || "Failed to save collection document" });
   }

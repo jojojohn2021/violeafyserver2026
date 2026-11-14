@@ -5,12 +5,15 @@ import {
   Clock,
   DollarSign,
   Edit3,
+  ExternalLink,
   FileCheck,
   FileText,
   GitCompare,
+  Globe,
   History,
   Image as ImageIcon,
   Leaf,
+  Link2,
   Loader2,
   Plus,
   RefreshCw,
@@ -27,6 +30,12 @@ import {
 import { useCRM } from '../store';
 import type {
   AIAyurvedaApplicability,
+  AICommerceFeedRecord,
+  AICommerceGeneratedPayload,
+  AICommercePlatformId,
+  AICommercePlatformSetting,
+  AICommerceStagingRecord,
+  AICommerceValidationRecord,
   AIEvidenceLevel,
   AIHealthBenefit,
   AIProductContentPayload,
@@ -35,29 +44,45 @@ import type {
   AIProductEvent,
   AIProductImage,
   AIProductResearchRecord,
+  AIProductSEOContent,
   AIProductSubmenuId,
   AIProductSyncLog,
   AIProductVersion,
   AIReviewStatus,
+  ProductFAQItem,
   WebPriceSourceOffer,
 } from '../types';
 import {
+  applyAICommerceDraftClient,
+  applyAIDraftSEOToMasterClient,
+  applyAIDraftToMaster,
+  approveAICommerceDraftClient,
+  approveAIDraftSEOClient,
   approveOrRejectAIProductDraft,
   approveOrRejectAIProductImage,
   approveOrRejectAIProductResearch,
-  applyAIDraftToMaster,
+  buildAICommerceFeedClient,
   calculateMarketPriceRangeClient,
+  checkProductSlugAvailabilityClient,
   compareAIDraftWithMaster,
+  fetchAICommerceOverviewClient,
   fetchAIConfigStatus,
   fetchAIProductDraftDetail,
   fetchAIProductDrafts,
+  generateAICommerceDraftClient,
+  generateAIDraftSEOClient,
   generateAIProductDraft,
   generateAIProductImageClient,
   MasterFieldComparisonItem,
+  normalizeUrlSlugClient,
   regenerateAIProductDraft,
+  saveAICommerceDraftClient,
+  saveAICommercePlatformSettingClient,
+  saveAIDraftSEOEditsClient,
   saveAIProductDraftEdits,
   saveAIProductResearchClient,
   submitAIProductDraftForReview,
+  validateProductCommerceReadinessClient,
 } from '../utils/aiProductContentApi';
 
 interface AIProductContentViewProps {
@@ -76,6 +101,7 @@ const SUBMENU_TABS: Array<{
   { id: 'review', label: 'Review & Edit Content', shortLabel: 'Review & Edit', icon: Edit3 },
   { id: 'images', label: 'AI Product Images', shortLabel: 'Images (1000×1000)', icon: ImageIcon },
   { id: 'research', label: 'Taxation & Market Research', shortLabel: 'Tax & Web Price', icon: Scale },
+  { id: 'commerce', label: 'AI Commerce & Discoverability', shortLabel: 'AI Commerce (V10)', icon: Globe },
   { id: 'sync', label: 'Update Product Master', shortLabel: 'Master Sync', icon: GitCompare },
   { id: 'history', label: 'Generation History', shortLabel: 'History & Audit', icon: History },
   { id: 'usage', label: 'AI Usage & Cost', shortLabel: 'Usage & Cost', icon: DollarSign },
@@ -201,6 +227,69 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
   // 9. Config status
   const [aiConfig, setAiConfig] = useState<any>(null);
 
+  // V9 SEO state (Review & Edit panel)
+  const [seoForm, setSeoForm] = useState<AIProductSEOContent>({
+    seoTitle: '',
+    metaDescription: '',
+    seoKeywords: [],
+    urlSlug: '',
+  });
+  const [seoKeywordsInput, setSeoKeywordsInput] = useState<string>('');
+  const [slugCheckState, setSlugCheckState] = useState<{
+    checking: boolean;
+    available?: boolean;
+    normalizedSlug?: string;
+    conflictProductId?: string | null;
+    suggestedSlug?: string;
+    error?: string;
+  }>({ checking: false });
+  const [savingSeo, setSavingSeo] = useState<boolean>(false);
+
+  // V10 AI Commerce & Discoverability state
+  const [commerceOverview, setCommerceOverview] = useState<{
+    settings: AICommercePlatformSetting[];
+    staging: AICommerceStagingRecord[];
+    feeds: AICommerceFeedRecord[];
+    validation: AICommerceValidationRecord[];
+    readinessSummary: {
+      totalProducts: number;
+      commerceEnabledCount: number;
+      publishedProjectionCount: number;
+      activeSlugCount: number;
+      readyCount: number;
+      warningCount: number;
+      blockedCount: number;
+      disabledCount: number;
+    };
+  } | null>(null);
+  const [loadingCommerce, setLoadingCommerce] = useState<boolean>(false);
+  const [selectedCommerceProductId, setSelectedCommerceProductId] = useState<string>('');
+  const [commerceForm, setCommerceForm] = useState<AICommerceGeneratedPayload>({
+    seoTitle: '',
+    metaDescription: '',
+    seoKeywords: [],
+    urlSlug: '',
+    productHighlights: [],
+    productFAQs: [],
+    searchTags: [],
+    dietaryAttributes: [],
+    allergenInformation: '',
+    googleProductCategory: 'Food, Beverages & Tobacco > Food Items > Seasonings & Spices > Herbs & Spices',
+    productType: 'Spices & Botanicals',
+    countryOfOrigin: 'India',
+    netWeight: 100,
+    netWeightUnit: 'g',
+    netVolume: null,
+    netVolumeUnit: null,
+  });
+  const [enableCommerceOnApply, setEnableCommerceOnApply] = useState<boolean>(true);
+  const [busyCommerceAction, setBusyCommerceAction] = useState<boolean>(false);
+  const [feedPreviewModal, setFeedPreviewModal] = useState<{
+    title: string;
+    format: string;
+    content: string;
+  } | null>(null);
+
   const loadDraftsList = useCallback(async () => {
     setLoadingList(true);
     try {
@@ -244,6 +333,28 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
         if (payload) {
           setEditedPayload(JSON.parse(JSON.stringify(payload)));
           if (payload.form) setImgProductForm(payload.form);
+          const seoSource: AIProductSEOContent =
+            res.currentVersion?.seo_edited ||
+            res.currentVersion?.seo_generated ||
+            payload.seo || {
+              seoTitle: `${payload.english_product_name} | LeafyEarth`,
+              metaDescription: (payload.description || '').slice(0, 155),
+              seoKeywords: [
+                payload.english_product_name.toLowerCase(),
+                (payload.category || 'natural products').toLowerCase(),
+                'leafyearth',
+                'pure quality',
+                'buy online india',
+              ],
+              urlSlug: normalizeUrlSlugClient(payload.english_product_name),
+            };
+          setSeoForm({
+            seoTitle: seoSource.seoTitle || '',
+            metaDescription: seoSource.metaDescription || '',
+            seoKeywords: Array.isArray(seoSource.seoKeywords) ? seoSource.seoKeywords : [],
+            urlSlug: seoSource.urlSlug || '',
+          });
+          setSeoKeywordsInput((seoSource.seoKeywords || []).join(', '));
         } else {
           setEditedPayload(null);
         }
@@ -598,6 +709,391 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
       setBanner({ type: 'error', message: err?.message || 'Failed to synchronize with Product Master' });
     } finally {
       setApplyingSync(false);
+    }
+  };
+
+  // =========================================================================
+  // V9 SEO Handlers
+  // =========================================================================
+  const handleCheckSlugAvailability = useCallback(
+    async (slugCandidate: string) => {
+      const normalized = normalizeUrlSlugClient(slugCandidate);
+      if (!normalized) {
+        setSlugCheckState({ checking: false, available: false, error: 'Enter a valid URL slug.' });
+        return;
+      }
+      setSlugCheckState({ checking: true });
+      try {
+        const res = await checkProductSlugAvailabilityClient(
+          normalized,
+          linkedMasterId || draftDetail?.draft.master_product_id || undefined
+        );
+        setSlugCheckState({
+          checking: false,
+          available: res.available,
+          normalizedSlug: res.normalizedSlug || normalized,
+          conflictProductId: res.conflictProductId || null,
+          suggestedSlug: res.suggestedSlug || normalized,
+        });
+      } catch (err: any) {
+        setSlugCheckState({
+          checking: false,
+          available: false,
+          error: err?.message || 'Failed to check slug availability',
+        });
+      }
+    },
+    [linkedMasterId, draftDetail]
+  );
+
+  const handleGenerateSEOForDraft = async () => {
+    if (!selectedDraftId) return;
+    setSavingSeo(true);
+    setBanner(null);
+    try {
+      const res = await generateAIDraftSEOClient({ draftId: selectedDraftId, actor });
+      if (res.seo) {
+        setSeoForm(res.seo);
+        setSeoKeywordsInput((res.seo.seoKeywords || []).join(', '));
+        if (editedPayload) {
+          setEditedPayload({ ...editedPayload, seo: res.seo });
+        }
+        await handleCheckSlugAvailability(res.seo.urlSlug);
+      }
+      await loadSelectedDraftDetail(selectedDraftId);
+      setBanner({
+        type: 'success',
+        message: 'Generated V9 SEO metadata (SEO Title, Meta Description, Keywords & Canonical Slug) in staging.',
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Failed to generate V9 SEO metadata' });
+    } finally {
+      setSavingSeo(false);
+    }
+  };
+
+  const handleSaveSEOEdits = async (approveAfterSave = false) => {
+    if (!selectedDraftId) return;
+    setSavingSeo(true);
+    setBanner(null);
+    try {
+      const normalizedKeywords = Array.from(
+        new Set(
+          seoKeywordsInput
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((k) => k.slice(0, 80))
+        )
+      );
+      const nextSeo: AIProductSEOContent = {
+        seoTitle: seoForm.seoTitle.trim(),
+        metaDescription: seoForm.metaDescription.trim(),
+        seoKeywords: normalizedKeywords,
+        urlSlug: normalizeUrlSlugClient(seoForm.urlSlug || seoForm.seoTitle),
+      };
+      setSeoForm(nextSeo);
+      setSeoKeywordsInput(normalizedKeywords.join(', '));
+
+      await saveAIDraftSEOEditsClient({
+        draftId: selectedDraftId,
+        seo: nextSeo,
+        actor,
+      });
+
+      if (approveAfterSave) {
+        await approveAIDraftSEOClient({
+          draftId: selectedDraftId,
+          action: 'APPROVE',
+          actor,
+        });
+      }
+
+      await loadSelectedDraftDetail(selectedDraftId);
+      setBanner({
+        type: 'success',
+        message: approveAfterSave
+          ? 'V9 SEO Metadata validated and APPROVED for Product Master synchronization.'
+          : 'V9 SEO Metadata saved to staging (ai_product_versions.seo_edited).',
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Failed to save V9 SEO metadata' });
+    } finally {
+      setSavingSeo(false);
+    }
+  };
+
+  const handleApplyApprovedSEOToMaster = async () => {
+    if (!selectedDraftId) return;
+    const targetMaster = linkedMasterId || draftDetail?.draft.master_product_id || '';
+    if (!targetMaster) {
+      setBanner({
+        type: 'error',
+        message: 'Link a target Master Product before applying approved SEO metadata.',
+      });
+      return;
+    }
+    setSavingSeo(true);
+    setBanner(null);
+    try {
+      await handleSaveSEOEdits(true);
+      const res = await applyAIDraftSEOToMasterClient({
+        draftId: selectedDraftId,
+        masterProductId: targetMaster,
+        selectedFields: ['seoTitle', 'metaDescription', 'seoKeywords', 'urlSlug'],
+        actor,
+      });
+      await reloadFirestoreData();
+      await loadSelectedDraftDetail(selectedDraftId);
+      setBanner({
+        type: 'success',
+        message: `Published V9 SEO & canonical slug (/products/${res.urlSlug || seoForm.urlSlug}) to Master Product with transactional productSlugs reservation.`,
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Failed to apply SEO to Master Product' });
+    } finally {
+      setSavingSeo(false);
+    }
+  };
+
+  // =========================================================================
+  // V10 AI Commerce & Discoverability Handlers
+  // =========================================================================
+  const loadCommerceOverview = useCallback(async () => {
+    setLoadingCommerce(true);
+    try {
+      const res = await fetchAICommerceOverviewClient();
+      setCommerceOverview({
+        settings: res.settings || [],
+        staging: res.staging || [],
+        feeds: res.feeds || [],
+        validation: res.validation || [],
+        readinessSummary: res.readinessSummary || {
+          totalProducts: products.length,
+          commerceEnabledCount: 0,
+          publishedProjectionCount: 0,
+          activeSlugCount: 0,
+          readyCount: 0,
+          warningCount: 0,
+          blockedCount: 0,
+          disabledCount: 0,
+        },
+      });
+      if (!selectedCommerceProductId && products.length > 0) {
+        setSelectedCommerceProductId(products[0].id);
+      }
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Failed to load AI Commerce overview' });
+    } finally {
+      setLoadingCommerce(false);
+    }
+  }, [products, selectedCommerceProductId]);
+
+  useEffect(() => {
+    if (activeSubmenu === 'commerce') {
+      loadCommerceOverview();
+    }
+  }, [activeSubmenu, loadCommerceOverview]);
+
+  useEffect(() => {
+    if (!selectedCommerceProductId) return;
+    const stagingDoc = commerceOverview?.staging.find((s) => s.productId === selectedCommerceProductId);
+    const prod = products.find((p) => p.id === selectedCommerceProductId);
+    const sourcePayload = stagingDoc?.editedPayload || stagingDoc?.generatedPayload;
+    if (sourcePayload) {
+      setCommerceForm(JSON.parse(JSON.stringify(sourcePayload)));
+    } else if (prod) {
+      setCommerceForm({
+        seoTitle: prod.seoTitle || `${prod.name} | LeafyEarth`,
+        metaDescription:
+          prod.metaDescription ||
+          (prod.description || `${prod.name} by ${prod.brand || 'LeafyEarth'}.`).slice(0, 155),
+        seoKeywords:
+          Array.isArray(prod.seoKeywords) && prod.seoKeywords.length >= 5
+            ? prod.seoKeywords
+            : [prod.name.toLowerCase(), (prod.category || 'spices').toLowerCase(), 'leafyearth', 'india', 'natural'],
+        urlSlug: prod.urlSlug || normalizeUrlSlugClient(prod.name),
+        productHighlights: Array.isArray(prod.productHighlights)
+          ? prod.productHighlights
+          : Array.isArray(prod.keyFeatures)
+          ? prod.keyFeatures.slice(0, 6)
+          : [],
+        productFAQs: Array.isArray(prod.productFAQs) ? prod.productFAQs : [],
+        searchTags: Array.isArray(prod.searchTags) ? prod.searchTags : [],
+        dietaryAttributes: Array.isArray(prod.dietaryAttributes)
+          ? prod.dietaryAttributes
+          : ['100% Natural', 'Vegetarian'],
+        allergenInformation:
+          prod.allergenInformation || 'Packed in a facility that handles culinary herbs and spices.',
+        googleProductCategory:
+          prod.googleProductCategory ||
+          'Food, Beverages & Tobacco > Food Items > Seasonings & Spices > Herbs & Spices',
+        productType: prod.productType || `Home & Kitchen > Grocery > ${prod.category || 'Botanicals'}`,
+        countryOfOrigin: prod.countryOfOrigin || 'India',
+        netWeight: prod.netWeight ?? 100,
+        netWeightUnit: prod.netWeightUnit ?? 'g',
+        netVolume: prod.netVolume ?? null,
+        netVolumeUnit: prod.netVolumeUnit ?? null,
+      });
+    }
+  }, [selectedCommerceProductId, commerceOverview, products]);
+
+  const handleGenerateCommerceForProduct = async () => {
+    if (!selectedCommerceProductId) return;
+    setBusyCommerceAction(true);
+    setBanner(null);
+    try {
+      const res = await generateAICommerceDraftClient({
+        productId: selectedCommerceProductId,
+        draftId: selectedDraftId,
+        actor,
+      });
+      if (res.staging?.editedPayload || res.staging?.generatedPayload) {
+        setCommerceForm(res.staging.editedPayload || res.staging.generatedPayload);
+      }
+      await loadCommerceOverview();
+      setBanner({
+        type: 'success',
+        message: 'Generated V10 AI Commerce draft (Highlights, FAQs, Google Category, Structured Attributes & SEO).',
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Failed to generate V10 AI Commerce draft' });
+    } finally {
+      setBusyCommerceAction(false);
+    }
+  };
+
+  const handleSaveAndApproveCommerce = async (approveAfterSave = false) => {
+    if (!selectedCommerceProductId) return;
+    setBusyCommerceAction(true);
+    setBanner(null);
+    try {
+      await saveAICommerceDraftClient({
+        productId: selectedCommerceProductId,
+        editedPayload: commerceForm,
+        actor,
+      });
+      if (approveAfterSave) {
+        await approveAICommerceDraftClient({
+          productId: selectedCommerceProductId,
+          action: 'APPROVE',
+          actor,
+        });
+      }
+      await loadCommerceOverview();
+      setBanner({
+        type: 'success',
+        message: approveAfterSave
+          ? 'V10 AI Commerce draft validated and APPROVED.'
+          : 'V10 AI Commerce draft saved to staging (ai_commerce_staging).',
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Failed to save V10 AI Commerce draft' });
+    } finally {
+      setBusyCommerceAction(false);
+    }
+  };
+
+  const handleApplyCommerceToMaster = async () => {
+    if (!selectedCommerceProductId) return;
+    setBusyCommerceAction(true);
+    setBanner(null);
+    try {
+      await saveAICommerceDraftClient({
+        productId: selectedCommerceProductId,
+        editedPayload: commerceForm,
+        actor,
+      });
+      await approveAICommerceDraftClient({
+        productId: selectedCommerceProductId,
+        action: 'APPROVE',
+        actor,
+      });
+      const res = await applyAICommerceDraftClient({
+        productId: selectedCommerceProductId,
+        enableAICommerce: enableCommerceOnApply,
+        actor,
+      });
+      await reloadFirestoreData();
+      await loadCommerceOverview();
+      setBanner({
+        type: 'success',
+        message: `Applied V10 AI Commerce fields to Master Product & published allowlisted projection (/products/${res.urlSlug || commerceForm.urlSlug}).`,
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Failed to apply AI Commerce to Master' });
+    } finally {
+      setBusyCommerceAction(false);
+    }
+  };
+
+  const handleValidateCommerceProduct = async (productId: string) => {
+    setBusyCommerceAction(true);
+    try {
+      await validateProductCommerceReadinessClient(productId);
+      await loadCommerceOverview();
+      setBanner({
+        type: 'success',
+        message: `Platform readiness validation completed for product ${productId}.`,
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Validation failed' });
+    } finally {
+      setBusyCommerceAction(false);
+    }
+  };
+
+  const handleBuildCommerceFeeds = async (dryRun: boolean, platform: AICommercePlatformId | 'all' = 'all') => {
+    setBusyCommerceAction(true);
+    setBanner(null);
+    try {
+      const res = await buildAICommerceFeedClient({
+        platform,
+        dryRun,
+        actor,
+      });
+      await loadCommerceOverview();
+      const firstFeed = res.feeds?.[0];
+      if (firstFeed && firstFeed.contentPreview) {
+        setFeedPreviewModal({
+          title: `${firstFeed.platform} (${dryRun ? 'Dry-Run Preview' : 'Published Snapshot'})`,
+          format: firstFeed.format,
+          content: firstFeed.contentPreview,
+        });
+      }
+      setBanner({
+        type: 'success',
+        message: dryRun
+          ? `Dry-run feed build succeeded (${res.feeds?.length || 0} feed(s) validated).`
+          : `Published ${res.feeds?.length || 0} feed snapshot(s) to ai_commerce_feeds.`,
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Feed generation failed' });
+    } finally {
+      setBusyCommerceAction(false);
+    }
+  };
+
+  const handleTogglePlatformSetting = async (
+    setting: AICommercePlatformSetting,
+    patch: Partial<AICommercePlatformSetting>
+  ) => {
+    setBusyCommerceAction(true);
+    try {
+      await saveAICommercePlatformSettingClient({
+        ...setting,
+        ...patch,
+        actor,
+      });
+      await loadCommerceOverview();
+      setBanner({
+        type: 'success',
+        message: `Updated platform configuration for ${setting.platformName}.`,
+      });
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err?.message || 'Failed to update platform setting' });
+    } finally {
+      setBusyCommerceAction(false);
     }
   };
 
@@ -1999,6 +2495,255 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                       </div>
                     )}
                   </div>
+
+                  {/* Section E: V9 SEO Metadata, Canonical Public Slug & SERP Preview (Sections 4–7) */}
+                  <div className="p-5 rounded-2xl border border-indigo-200 bg-indigo-50/30 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-black text-indigo-950 flex items-center gap-2">
+                          <Globe className="w-4 h-4 text-indigo-700" />
+                          5. SEO Metadata, Canonical URL Slug & SERP Preview (V9 Override — Sections 4–7)
+                        </h3>
+                        <p className="text-[11px] text-slate-600">
+                          Editorial targets: SEO Title <strong>50–60 chars</strong> (max 120), Meta Description{' '}
+                          <strong>140–160 chars</strong> (max 320), <strong>5–12</strong> deduplicated keywords,
+                          and unique <code>productSlugs/{'{slug}'}</code> reservation.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                            draftDetail.currentVersion?.seo_review_status === 'approved'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : 'bg-amber-100 text-amber-800 border border-amber-300'
+                          }`}
+                        >
+                          SEO: {draftDetail.currentVersion?.seo_review_status || 'pending_review'}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={savingSeo}
+                          onClick={handleGenerateSEOForDraft}
+                          className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center gap-1"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          Generate V9 SEO
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-bold text-slate-700">
+                            SEO Title (Target 50–60, Max 120)
+                          </label>
+                          <span
+                            className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                              seoForm.seoTitle.length >= 50 && seoForm.seoTitle.length <= 60
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : seoForm.seoTitle.length > 0 && seoForm.seoTitle.length <= 120
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {seoForm.seoTitle.length} / 120 chars
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          value={seoForm.seoTitle}
+                          onChange={(e) => {
+                            const nextSeo = { ...seoForm, seoTitle: e.target.value };
+                            setSeoForm(nextSeo);
+                            setEditedPayload({ ...editedPayload, seo: nextSeo });
+                          }}
+                          placeholder="e.g., Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-semibold"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Canonical URL Slug (<code>^[a-z0-9]+(?:-[a-z0-9]+)*$</code>)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => handleCheckSlugAvailability(seoForm.urlSlug || seoForm.seoTitle)}
+                            className="text-[10px] font-bold text-indigo-700 hover:underline flex items-center gap-1"
+                          >
+                            <Link2 className="w-3 h-3" /> Check Availability
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={seoForm.urlSlug}
+                            onChange={(e) => {
+                              const nextSeo = { ...seoForm, urlSlug: e.target.value.toLowerCase() };
+                              setSeoForm(nextSeo);
+                              setEditedPayload({ ...editedPayload, seo: nextSeo });
+                            }}
+                            onBlur={() => {
+                              const norm = normalizeUrlSlugClient(seoForm.urlSlug || seoForm.seoTitle);
+                              const nextSeo = { ...seoForm, urlSlug: norm };
+                              setSeoForm(nextSeo);
+                              setEditedPayload({ ...editedPayload, seo: nextSeo });
+                              if (norm) handleCheckSlugAvailability(norm);
+                            }}
+                            placeholder="e.g., cumin-seeds-jeera-whole"
+                            className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-mono"
+                          />
+                        </div>
+                        {slugCheckState.available !== undefined && (
+                          <div className="mt-1 flex items-center justify-between text-[10px]">
+                            {slugCheckState.available ? (
+                              <span className="text-emerald-700 font-bold">
+                                ✓ Slug available: /products/{slugCheckState.normalizedSlug || seoForm.urlSlug}
+                              </span>
+                            ) : (
+                              <span className="text-rose-700 font-bold">
+                                ✗ Conflict with product {slugCheckState.conflictProductId}.{' '}
+                                {slugCheckState.suggestedSlug && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextSeo = {
+                                        ...seoForm,
+                                        urlSlug: slugCheckState.suggestedSlug!,
+                                      };
+                                      setSeoForm(nextSeo);
+                                      setEditedPayload({ ...editedPayload, seo: nextSeo });
+                                      handleCheckSlugAvailability(slugCheckState.suggestedSlug!);
+                                    }}
+                                    className="underline ml-1 text-indigo-800"
+                                  >
+                                    Use {slugCheckState.suggestedSlug}
+                                  </button>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-700">
+                          Meta Description (Target 140–160, Max 320)
+                        </label>
+                        <span
+                          className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                            seoForm.metaDescription.length >= 140 &&
+                            seoForm.metaDescription.length <= 160
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : seoForm.metaDescription.length > 0 &&
+                                seoForm.metaDescription.length <= 320
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {seoForm.metaDescription.length} / 320 chars
+                        </span>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={seoForm.metaDescription}
+                        onChange={(e) => {
+                          const nextSeo = { ...seoForm, metaDescription: e.target.value };
+                          setSeoForm(nextSeo);
+                          setEditedPayload({ ...editedPayload, seo: nextSeo });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-700">
+                          SEO Keywords (Comma-separated, 5–12 deduplicated terms, max 80 chars each)
+                        </label>
+                        <span className="text-[10px] font-mono font-bold text-slate-600">
+                          {
+                            seoKeywordsInput
+                              .split(',')
+                              .map((s) => s.trim())
+                              .filter(Boolean).length
+                          }{' '}
+                          / 12 terms
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        value={seoKeywordsInput}
+                        onChange={(e) => {
+                          setSeoKeywordsInput(e.target.value);
+                          const kw = Array.from(
+                            new Set(
+                              e.target.value
+                                .split(',')
+                                .map((s) => s.trim())
+                                .filter(Boolean)
+                            )
+                          );
+                          const nextSeo = { ...seoForm, seoKeywords: kw };
+                          setSeoForm(nextSeo);
+                          setEditedPayload({ ...editedPayload, seo: nextSeo });
+                        }}
+                        placeholder="cumin seeds, jeera whole, cuminum cyminum, indian spices, leafyearth"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+                      />
+                    </div>
+
+                    {/* Google SERP Live Preview */}
+                    <div className="p-3.5 rounded-xl bg-white border border-slate-200 space-y-1">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        Google Search & AI Snippet Preview
+                      </div>
+                      <div className="text-xs text-emerald-800 font-mono truncate">
+                        https://leafyearth.com/products/{seoForm.urlSlug || 'product-slug'}
+                      </div>
+                      <div className="text-sm font-bold text-blue-800 truncate">
+                        {seoForm.seoTitle || editedPayload.title || editedPayload.english_product_name}
+                      </div>
+                      <div className="text-xs text-slate-600 line-clamp-2">
+                        {seoForm.metaDescription || editedPayload.description}
+                      </div>
+                    </div>
+
+                    {/* SEO Action Bar */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        disabled={savingSeo}
+                        onClick={() => handleSaveSEOEdits(false)}
+                        className="px-3.5 py-2 rounded-xl border border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-900 text-xs font-bold flex items-center gap-1.5"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Save SEO Draft
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingSeo}
+                        onClick={() => handleSaveSEOEdits(true)}
+                        className="px-3.5 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold flex items-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Approve SEO
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingSeo || !linkedMasterId}
+                        onClick={handleApplyApprovedSEOToMaster}
+                        className="px-4 py-2 rounded-xl bg-[#2E7D32] hover:bg-[#256628] disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-sm"
+                      >
+                        <FileCheck className="w-3.5 h-3.5" />
+                        Publish Approved SEO & Slug to Master
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </>
@@ -2465,6 +3210,769 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                     ))
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =====================================================================
+          SUBMENU 5B: AI COMMERCE & PRODUCT DISCOVERABILITY (V10 — SECTIONS 12–21)
+         ===================================================================== */}
+      {activeSubmenu === 'commerce' && (
+        <div className="space-y-6">
+          {/* 1. Readiness Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+            {[
+              {
+                label: 'Master Products',
+                value: commerceOverview?.readinessSummary.totalProducts ?? products.length,
+                tone: 'bg-white border-slate-200 text-slate-900',
+              },
+              {
+                label: 'Commerce Enabled',
+                value: commerceOverview?.readinessSummary.commerceEnabledCount ?? 0,
+                tone: 'bg-emerald-50 border-emerald-200 text-emerald-900',
+              },
+              {
+                label: 'Public Projections',
+                value: commerceOverview?.readinessSummary.publishedProjectionCount ?? 0,
+                tone: 'bg-indigo-50 border-indigo-200 text-indigo-900',
+              },
+              {
+                label: 'Slug Reservations',
+                value: commerceOverview?.readinessSummary.activeSlugCount ?? 0,
+                tone: 'bg-blue-50 border-blue-200 text-blue-900',
+              },
+              {
+                label: 'Ready (Pass)',
+                value: commerceOverview?.readinessSummary.readyCount ?? 0,
+                tone: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+              },
+              {
+                label: 'Warnings',
+                value: commerceOverview?.readinessSummary.warningCount ?? 0,
+                tone: 'bg-amber-50 border-amber-200 text-amber-800',
+              },
+              {
+                label: 'Blocked (Errors)',
+                value: commerceOverview?.readinessSummary.blockedCount ?? 0,
+                tone: 'bg-rose-50 border-rose-200 text-rose-800',
+              },
+              {
+                label: 'Opted-Out / Disabled',
+                value: commerceOverview?.readinessSummary.disabledCount ?? 0,
+                tone: 'bg-slate-50 border-slate-200 text-slate-600',
+              },
+            ].map((card) => (
+              <div key={card.label} className={`p-3.5 rounded-2xl border ${card.tone}`}>
+                <div className="text-[10px] font-black uppercase tracking-wider opacity-75">
+                  {card.label}
+                </div>
+                <div className="text-xl font-black mt-1">{card.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* 2. Live Public Feeds, Sitemap, Robots & LLMs Bar */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-black text-slate-900 flex items-center gap-2">
+                <Globe className="w-4 h-4 text-[#2E7D32]" />
+                Multi-Platform Commerce Feeds, Sitemap & Structured Discovery Endpoints
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Reads strictly from allowlisted <code>public_products</code> projections. Never exposes
+                competitor research prices or internal stock counts.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { label: 'Google XML', href: '/feeds/google-products.xml' },
+                { label: 'Bing XML', href: '/feeds/bing-products.xml' },
+                { label: 'OpenAI JSONL', href: '/feeds/openai-products.jsonl' },
+                { label: 'Public JSON', href: '/feeds/products.json' },
+                { label: 'Sitemap.xml', href: '/sitemap.xml' },
+                { label: 'Robots.txt', href: '/robots.txt' },
+                { label: 'LLMs.txt', href: '/llms.txt' },
+              ].map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800 text-[11px] font-bold flex items-center gap-1"
+                >
+                  <span>{link.label}</span>
+                  <ExternalLink className="w-3 h-3 text-slate-400" />
+                </a>
+              ))}
+
+              <button
+                type="button"
+                disabled={busyCommerceAction}
+                onClick={() => handleBuildCommerceFeeds(true, 'all')}
+                className="px-3 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 text-xs font-bold"
+              >
+                Dry-Run Feed Build
+              </button>
+              <button
+                type="button"
+                disabled={busyCommerceAction}
+                onClick={() => handleBuildCommerceFeeds(false, 'all')}
+                className="px-3.5 py-1.5 rounded-xl bg-[#2E7D32] hover:bg-[#256628] text-white text-xs font-black shadow-sm"
+              >
+                Publish Feed Snapshots
+              </button>
+            </div>
+          </div>
+
+          {/* 3. Main Grid: Left = V10 Commerce Staging Editor, Right = Platform Settings & Validation */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            {/* Left: V10 AI Commerce Staging & Editor */}
+            <div className="xl:col-span-7 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-[#2E7D32]" />
+                    V10 AI Commerce Staging & Structured Attribute Editor
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Generates & stages Product Highlights (4–6), Product FAQs (3–6 Q&A pairs), Google
+                    Product Category, Dietary Attributes & Canonical URL Slug. Never fabricates GTIN, MPN,
+                    FSSAI, prices, or reviews.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedCommerceProductId}
+                    onChange={(e) => setSelectedCommerceProductId(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold bg-slate-50"
+                  >
+                    <option value="">-- Select Product --</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.sku || p.id})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!selectedCommerceProductId || busyCommerceAction}
+                    onClick={handleGenerateCommerceForProduct}
+                    className="px-3.5 py-2 rounded-xl bg-[#2E7D32] hover:bg-[#256628] disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shrink-0"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Generate V10 Draft
+                  </button>
+                </div>
+              </div>
+
+              {/* SEO + Slug Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    SEO Title ({commerceForm.seoTitle.length}/120 chars)
+                  </label>
+                  <input
+                    type="text"
+                    value={commerceForm.seoTitle}
+                    onChange={(e) =>
+                      setCommerceForm({ ...commerceForm, seoTitle: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Canonical URL Slug (<code>/products/{commerceForm.urlSlug || '...'}</code>)
+                  </label>
+                  <input
+                    type="text"
+                    value={commerceForm.urlSlug}
+                    onChange={(e) =>
+                      setCommerceForm({
+                        ...commerceForm,
+                        urlSlug: normalizeUrlSlugClient(e.target.value),
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Meta Description ({commerceForm.metaDescription.length}/320 chars)
+                </label>
+                <textarea
+                  rows={2}
+                  value={commerceForm.metaDescription}
+                  onChange={(e) =>
+                    setCommerceForm({ ...commerceForm, metaDescription: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+
+              {/* Google Product Category & Store Product Type */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Google Product Category (Taxonomy Path)
+                  </label>
+                  <input
+                    type="text"
+                    value={commerceForm.googleProductCategory}
+                    onChange={(e) =>
+                      setCommerceForm({
+                        ...commerceForm,
+                        googleProductCategory: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Store Product Type
+                  </label>
+                  <input
+                    type="text"
+                    value={commerceForm.productType}
+                    onChange={(e) =>
+                      setCommerceForm({ ...commerceForm, productType: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Weight vs Volume Separation */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                    Net Weight (Mass)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={commerceForm.netWeight ?? ''}
+                    onChange={(e) =>
+                      setCommerceForm({
+                        ...commerceForm,
+                        netWeight: e.target.value === '' ? null : Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                    Mass Unit (g/kg/mg)
+                  </label>
+                  <select
+                    value={commerceForm.netWeightUnit || 'g'}
+                    onChange={(e) =>
+                      setCommerceForm({
+                        ...commerceForm,
+                        netWeightUnit: e.target.value as 'g' | 'kg' | 'mg',
+                      })
+                    }
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white font-bold"
+                  >
+                    <option value="g">g</option>
+                    <option value="kg">kg</option>
+                    <option value="mg">mg</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                    Net Volume (Liquid)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={commerceForm.netVolume ?? ''}
+                    onChange={(e) =>
+                      setCommerceForm({
+                        ...commerceForm,
+                        netVolume: e.target.value === '' ? null : Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                    Volume Unit (ml/l)
+                  </label>
+                  <select
+                    value={commerceForm.netVolumeUnit || ''}
+                    onChange={(e) =>
+                      setCommerceForm({
+                        ...commerceForm,
+                        netVolumeUnit: e.target.value ? (e.target.value as 'ml' | 'l') : null,
+                      })
+                    }
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white font-bold"
+                  >
+                    <option value="">None (Solid)</option>
+                    <option value="ml">ml</option>
+                    <option value="l">l</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Product Highlights (4-6 bullets) & Search/Dietary Tags */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Product Highlights (4–6 Factual Bullets, One per line)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={formatArrayAsLines(commerceForm.productHighlights)}
+                    onChange={(e) =>
+                      setCommerceForm({
+                        ...commerceForm,
+                        productHighlights: parseLinesToArray(e.target.value),
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                  />
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Dietary Attributes (Comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={(commerceForm.dietaryAttributes || []).join(', ')}
+                      onChange={(e) =>
+                        setCommerceForm({
+                          ...commerceForm,
+                          dietaryAttributes: e.target.value
+                            .split(',')
+                            .map((s) => s.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Search Tags (Comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={(commerceForm.searchTags || []).join(', ')}
+                      onChange={(e) =>
+                        setCommerceForm({
+                          ...commerceForm,
+                          searchTags: e.target.value
+                            .split(',')
+                            .map((s) => s.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Product FAQs (3-6 Q&A pairs) */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-slate-700">
+                    Structured Product FAQs (3–6 Q&A Pairs for AI Shopping Assistants & FAQ Schema)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextFaq: ProductFAQItem = {
+                        question: 'How should this product be stored in Indian climate conditions?',
+                        answer:
+                          'Store in a cool, dry place inside an airtight container away from direct sunlight and moisture.',
+                      };
+                      setCommerceForm({
+                        ...commerceForm,
+                        productFAQs: [...(commerceForm.productFAQs || []), nextFaq],
+                      });
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 text-[11px] font-bold flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" /> Add FAQ Pair
+                  </button>
+                </div>
+
+                {(commerceForm.productFAQs || []).map((faq, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 grid grid-cols-1 md:grid-cols-12 gap-2 items-start"
+                  >
+                    <div className="md:col-span-5">
+                      <input
+                        type="text"
+                        value={faq.question}
+                        onChange={(e) => {
+                          const next = [...commerceForm.productFAQs];
+                          next[idx] = { ...next[idx], question: e.target.value };
+                          setCommerceForm({ ...commerceForm, productFAQs: next });
+                        }}
+                        placeholder="Question..."
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white font-semibold"
+                      />
+                    </div>
+                    <div className="md:col-span-6">
+                      <input
+                        type="text"
+                        value={faq.answer}
+                        onChange={(e) => {
+                          const next = [...commerceForm.productFAQs];
+                          next[idx] = { ...next[idx], answer: e.target.value };
+                          setCommerceForm({ ...commerceForm, productFAQs: next });
+                        }}
+                        placeholder="Factual answer..."
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+                      />
+                    </div>
+                    <div className="md:col-span-1 text-right">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = commerceForm.productFAQs.filter((_, i) => i !== idx);
+                          setCommerceForm({ ...commerceForm, productFAQs: next });
+                        }}
+                        className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Commerce Staging Action Buttons */}
+              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableCommerceOnApply}
+                    onChange={(e) => setEnableCommerceOnApply(e.target.checked)}
+                    className="rounded border-slate-300 text-[#2E7D32]"
+                  />
+                  <span>Enable AI Commerce & Feed Syndication (aiCommerceEnabled = true) on Apply</span>
+                </label>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={busyCommerceAction || !selectedCommerceProductId}
+                    onClick={() => handleSaveAndApproveCommerce(false)}
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Save Draft
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyCommerceAction || !selectedCommerceProductId}
+                    onClick={() => handleSaveAndApproveCommerce(true)}
+                    className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Approve Commerce
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyCommerceAction || !selectedCommerceProductId}
+                    onClick={handleApplyCommerceToMaster}
+                    className="px-4 py-2 rounded-xl bg-[#2E7D32] hover:bg-[#256628] text-white text-xs font-black flex items-center gap-1.5 shadow-sm"
+                  >
+                    <FileCheck className="w-3.5 h-3.5" />
+                    Apply to Master & Publish Projection
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Platform Settings Matrix & Feed Snapshot History */}
+            <div className="xl:col-span-5 space-y-6">
+              {/* Platform Eligibility & Settings Matrix */}
+              <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Platform Adapters & Feature Flags (ai_commerce_settings)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    All platforms default to disabled until explicitly enabled by an Administrator.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  {(commerceOverview?.settings || []).map((st) => (
+                    <div
+                      key={st.id}
+                      className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-black text-slate-900">{st.platformName}</span>
+                          <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-200 text-slate-800">
+                            {st.priorityTier} • {st.feedFormat.toUpperCase()}
+                          </span>
+                        </div>
+                        <label className="inline-flex items-center gap-1.5 font-bold text-slate-800 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={st.enabled}
+                            onChange={(e) =>
+                              handleTogglePlatformSetting(st, { enabled: e.target.checked })
+                            }
+                            className="rounded border-slate-300 text-[#2E7D32]"
+                          />
+                          <span>{st.enabled ? 'Enabled' : 'Disabled'}</span>
+                        </label>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-600">
+                        <span className="font-mono">{st.feedPath}</span>
+                        {st.id === 'openai_chatgpt' && (
+                          <label className="inline-flex items-center gap-1 font-bold text-indigo-800 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(st.featureFlagEnabled)}
+                              onChange={(e) =>
+                                handleTogglePlatformSetting(st, {
+                                  featureFlagEnabled: e.target.checked,
+                                })
+                              }
+                            />
+                            <span>P2 Adapter Feature Flag</span>
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Feed Snapshot History */}
+              <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Feed Snapshot History (ai_commerce_feeds)
+                  </h3>
+                  <span className="text-[11px] text-slate-400">
+                    {(commerceOverview?.feeds || []).length} snapshot(s)
+                  </span>
+                </div>
+
+                {(commerceOverview?.feeds || []).length === 0 ? (
+                  <div className="py-6 text-center text-xs text-slate-400">
+                    No feed snapshots built yet. Click "Publish Feed Snapshots" above.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-[300px] overflow-y-auto">
+                    {(commerceOverview?.feeds || []).slice(0, 8).map((fd) => (
+                      <div
+                        key={fd.id}
+                        className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between text-xs"
+                      >
+                        <div>
+                          <div className="font-bold text-slate-900">
+                            {fd.platform} ({fd.format.toUpperCase()})
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-500">
+                            Eligible: {fd.eligibleItems}/{fd.totalItems} • Checksum: {fd.checksum}
+                          </div>
+                        </div>
+                        {fd.contentPreview && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFeedPreviewModal({
+                                title: `${fd.platform} (${fd.generatedAt})`,
+                                format: fd.format,
+                                content: fd.contentPreview || '',
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-bold text-slate-700 hover:bg-slate-100"
+                          >
+                            Inspect
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Per-Product Platform Readiness & Validation Diagnostics Table */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                  Per-Product Platform Readiness & Validation Diagnostics (ai_commerce_validation)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Strictly separates local readiness validation (<code>localReadiness</code>) from remote
+                  platform confirmation (<code>remoteStatus: not_configured</code> when external API
+                  credentials are not provisioned).
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    <th className="py-3 px-3">Product & SKU</th>
+                    <th className="py-3 px-3">Canonical URL Slug</th>
+                    <th className="py-3 px-3">Opt-In</th>
+                    <th className="py-3 px-3">Overall Readiness</th>
+                    <th className="py-3 px-3">Google Merchant (P0)</th>
+                    <th className="py-3 px-3">Public Web (P0)</th>
+                    <th className="py-3 px-3">Diagnostics / Issues</th>
+                    <th className="py-3 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {products.map((prod) => {
+                    const val = commerceOverview?.validation.find((v) => v.productId === prod.id);
+                    return (
+                      <tr key={prod.id} className="hover:bg-slate-50">
+                        <td className="py-3 px-3">
+                          <div className="font-bold text-slate-900">{prod.name}</div>
+                          <div className="text-[10px] font-mono text-slate-500">
+                            SKU: {prod.sku || 'N/A'} • ₹{prod.offerPrice || prod.onlinePrice || prod.mrp || 0}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[11px]">
+                          {prod.urlSlug ? (
+                            <a
+                              href={`/products/${prod.urlSlug}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-indigo-700 hover:underline flex items-center gap-1"
+                            >
+                              <span>/products/{prod.urlSlug}</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <span className="text-amber-700">Not assigned</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              prod.aiCommerceEnabled
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {prod.aiCommerceEnabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              val?.overallReadiness === 'ready'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : val?.overallReadiness === 'warning'
+                                ? 'bg-amber-100 text-amber-800'
+                                : val?.overallReadiness === 'blocked'
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {val?.overallReadiness || 'unvalidated'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-[11px] font-mono">
+                          {val?.platformReadiness?.google_merchant || '—'}
+                        </td>
+                        <td className="py-3 px-3 text-[11px] font-mono">
+                          {val?.platformReadiness?.public_web || '—'}
+                        </td>
+                        <td className="py-3 px-3 max-w-[280px]">
+                          {val?.issues && val.issues.length > 0 ? (
+                            <div className="space-y-0.5">
+                              {val.issues.slice(0, 2).map((iss, i) => (
+                                <div
+                                  key={i}
+                                  className={`text-[10px] truncate ${
+                                    iss.severity === 'error'
+                                      ? 'text-rose-700 font-bold'
+                                      : 'text-amber-700'
+                                  }`}
+                                  title={iss.message}
+                                >
+                                  • [{iss.field}] {iss.message}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-emerald-700">No blocking issues</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCommerceProductId(prod.id)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[11px]"
+                            >
+                              Edit V10
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busyCommerceAction}
+                              onClick={() => handleValidateCommerceProduct(prod.id)}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-[11px]"
+                            >
+                              Validate
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Feed Preview Modal */}
+          {feedPreviewModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl border border-slate-200 max-w-4xl w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">{feedPreviewModal.title}</h3>
+                    <p className="text-xs text-slate-500">Format: {feedPreviewModal.format}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFeedPreviewModal(null)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+                  >
+                    Close
+                  </button>
+                </div>
+                <pre className="p-4 rounded-2xl bg-slate-900 text-emerald-300 text-[11px] font-mono overflow-x-auto max-h-[460px] overflow-y-auto whitespace-pre-wrap">
+                  {feedPreviewModal.content}
+                </pre>
               </div>
             </div>
           )}

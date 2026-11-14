@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../store';
 import ProductReviewsSection from './ProductReviewsSection';
 import ProductDetailsDisplay from './ProductDetailsDisplay';
+import { resolvePublicProductBySlugOrIdClient } from '../utils/aiProductContentApi';
 import { 
   ShoppingBag, ShoppingCart, Heart, Search, Star, MapPin, Tag, 
   Truck, ArrowLeft, Check, Plus, Minus, Trash2, Calendar, FileText, 
@@ -180,6 +181,78 @@ export default function ShoppingPlatformView() {
 
   // Modals / Details
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+  const [deepLinkNotFound, setDeepLinkNotFound] = useState<string | null>(null);
+  const [copiedSlugNotice, setCopiedSlugNotice] = useState<boolean>(false);
+
+  // V9/V10 Deep Link & Canonical Slug Resolution (/products/:slugOrId)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const match = window.location.pathname.match(/^\/products\/([^/]+)$/i);
+    if (!match) return;
+    const slugOrId = decodeURIComponent(match[1]);
+
+    // First try local in-memory products
+    const localHit = products.find(
+      (p) =>
+        (p.urlSlug && p.urlSlug.toLowerCase() === slugOrId.toLowerCase()) ||
+        p.id === slugOrId
+    );
+    if (localHit) {
+      setSelectedProduct(localHit);
+      setDeepLinkNotFound(null);
+      if (localHit.urlSlug && window.location.pathname !== `/products/${localHit.urlSlug}`) {
+        window.history.replaceState({}, '', `/products/${localHit.urlSlug}`);
+      }
+      return;
+    }
+
+    // Otherwise resolve via backend / Firestore productSlugs & public_products
+    let cancelled = false;
+    resolvePublicProductBySlugOrIdClient(slugOrId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.status === 'not_found') {
+          setDeepLinkNotFound(slugOrId);
+          return;
+        }
+        if (res.redirectToSlug && typeof window !== 'undefined') {
+          window.history.replaceState({}, '', `/products/${res.redirectToSlug}`);
+        }
+        const matchedMaster = products.find((p) => p.id === res.product?.productId);
+        if (matchedMaster) {
+          setSelectedProduct(matchedMaster);
+          setDeepLinkNotFound(null);
+        } else if (res.product) {
+          setSelectedProduct({
+            id: res.product.productId,
+            name: res.product.title,
+            title: res.product.title,
+            description: res.product.description,
+            notes: res.product.description,
+            category: res.product.category,
+            brand: res.product.brand,
+            sku: res.product.sku,
+            offerPrice: res.product.salePrice ?? res.product.price,
+            onlinePrice: res.product.price,
+            mrp: res.product.price,
+            imageUrl: res.product.imageLink,
+            urlSlug: res.product.urlSlug,
+            seoTitle: res.product.seoTitle,
+            metaDescription: res.product.metaDescription,
+            productHighlights: res.product.productHighlights,
+            productFAQs: res.product.productFAQs,
+            dietaryAttributes: res.product.dietaryAttributes,
+            allergenInformation: res.product.allergenInformation,
+            countryOfOrigin: res.product.countryOfOrigin,
+          });
+          setDeepLinkNotFound(null);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [products]);
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'address' | 'payment' | 'review' | 'confirmed'>('cart');
   const [trackingOrder, setTrackingOrder] = useState<SalesOrder | null>(null);
   
@@ -2075,6 +2148,103 @@ export default function ShoppingPlatformView() {
               </div>
             )}
 
+            {/* V9 Canonical Public URL & V10 AI Commerce Highlights / FAQs / Regulatory */}
+            {(selectedProduct.urlSlug ||
+              (selectedProduct.productHighlights && selectedProduct.productHighlights.length > 0) ||
+              (selectedProduct.productFAQs && selectedProduct.productFAQs.length > 0) ||
+              (selectedProduct.dietaryAttributes && selectedProduct.dietaryAttributes.length > 0) ||
+              selectedProduct.fssaiLicenseNumber) && (
+              <div className="border-t pt-4 dark:border-slate-800 space-y-4 text-xs">
+                {selectedProduct.urlSlug && (
+                  <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                    <div className="truncate font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                      <span className="font-bold text-emerald-600">Canonical URL:</span>{' '}
+                      /products/{selectedProduct.urlSlug}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = `${window.location.origin}/products/${selectedProduct.urlSlug}`;
+                        navigator.clipboard?.writeText(url);
+                        setCopiedSlugNotice(true);
+                        setTimeout(() => setCopiedSlugNotice(false), 2000);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-[#22C55E] text-white text-[10px] font-bold flex items-center gap-1 shrink-0"
+                    >
+                      <Share2 className="w-3 h-3" />
+                      {copiedSlugNotice ? 'Copied!' : 'Share Link'}
+                    </button>
+                  </div>
+                )}
+
+                {selectedProduct.productHighlights && selectedProduct.productHighlights.length > 0 && (
+                  <div className="space-y-1.5">
+                    <h4 className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                      Key Product Highlights
+                    </h4>
+                    <ul className="list-disc pl-4 space-y-1 text-slate-700 dark:text-slate-300">
+                      {selectedProduct.productHighlights.map((hl: string, idx: number) => (
+                        <li key={idx}>{hl}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {selectedProduct.dietaryAttributes && selectedProduct.dietaryAttributes.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedProduct.dietaryAttributes.map((attr: string, idx: number) => (
+                      <span
+                        key={idx}
+                        className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold"
+                      >
+                        {attr}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {selectedProduct.productFAQs && selectedProduct.productFAQs.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                      Frequently Asked Questions
+                    </h4>
+                    <div className="space-y-2">
+                      {selectedProduct.productFAQs.map(
+                        (faq: { question: string; answer: string }, idx: number) => (
+                          <div
+                            key={idx}
+                            className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
+                          >
+                            <div className="font-bold text-slate-800 dark:text-slate-100">
+                              Q: {faq.question}
+                            </div>
+                            <div className="text-slate-600 dark:text-slate-300 mt-0.5">
+                              {faq.answer}
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {(selectedProduct.countryOfOrigin || selectedProduct.fssaiLicenseNumber) && (
+                  <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-1">
+                    {selectedProduct.countryOfOrigin && (
+                      <span>
+                        <strong>Country of Origin:</strong> {selectedProduct.countryOfOrigin}
+                      </span>
+                    )}
+                    {selectedProduct.fssaiLicenseNumber && (
+                      <span className="font-mono">
+                        <strong>FSSAI Lic. No:</strong> {selectedProduct.fssaiLicenseNumber}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Additional product details (product_details collection); renders nothing if absent */}
             <ProductDetailsDisplay productId={selectedProduct.id} />
 
@@ -2088,6 +2258,34 @@ export default function ShoppingPlatformView() {
                 currentUser={currentUser}
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 404 Not Found Modal for invalid /products/:slug deep links */}
+      {deepLinkNotFound && !selectedProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-3xl w-full max-w-md p-6 text-center space-y-4">
+            <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
+            <h3 className="text-base font-black text-slate-900 dark:text-white">
+              Product Not Found (404)
+            </h3>
+            <p className="text-xs text-slate-500">
+              No active product matches <code>/products/{deepLinkNotFound}</code>. It may have been
+              withdrawn or moved.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setDeepLinkNotFound(null);
+                if (typeof window !== 'undefined') {
+                  window.history.replaceState({}, '', '/');
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-[#22C55E] text-white text-xs font-bold"
+            >
+              Browse Storefront Catalog
+            </button>
           </div>
         </div>
       )}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- V9/V10 iOS Universal Links for Canonical Product URLs (/products/<slug>) -->
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+        <string>applinks:leafyearth.com</string>
+        <string>applinks:www.leafyearth.com</string>
+    </array>
+</dict>
+</plist>

@@ -16,8 +16,21 @@ import type {
   AIProductTaxationResearch,
   AIProductVersion,
   AIUsageMetadata,
+  ProductSlugReservation,
   WebPriceSourceOffer,
 } from '../types';
+import {
+  buildStructuredFallbackCommerce,
+  buildStructuredFallbackSEO,
+  getDefaultVerifiedDomain,
+  isValidUrlSlug,
+  normalizeUrlSlug,
+  PRODUCT_SLUGS_COLLECTION,
+  syncProductToPublicProjectionAndQueueJobs,
+  V10_SCHEMA_VERSION,
+  validateAICommercePayload,
+  validateSEOPayload,
+} from './aiCommerceService';
 
 export const AI_PRODUCT_DRAFTS_COLLECTION = 'ai_product_drafts';
 export const AI_PRODUCT_VERSIONS_COLLECTION = 'ai_product_versions';
@@ -228,6 +241,25 @@ export function validateAIProductContentPayload(
     : [];
   const review_flags = cleanArr(raw.review_flags);
 
+  // V9 Section 4 & V10 Section 13: Optional nested SEO & Commerce objects
+  let seo: AIProductContentPayload['seo'] = null;
+  if (raw.seo !== undefined && raw.seo !== null) {
+    const seoVal = validateSEOPayload(raw.seo);
+    if (!seoVal.valid) {
+      errors.push(...seoVal.errors);
+    }
+    seo = seoVal.seo;
+  }
+
+  let commerce: AIProductContentPayload['commerce'] = null;
+  if (raw.commerce !== undefined && raw.commerce !== null) {
+    const comVal = validateAICommercePayload(raw.commerce);
+    if (!comVal.valid) {
+      errors.push(...comVal.errors);
+    }
+    commerce = comVal.commerce;
+  }
+
   return {
     valid: errors.length === 0,
     errors,
@@ -250,6 +282,8 @@ export function validateAIProductContentPayload(
       ayurveda,
       references,
       review_flags,
+      seo,
+      commerce,
     },
   };
 }
@@ -282,6 +316,38 @@ interface BotanicalKnowledgeEntry {
 }
 
 const BOTANICAL_CATALOG: BotanicalKnowledgeEntry[] = [
+  {
+    keywords: ['cumin', 'jeera', 'jeerakam', 'cuminum'],
+    english: 'Cumin Seeds',
+    botanical_name: 'Cuminum cyminum',
+    family: 'Apiaceae',
+    category: 'Spices',
+    form: 'Whole Seeds',
+    translations: {
+      ml: 'ജീരകം',
+      hi: 'जीरा',
+      ta: 'சீரகம்',
+      kn: 'ಜೀರಿಗೆ',
+      te: 'జీలకర్ర',
+    },
+    hsnCode: '090931',
+    gstRatePercent: 5,
+    gstReference: 'GST Schedule I – Chapter 0909 (Seeds of cumin / Cuminum cyminum, 5% GST)',
+    ayurveda_applicability: 'applicable',
+    sanskrit_name: 'Jiraka (जीरक)',
+    rasa: ['Katu (Pungent)'],
+    guna: ['Laghu (Light)', 'Ruksha (Dry)'],
+    virya: 'Ushna (Warming)',
+    vipaka: 'Katu (Pungent)',
+    prabhava: 'Deepana, Pachana & Grahi (kindles digestive fire and supports assimilation)',
+    dosha: {
+      vata: 'Pacifies Vata and relieves bloating',
+      pitta: 'May slightly increase Pitta in excess, balanced in culinary tempering with ghee',
+      kapha: 'Pacifies Kapha via Laghu-Ruksha guna and Ushna virya',
+    },
+    parts_used: ['Dried Cremocarp / Seeds (Phala / Bija)'],
+    formulations: ['Jirakadyarishta', 'Hingvashtaka Churna'],
+  },
   {
     keywords: ['turmeric', 'haldi', 'manjal', 'curcuma'],
     english: 'Turmeric Powder',
@@ -634,6 +700,14 @@ export function buildStructuredFallbackContent(
       'Verify botanical taxonomy and regional language script spellings before master sync.',
       'Review health and Ayurvedic claims for regulatory compliance.',
     ],
+    seo: buildStructuredFallbackSEO(cleanName, {
+      categoryHint: category,
+      brandHint: options?.brandHint,
+      formHint: form,
+    }),
+    commerce: buildStructuredFallbackCommerce(cleanName, {
+      categoryHint: category,
+    }),
   };
 }
 
@@ -1075,7 +1149,15 @@ export function buildInitialTaxationAndMarketResearch(params: {
 export interface MasterFieldComparisonItem {
   fieldKey: string;
   label: string;
-  group: 'general' | 'translations' | 'health' | 'ayurveda' | 'image' | 'taxation_pricing';
+  group:
+    | 'general'
+    | 'translations'
+    | 'health'
+    | 'ayurveda'
+    | 'image'
+    | 'taxation_pricing'
+    | 'seo'
+    | 'commerce';
   masterField: string;
   currentMasterValue: any;
   proposedAiValue: any;
@@ -1175,6 +1257,37 @@ export function buildMasterComparisonDiff(params: {
       pushItem('contraindications', 'Contraindications', 'ayurveda', 'contraindications', ay.contraindications);
       pushItem('drugInteractions', 'Drug / Herb Interactions', 'ayurveda', 'drugInteractions', ay.interactions);
       pushItem('ayurvedicReferences', 'Ayurvedic Classical References', 'ayurveda', 'ayurvedicReferences', ay.references);
+    }
+
+    // V9 Section 4 & 10: SEO Metadata Group
+    if (payload.seo) {
+      pushItem('seoTitle', 'SEO Title', 'seo', 'seoTitle', payload.seo.seoTitle);
+      pushItem('metaDescription', 'Meta Description', 'seo', 'metaDescription', payload.seo.metaDescription);
+      pushItem('seoKeywords', 'SEO Keywords (5–12)', 'seo', 'seoKeywords', payload.seo.seoKeywords);
+      pushItem('urlSlug', 'Canonical URL Slug (/products/:slug)', 'seo', 'urlSlug', payload.seo.urlSlug);
+    }
+
+    // V10 Section 12 & 13: AI Commerce & Discoverability Group
+    if (payload.commerce) {
+      const c = payload.commerce;
+      const sugg = c.factualAttributeSuggestions || {};
+      pushItem('productHighlights', 'Product Highlights (4–6 bullets)', 'commerce', 'productHighlights', c.productHighlights);
+      pushItem('productFAQs', 'Product FAQs (3–6 Q&A pairs)', 'commerce', 'productFAQs', c.productFAQs);
+      pushItem('searchTags', 'AI Search & Discovery Tags', 'commerce', 'searchTags', c.searchTags);
+      pushItem('dietaryAttributes', 'Dietary Attributes', 'commerce', 'dietaryAttributes', c.dietaryAttributes);
+      pushItem('googleProductCategory', 'Google Product Category', 'commerce', 'googleProductCategory', c.googleProductCategory);
+      pushItem('productType', 'Store Taxonomy (productType)', 'commerce', 'productType', c.productType);
+      if (sugg.countryOfOrigin) {
+        pushItem('countryOfOrigin', 'Country of Origin', 'commerce', 'countryOfOrigin', sugg.countryOfOrigin);
+      }
+      if (sugg.netWeight !== undefined && sugg.netWeight !== null) {
+        pushItem('netWeight', 'Net Weight', 'commerce', 'netWeight', sugg.netWeight);
+        pushItem('netWeightUnit', 'Net Weight Unit', 'commerce', 'netWeightUnit', sugg.netWeightUnit);
+      }
+      if (sugg.netVolume !== undefined && sugg.netVolume !== null) {
+        pushItem('netVolume', 'Net Volume', 'commerce', 'netVolume', sugg.netVolume);
+        pushItem('netVolumeUnit', 'Net Volume Unit', 'commerce', 'netVolumeUnit', sugg.netVolumeUnit);
+      }
     }
   }
 
@@ -2369,6 +2482,7 @@ export function registerAIProductContentRoutes(
         masterProductId,
         selectedFields = [],
         imageAction = 'none',
+        expectedMasterRevision,
         idempotencyKey,
       } = req.body || {};
 
@@ -2452,6 +2566,17 @@ export function registerAIProductContentRoutes(
           throw new Error(`Target master product '${targetMasterId}' does not exist in products collection.`);
         }
         const existingMaster = { id: masterSnap.id, ...(masterSnap.data() as any) };
+        const currentRevision = Number(existingMaster.revision || 1);
+
+        if (
+          expectedMasterRevision !== undefined &&
+          expectedMasterRevision !== null &&
+          Number(expectedMasterRevision) !== currentRevision
+        ) {
+          throw new Error(
+            `MASTER_REVISION_CONFLICT: Expected master revision ${expectedMasterRevision}, but current product revision is ${currentRevision}.`
+          );
+        }
 
         const comparisonItems = buildMasterComparisonDiff({
           masterProduct: existingMaster,
@@ -2472,6 +2597,92 @@ export function registerAIProductContentRoutes(
           throw new Error('None of the selected fields produced a valid master product update.');
         }
 
+        // V9 Section 6.1: Transactional slug reservation & redirect conversion when urlSlug is selected
+        let slugAction: AIProductSyncLog['slug_action'] = null;
+        if (updatePatch.urlSlug !== undefined) {
+          const candidateSlug = normalizeUrlSlug(updatePatch.urlSlug);
+          if (!isValidUrlSlug(candidateSlug)) {
+            throw new Error(`INVALID_URL_SLUG: "${updatePatch.urlSlug}" is not a valid URL slug.`);
+          }
+          updatePatch.urlSlug = candidateSlug;
+          afterSnapshot.urlSlug = candidateSlug;
+
+          const slugRef = db.collection(PRODUCT_SLUGS_COLLECTION).doc(candidateSlug);
+          const slugSnap = await tx.get(slugRef);
+          if (slugSnap.exists) {
+            const reservation = slugSnap.data() as ProductSlugReservation;
+            if (String(reservation.productId) !== String(targetMasterId)) {
+              throw new Error(
+                `SLUG_CONFLICT: URL slug '${candidateSlug}' is already reserved by product '${reservation.productId}'.`
+              );
+            }
+          }
+
+          const previousSlug = existingMaster.urlSlug
+            ? String(existingMaster.urlSlug).trim()
+            : null;
+
+          const newReservation: ProductSlugReservation = {
+            slug: candidateSlug,
+            productId: targetMasterId,
+            state: 'active',
+            canonicalSlug: candidateSlug,
+            createdAt: slugSnap.exists
+              ? String((slugSnap.data() as any)?.createdAt || now)
+              : now,
+            updatedAt: now,
+            updatedBy: actor.uid,
+          };
+          tx.set(slugRef, newReservation);
+
+          if (previousSlug && previousSlug !== candidateSlug && isValidUrlSlug(previousSlug)) {
+            const prevSlugRef = db.collection(PRODUCT_SLUGS_COLLECTION).doc(previousSlug);
+            const redirectReservation: ProductSlugReservation = {
+              slug: previousSlug,
+              productId: targetMasterId,
+              state: 'redirect',
+              canonicalSlug: candidateSlug,
+              createdAt: now,
+              updatedAt: now,
+              updatedBy: actor.uid,
+            };
+            tx.set(prevSlugRef, redirectReservation, { merge: true });
+          }
+
+          updatePatch.canonicalUrl = `${getDefaultVerifiedDomain()}/products/${candidateSlug}`;
+          updatePatch.seoUpdatedAt = now;
+          slugAction = {
+            previousSlug,
+            newSlug: candidateSlug,
+            redirectCreated: Boolean(previousSlug && previousSlug !== candidateSlug),
+          };
+        } else if (
+          updatePatch.seoTitle !== undefined ||
+          updatePatch.metaDescription !== undefined ||
+          updatePatch.seoKeywords !== undefined
+        ) {
+          updatePatch.seoUpdatedAt = now;
+        }
+
+        const nextRevision = currentRevision + 1;
+        const aiMeta = { ...(existingMaster.aiContentMetadata || {}) };
+        for (const k of Object.keys(updatePatch)) {
+          if (['revision', 'aiContentMetadata', 'seoUpdatedAt', 'aiCommerceUpdatedAt'].includes(k)) {
+            continue;
+          }
+          aiMeta[k] = {
+            source: 'ai',
+            draftId,
+            versionId: verId,
+            model: version?.model || 'gpt-4o-mini',
+            promptVersion: version?.prompt_version || V10_SCHEMA_VERSION,
+            approvedBy: actor.uid,
+            approvedAt: now,
+          };
+        }
+        updatePatch.aiContentMetadata = aiMeta;
+        updatePatch.revision = nextRevision;
+
         tx.set(masterRef, updatePatch, { merge: true });
 
         const syncLogDoc: AIProductSyncLog = {
@@ -2484,6 +2695,9 @@ export function registerAIProductContentRoutes(
           image_action: imageAction,
           approved_image_id: approvedImage?.id || null,
           approved_research_id: approvedResearch?.id || null,
+          expected_master_revision: expectedMasterRevision ?? currentRevision,
+          resulting_master_revision: nextRevision,
+          slug_action: slugAction,
           before_snapshot: beforeSnapshot,
           after_snapshot: afterSnapshot,
           result: 'SUCCESS',
@@ -2510,6 +2724,8 @@ export function registerAIProductContentRoutes(
         return { syncLogDoc, updatedMaster: { ...existingMaster, ...updatePatch } };
       });
 
+      await syncProductToPublicProjectionAndQueueJobs(db, txResult.updatedMaster, actor.uid);
+
       await logEvent(db, draftId, 'MASTER_SYNC_APPLIED', actor, {
         sync_log_id: syncLogId,
         master_product_id: targetMasterId,
@@ -2522,7 +2738,10 @@ export function registerAIProductContentRoutes(
         masterProduct: txResult.updatedMaster,
       });
     } catch (err: any) {
-      return res.status(400).json({ error: err?.message || 'Master product synchronization failed' });
+      const msg = String(err?.message || 'Master product synchronization failed');
+      const status =
+        msg.includes('SLUG_CONFLICT') || msg.includes('MASTER_REVISION_CONFLICT') ? 409 : 400;
+      return res.status(status).json({ error: msg });
     }
   };
   app.post('/api/admin/ai-products/:id/apply', handleApplyToMaster);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Leaf, Scale, Sparkles } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, Globe, Leaf, Scale, ShieldCheck, Sparkles } from 'lucide-react';
 import type { ProductPerformance } from '../types';
+import { normalizeUrlSlugClient, validateGtinChecksumClient } from '../utils/aiProductContentApi';
 
 export type ProductMasterV8Fields = Pick<
   ProductPerformance,
@@ -51,6 +52,34 @@ export type ProductMasterV8Fields = Pick<
   | 'availablePackingSizes'
   | 'gstReference'
   | 'gstVerifiedAt'
+  | 'seoTitle'
+  | 'metaDescription'
+  | 'seoKeywords'
+  | 'urlSlug'
+  | 'seoUpdatedAt'
+  | 'gtin'
+  | 'mpn'
+  | 'barcode'
+  | 'googleProductCategory'
+  | 'productType'
+  | 'canonicalUrl'
+  | 'condition'
+  | 'countryOfOrigin'
+  | 'manufacturerName'
+  | 'netWeight'
+  | 'netWeightUnit'
+  | 'netVolume'
+  | 'netVolumeUnit'
+  | 'shippingWeight'
+  | 'shippingWeightUnit'
+  | 'productHighlights'
+  | 'productFAQs'
+  | 'searchTags'
+  | 'dietaryAttributes'
+  | 'allergenInformation'
+  | 'fssaiLicenseNumber'
+  | 'aiCommerceEnabled'
+  | 'aiCommerceUpdatedAt'
 >;
 
 export function extractV8FieldsFromProduct(p?: Partial<ProductPerformance> | null): ProductMasterV8Fields {
@@ -102,6 +131,36 @@ export function extractV8FieldsFromProduct(p?: Partial<ProductPerformance> | nul
     availablePackingSizes: Array.isArray(p?.availablePackingSizes) ? p!.availablePackingSizes : [],
     gstReference: p?.gstReference || '',
     gstVerifiedAt: p?.gstVerifiedAt || null,
+    // V9 SEO Fields
+    seoTitle: p?.seoTitle || '',
+    metaDescription: p?.metaDescription || '',
+    seoKeywords: Array.isArray(p?.seoKeywords) ? p!.seoKeywords : [],
+    urlSlug: p?.urlSlug || '',
+    seoUpdatedAt: p?.seoUpdatedAt || null,
+    // V10 AI Commerce & Product Discoverability Fields
+    gtin: p?.gtin || '',
+    mpn: p?.mpn || '',
+    barcode: p?.barcode || '',
+    googleProductCategory: p?.googleProductCategory || '',
+    productType: p?.productType || '',
+    canonicalUrl: p?.canonicalUrl || '',
+    condition: p?.condition || 'new',
+    countryOfOrigin: p?.countryOfOrigin || 'India',
+    manufacturerName: p?.manufacturerName || '',
+    netWeight: p?.netWeight ?? null,
+    netWeightUnit: p?.netWeightUnit || 'g',
+    netVolume: p?.netVolume ?? null,
+    netVolumeUnit: p?.netVolumeUnit || 'ml',
+    shippingWeight: p?.shippingWeight ?? null,
+    shippingWeightUnit: p?.shippingWeightUnit || 'g',
+    productHighlights: Array.isArray(p?.productHighlights) ? p!.productHighlights : [],
+    productFAQs: Array.isArray(p?.productFAQs) ? p!.productFAQs : [],
+    searchTags: Array.isArray(p?.searchTags) ? p!.searchTags : [],
+    dietaryAttributes: Array.isArray(p?.dietaryAttributes) ? p!.dietaryAttributes : [],
+    allergenInformation: Array.isArray(p?.allergenInformation) ? p!.allergenInformation : [],
+    fssaiLicenseNumber: p?.fssaiLicenseNumber || '',
+    aiCommerceEnabled: Boolean(p?.aiCommerceEnabled),
+    aiCommerceUpdatedAt: p?.aiCommerceUpdatedAt || null,
   };
 }
 
@@ -129,6 +188,9 @@ export const ProductMasterV8Section: React.FC<ProductMasterV8SectionProps> = ({
     onChange({ ...value, ...patch });
   };
 
+  const gtinCheck = value.gtin ? validateGtinChecksumClient(value.gtin) : null;
+  const fssaiValid = !value.fssaiLicenseNumber || /^\d{14}$/.test(String(value.fssaiLicenseNumber).trim());
+
   return (
     <div className="mt-4 bg-[#111115] border border-slate-800 rounded-2xl overflow-hidden">
       <button
@@ -137,14 +199,24 @@ export const ProductMasterV8Section: React.FC<ProductMasterV8SectionProps> = ({
         className="w-full px-4 py-3 flex items-center justify-between text-left bg-[#15151a] hover:bg-[#191920] transition cursor-pointer"
         id={`${idPrefix}-v8-section-toggle`}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Sparkles className="w-4 h-4 text-emerald-400" />
           <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-300">
-            Botanical, 6-Language Names, Health/Ayurvedic Monograph & Market Intelligence (V8)
+            Botanical, 6-Language Names, Ayurvedic Monograph, SEO & AI Commerce (V8–V10)
           </span>
           {value.isAyurvedicProduct && (
             <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-950 text-emerald-300 border border-emerald-700">
               Ayurvedic Enabled
+            </span>
+          )}
+          {value.urlSlug && (
+            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-indigo-950 text-indigo-300 border border-indigo-700 font-mono">
+              /products/{value.urlSlug}
+            </span>
+          )}
+          {value.aiCommerceEnabled && (
+            <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-cyan-950 text-cyan-300 border border-cyan-700">
+              AI Commerce Active
             </span>
           )}
         </div>
@@ -182,7 +254,7 @@ export const ProductMasterV8Section: React.FC<ProductMasterV8SectionProps> = ({
                   type="text"
                   value={value.botanicalName || ''}
                   onChange={(e) => update({ botanicalName: e.target.value })}
-                  placeholder="e.g. Curcuma longa"
+                  placeholder="e.g. Cuminum cyminum"
                   className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg italic"
                 />
               </div>
@@ -194,7 +266,7 @@ export const ProductMasterV8Section: React.FC<ProductMasterV8SectionProps> = ({
                   type="text"
                   value={value.botanicalFamily || ''}
                   onChange={(e) => update({ botanicalFamily: e.target.value })}
-                  placeholder="e.g. Zingiberaceae"
+                  placeholder="e.g. Apiaceae"
                   className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
                 />
               </div>
@@ -206,7 +278,7 @@ export const ProductMasterV8Section: React.FC<ProductMasterV8SectionProps> = ({
                   type="text"
                   value={value.productForm || ''}
                   onChange={(e) => update({ productForm: e.target.value })}
-                  placeholder="e.g. Fine Powder / Whole"
+                  placeholder="e.g. Whole Seeds / Powder"
                   className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
                 />
               </div>
@@ -409,13 +481,342 @@ export const ProductMasterV8Section: React.FC<ProductMasterV8SectionProps> = ({
             </div>
           </div>
 
-          {/* 3. Conditional Ayurvedic Toggle & 21 Fields (Section 18.2 & 18.3) */}
+          {/* 3. V9 Approved SEO Metadata & Canonical Slug (Sections 4–8) */}
+          <div className="pt-3 border-t border-slate-800 space-y-3" id={`${idPrefix}-v9-seo-section`}>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h4 className="text-[10px] font-black uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5" />
+                3. Approved SEO Metadata & Canonical Public URL (V9 Sections 4–8)
+              </h4>
+              {value.seoUpdatedAt && (
+                <span className="text-[10px] text-slate-500">
+                  Last SEO Sync: {new Date(value.seoUpdatedAt).toLocaleString()}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">
+                    SEO Title (Target 50–60 chars, Max 120)
+                  </label>
+                  <span
+                    className={`text-[10px] font-mono ${
+                      (value.seoTitle?.length || 0) > 120
+                        ? 'text-rose-400'
+                        : (value.seoTitle?.length || 0) >= 50 && (value.seoTitle?.length || 0) <= 60
+                        ? 'text-emerald-400'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {value.seoTitle?.length || 0}/120
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  maxLength={120}
+                  value={value.seoTitle || ''}
+                  onChange={(e) => update({ seoTitle: e.target.value })}
+                  placeholder="e.g. Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                  id={`${idPrefix}-seo-title-input`}
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">
+                    URL Slug (Lowercase ASCII, Max 100)
+                  </label>
+                  <span className="text-[10px] font-mono text-indigo-300">
+                    /products/{value.urlSlug || 'slug'}
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  maxLength={100}
+                  value={value.urlSlug || ''}
+                  onChange={(e) => update({ urlSlug: normalizeUrlSlugClient(e.target.value) })}
+                  placeholder="e.g. cumin-seeds-jeera-whole"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-indigo-300 font-mono rounded-lg"
+                  id={`${idPrefix}-url-slug-input`}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">
+                    Meta Description (Target 140–160 chars, Max 320)
+                  </label>
+                  <span
+                    className={`text-[10px] font-mono ${
+                      (value.metaDescription?.length || 0) > 320
+                        ? 'text-rose-400'
+                        : (value.metaDescription?.length || 0) >= 140 &&
+                          (value.metaDescription?.length || 0) <= 160
+                        ? 'text-emerald-400'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {value.metaDescription?.length || 0}/320
+                  </span>
+                </div>
+                <textarea
+                  rows={2}
+                  maxLength={320}
+                  value={value.metaDescription || ''}
+                  onChange={(e) => update({ metaDescription: e.target.value })}
+                  placeholder="Shop whole cumin seeds (Jeera / Cuminum cyminum) with warm earthy aroma..."
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                  id={`${idPrefix}-meta-desc-input`}
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                  SEO Keywords (5–12 Comma-separated terms)
+                </label>
+                <textarea
+                  rows={2}
+                  value={joinCsv(value.seoKeywords)}
+                  onChange={(e) => update({ seoKeywords: splitCsv(e.target.value) })}
+                  placeholder="cumin seeds, jeera, whole cumin, cuminum cyminum, indian spices"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                  id={`${idPrefix}-seo-keywords-input`}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 4. V10 AI Commerce, Identifiers (GTIN/MPN/FSSAI) & Merchant Attributes */}
+          <div className="pt-3 border-t border-slate-800 space-y-3" id={`${idPrefix}-v10-commerce-section`}>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-extrabold uppercase tracking-wider text-cyan-300">
+                  4. AI Commerce, GS1 Identifiers & Feed Discoverability (V10 Sections 12–15)
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">
+                  Publish to Public Feeds & AI Discovery:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => update({ aiCommerceEnabled: !value.aiCommerceEnabled })}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition ${
+                    value.aiCommerceEnabled
+                      ? 'bg-cyan-600 text-white'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                  id={`${idPrefix}-ai-commerce-toggle`}
+                >
+                  {value.aiCommerceEnabled ? 'Enabled (Published)' : 'Disabled (Draft Only)'}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">
+                    Verified GTIN (8/12/13/14 digits)
+                  </label>
+                  {gtinCheck && (
+                    <span
+                      className={`text-[9px] font-bold ${
+                        gtinCheck.valid ? 'text-emerald-400' : 'text-rose-400'
+                      }`}
+                    >
+                      {gtinCheck.valid ? `✓ ${gtinCheck.format}` : 'Invalid Checksum'}
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={value.gtin || ''}
+                  onChange={(e) => update({ gtin: e.target.value.replace(/[^\d]/g, '') })}
+                  placeholder="Manufacturer GS1 barcode only"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 font-mono rounded-lg"
+                  id={`${idPrefix}-gtin-input`}
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                  MPN (Manufacturer Part No.)
+                </label>
+                <input
+                  type="text"
+                  value={value.mpn || ''}
+                  onChange={(e) => update({ mpn: e.target.value })}
+                  placeholder="Optional verified MPN"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 font-mono rounded-lg"
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">
+                    FSSAI License No. (14 digits)
+                  </label>
+                  {value.fssaiLicenseNumber && (
+                    <span className={`text-[9px] font-bold ${fssaiValid ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {fssaiValid ? '✓ 14-digit FSSAI' : 'Must be 14 digits'}
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  maxLength={14}
+                  value={value.fssaiLicenseNumber || ''}
+                  onChange={(e) => update({ fssaiLicenseNumber: e.target.value.replace(/[^\d]/g, '') })}
+                  placeholder="14-digit FSSAI number"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 font-mono rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                  Country of Origin
+                </label>
+                <input
+                  type="text"
+                  value={value.countryOfOrigin || 'India'}
+                  onChange={(e) => update({ countryOfOrigin: e.target.value })}
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                  Google Product Category
+                </label>
+                <input
+                  type="text"
+                  value={value.googleProductCategory || ''}
+                  onChange={(e) => update({ googleProductCategory: e.target.value })}
+                  placeholder="Food, Beverages & Tobacco > Food Items > Seasonings & Spices"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                  Store Product Type (Taxonomy)
+                </label>
+                <input
+                  type="text"
+                  value={value.productType || ''}
+                  onChange={(e) => update({ productType: e.target.value })}
+                  placeholder="Spices & Groceries > Whole Spices"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                    Net Weight (Mass)
+                  </label>
+                  <input
+                    type="number"
+                    value={value.netWeight ?? ''}
+                    onChange={(e) =>
+                      update({ netWeight: e.target.value === '' ? null : Number(e.target.value) })
+                    }
+                    placeholder="100"
+                    className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                    Mass Unit
+                  </label>
+                  <select
+                    value={value.netWeightUnit || 'g'}
+                    onChange={(e) => update({ netWeightUnit: e.target.value })}
+                    className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                  >
+                    <option value="g">g</option>
+                    <option value="kg">kg</option>
+                    <option value="mg">mg</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                    Net Volume (Liquid)
+                  </label>
+                  <input
+                    type="number"
+                    value={value.netVolume ?? ''}
+                    onChange={(e) =>
+                      update({ netVolume: e.target.value === '' ? null : Number(e.target.value) })
+                    }
+                    placeholder="250"
+                    className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                    Volume Unit
+                  </label>
+                  <select
+                    value={value.netVolumeUnit || 'ml'}
+                    onChange={(e) => update({ netVolumeUnit: e.target.value })}
+                    className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                  >
+                    <option value="ml">ml</option>
+                    <option value="l">l</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                  Product Highlights (Comma-separated, 4–6 bullets)
+                </label>
+                <input
+                  type="text"
+                  value={joinCsv(value.productHighlights)}
+                  onChange={(e) => update({ productHighlights: splitCsv(e.target.value) })}
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                  Dietary Attributes (Comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={joinCsv(value.dietaryAttributes)}
+                  onChange={(e) => update({ dietaryAttributes: splitCsv(e.target.value) })}
+                  placeholder="Vegetarian, Vegan, Gluten-Free"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase">
+                  Allergen Information (Comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={joinCsv(value.allergenInformation)}
+                  onChange={(e) => update({ allergenInformation: splitCsv(e.target.value) })}
+                  placeholder="Packed in a facility handling tree nuts"
+                  className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 5. Conditional Ayurvedic Toggle & 21 Fields (Section 18.2 & 18.3) */}
           <div className="pt-3 border-t border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Leaf className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-300">
-                  Is Ayurvedic Product? (Section 18.3 Conditional Monograph)
+                  5. Is Ayurvedic Product? (Section 18.3 Conditional Monograph)
                 </span>
               </div>
               <div className="flex items-center gap-2">

@@ -456,14 +456,16 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
 
     // Master comparison diff includes V9 'seo' and V10 'commerce' groups
     const fallbackPayload = buildStructuredFallbackContent('Cumin Seeds (Jeera)');
-    const diff = buildMasterComparisonDiff(
-      { id: 'prod_cumin_1', name: 'Cumin Seeds' },
-      fallbackPayload,
-      null,
-      'APPROVED',
-      'approved',
-      'approved'
-    );
+    const diff = buildMasterComparisonDiff({
+      masterProduct: { id: 'prod_cumin_1', name: 'Cumin Seeds' },
+      version: {
+        generated_payload: fallbackPayload,
+        edited_payload: fallbackPayload,
+        seo_status: 'APPROVED',
+      } as any,
+      approvedImage: null,
+      approvedResearch: null,
+    });
     assert.ok(diff.some((d) => d.group === 'seo' && d.fieldKey === 'urlSlug' && d.selectable));
     assert.ok(diff.some((d) => d.group === 'commerce' && d.fieldKey === 'productHighlights' && d.selectable));
 

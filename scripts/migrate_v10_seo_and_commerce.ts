@@ -9,12 +9,20 @@
 
 import fs from 'fs';
 import path from 'path';
-import { getFirestoreAdmin } from '../src/services/firebaseAdmin';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 import {
   buildStructuredFallbackSEO,
   getDefaultPlatformSettingsCatalog,
   normalizeUrlSlug,
 } from '../src/services/aiCommerceService';
+
+function getFirestoreAdmin() {
+  if (!getApps().length) {
+    initializeApp();
+  }
+  return getFirestore();
+}
 
 interface ProductMigrationItem {
   productId: string;

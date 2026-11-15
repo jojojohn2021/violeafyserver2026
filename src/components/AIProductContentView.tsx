@@ -65,6 +65,7 @@ import {
   calculateMarketPriceRangeClient,
   checkProductSlugAvailabilityClient,
   compareAIDraftWithMaster,
+  ensureClientFirebaseStorageUrl,
   fetchAICommerceOverviewClient,
   fetchAIConfigStatus,
   fetchAIProductDraftDetail,
@@ -73,6 +74,7 @@ import {
   generateAIDraftSEOClient,
   generateAIProductDraft,
   generateAIProductImageClient,
+  isFirebaseStorageUrlClient,
   MasterFieldComparisonItem,
   normalizeUrlSlugClient,
   regenerateAIProductDraft,
@@ -134,7 +136,86 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
   activeSubmenu,
   onSubmenuChange,
 }) => {
-  const { products, units, currentUser, reloadFirestoreData } = useCRM();
+  const {
+    products,
+    units,
+    categories,
+    customCategories,
+    brands,
+    customBrands,
+    brandOwners,
+    customBrandOwners,
+    currentUser,
+    reloadFirestoreData,
+  } = useCRM();
+
+  const allCategoryOptions = useMemo(() => {
+    const base = Array.isArray(categories) ? categories : [];
+    const custom = Array.isArray(customCategories) ? customCategories : [];
+    return Array.from(new Set([...base, ...custom].map((c) => String(c || '').trim()).filter(Boolean)));
+  }, [categories, customCategories]);
+
+  const allBrandOptions = useMemo(() => {
+    const base = Array.isArray(brands) ? brands.map((b: any) => String(b?.name || '').trim()) : [];
+    const custom = Array.isArray(customBrands) ? customBrands.map((b) => String(b || '').trim()) : [];
+    return Array.from(new Set(['LeafyEarth', ...base, ...custom].filter(Boolean)));
+  }, [brands, customBrands]);
+
+  const allBrandOwnerOptions = useMemo(() => {
+    const base = Array.isArray(brandOwners)
+      ? brandOwners.map((bo: any) => String(bo?.name || '').trim())
+      : [];
+    const custom = Array.isArray(customBrandOwners)
+      ? customBrandOwners.map((bo) => String(bo || '').trim())
+      : [];
+    return Array.from(new Set(['Vio Nature Science', ...base, ...custom].filter(Boolean)));
+  }, [brandOwners, customBrandOwners]);
+
+  const computeNextEightDigitSku = useCallback(() => {
+    let highest = 10000000;
+    for (const p of products || []) {
+      const raw = String(p?.sku ?? '').trim();
+      if (/^[0-9]{8}$/.test(raw)) {
+        const num = Number.parseInt(raw, 10);
+        if (Number.isFinite(num) && num > highest && num < 99999999) {
+          highest = num;
+        }
+      }
+    }
+    return String(highest + 1).padStart(8, '0');
+  }, [products]);
+
+  const findMatchingProductByName = useCallback(
+    (candidateNames: Array<string | null | undefined>) => {
+      const norm = (v: unknown) =>
+        String(v || '')
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, ' ');
+      const base = (v: unknown) =>
+        norm(v)
+          .replace(/\([^)]*\)/g, '')
+          .trim()
+          .replace(/\s+/g, ' ');
+
+      const valid = (candidateNames || []).map(norm).filter((s) => s.length >= 2);
+      for (const cand of valid) {
+        const exact = (products || []).find(
+          (p) => norm(p.name) === cand || norm(p.englishName) === cand
+        );
+        if (exact) return exact;
+      }
+      const baseValid = valid.map(base).filter((s) => s.length >= 3);
+      for (const bCand of baseValid) {
+        const hit = (products || []).find(
+          (p) => base(p.name) === bCand || base(p.englishName) === bCand
+        );
+        if (hit) return hit;
+      }
+      return null;
+    },
+    [products]
+  );
 
   const actor = useMemo(
     () => ({
@@ -193,9 +274,9 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
   const [savingReview, setSavingReview] = useState<boolean>(false);
 
   // 4. Image generation state
-  const [imgProductForm, setImgProductForm] = useState<string>('Powder / Whole Botanical');
+  const [imgProductForm, setImgProductForm] = useState<string>('Dried Whole Fruit');
   const [imgPackagingStyle, setImgPackagingStyle] = useState<string>(
-    'Clean Retail Stand-up Pouch with Natural Product Foreground'
+    'Standard Brown Kraft Stand-Up Zipper Pouch with Cream Label, Clear Lower Window & Foreground Heap'
   );
   const [imgCustomPrompt, setImgCustomPrompt] = useState<string>('');
   const [generatingImage, setGeneratingImage] = useState<boolean>(false);
@@ -214,15 +295,56 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
   const [resOffers, setResOffers] = useState<WebPriceSourceOffer[]>([]);
   const [savingResearch, setSavingResearch] = useState<boolean>(false);
 
-  // 6. Master Sync Comparison state
+  // 6. Master Sync Comparison & 16-Field Product Master Updation state
   const [comparisonItems, setComparisonItems] = useState<MasterFieldComparisonItem[]>([]);
   const [selectedSyncFields, setSelectedSyncFields] = useState<Set<string>>(new Set());
   const [syncTargetMasterId, setSyncTargetMasterId] = useState<string>('');
+  const [isNewMasterProduct, setIsNewMasterProduct] = useState<boolean>(false);
   const [syncImageAction, setSyncImageAction] = useState<'none' | 'replace_primary' | 'append_gallery'>(
-    'none'
+    'replace_primary'
   );
   const [loadingCompare, setLoadingCompare] = useState<boolean>(false);
   const [applyingSync, setApplyingSync] = useState<boolean>(false);
+  const [customCategoryInput, setCustomCategoryInput] = useState<string>('');
+  const [masterUpdationForm, setMasterUpdationForm] = useState<{
+    name: string;
+    sku: string;
+    packingSize: string;
+    unit: string;
+    mrp: number;
+    onlinePrice: number;
+    shopPrice: number;
+    gstPercentage: number;
+    categories: string[];
+    leafycategory: string;
+    brand: string;
+    brandOwner: string;
+    stockIn: number;
+    imageUrl: string;
+    images: string[];
+    uniqueSpec1: string;
+    uniqueSpec2: string;
+    uniqueSpec3: string;
+  }>({
+    name: '',
+    sku: '10000001',
+    packingSize: '100 g',
+    unit: 'PAC',
+    mrp: 0,
+    onlinePrice: 0,
+    shopPrice: 0,
+    gstPercentage: 5,
+    categories: [],
+    leafycategory: '',
+    brand: 'LeafyEarth',
+    brandOwner: 'Vio Nature Science',
+    stockIn: 0,
+    imageUrl: '',
+    images: [],
+    uniqueSpec1: '',
+    uniqueSpec2: '',
+    uniqueSpec3: '',
+  });
 
   // 9. Config status
   const [aiConfig, setAiConfig] = useState<any>(null);
@@ -311,13 +433,144 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     }
   }, [statusFilter, searchQuery, selectedDraftId]);
 
+  const populateMasterUpdationForm = useCallback(
+    (params: {
+      draft: AIProductDraft;
+      payload: AIProductContentPayload | null;
+      research: AIProductResearchRecord | null;
+      images: AIProductImage[];
+      matchedMaster: Record<string, any> | null;
+      nextAutoSku?: string;
+    }) => {
+      const { draft, payload, research, images, matchedMaster } = params;
+      const autoSku = params.nextAutoSku || computeNextEightDigitSku();
+      const existingSku = String(matchedMaster?.sku || '').trim();
+      const resolvedSku = /^[0-9]{8}$/.test(existingSku) ? existingSku : autoSku;
+      const approvedOrFirstImg =
+        (images || []).find((i) => i.status === 'APPROVED') || (images || [])[0] || null;
+      const resolvedImgUrl =
+        matchedMaster?.imageUrl || approvedOrFirstImg?.preview_url || '';
+      const resolvedCategories: string[] =
+        Array.isArray(matchedMaster?.categories) && matchedMaster.categories.length > 0
+          ? matchedMaster.categories
+          : matchedMaster?.category
+          ? [String(matchedMaster.category)]
+          : payload?.category
+          ? [String(payload.category)]
+          : [];
+
+      const brandVal = matchedMaster?.brand || draft.brand_hint || 'LeafyEarth';
+      const knownBrandObj = (brands || []).find(
+        (b: any) => String(b?.name || '').toLowerCase() === String(brandVal).toLowerCase()
+      );
+      const brandOwnerVal =
+        matchedMaster?.brandOwner || (knownBrandObj as any)?.owner || 'Vio Nature Science';
+
+      setMasterUpdationForm({
+        name:
+          matchedMaster?.name ||
+          payload?.english_product_name ||
+          draft.source_product_name ||
+          '',
+        sku: resolvedSku,
+        packingSize:
+          matchedMaster?.packingSize || research?.packing?.selectedPackingSize || '100 g',
+        unit: matchedMaster?.unit || research?.packing?.unit || 'PAC',
+        mrp: Number(
+          matchedMaster?.mrp ??
+            research?.marketResearch?.highestPrice ??
+            research?.marketResearch?.lowestPrice ??
+            0
+        ),
+        onlinePrice: Number(
+          matchedMaster?.onlinePrice ??
+            matchedMaster?.offerPrice ??
+            research?.marketResearch?.lowestPrice ??
+            0
+        ),
+        shopPrice: Number(
+          matchedMaster?.shopPrice ??
+            research?.marketResearch?.lowestPrice ??
+            0
+        ),
+        gstPercentage: Number(
+          matchedMaster?.gstPercentage ?? research?.taxation?.gstRatePercent ?? 5
+        ),
+        categories: resolvedCategories,
+        leafycategory:
+          payload?.category || matchedMaster?.leafycategory || draft.category_hint || '',
+        brand: brandVal,
+        brandOwner: brandOwnerVal,
+        stockIn: Number(matchedMaster?.stockIn ?? matchedMaster?.stock ?? 0),
+        imageUrl: resolvedImgUrl,
+        images:
+          Array.isArray(matchedMaster?.images) && matchedMaster.images.length > 0
+            ? matchedMaster.images
+            : resolvedImgUrl
+            ? [resolvedImgUrl]
+            : [],
+        uniqueSpec1: matchedMaster?.uniqueSpec1 || payload?.key_features?.[0] || '',
+        uniqueSpec2: matchedMaster?.uniqueSpec2 || payload?.key_features?.[1] || '',
+        uniqueSpec3: matchedMaster?.uniqueSpec3 || payload?.key_features?.[2] || '',
+      });
+
+      if (resolvedImgUrl && !isFirebaseStorageUrlClient(resolvedImgUrl)) {
+        ensureClientFirebaseStorageUrl({
+          draftId: draft.id,
+          targetProductId: matchedMaster?.id ? String(matchedMaster.id) : undefined,
+          sourceUrl: resolvedImgUrl,
+        })
+          .then((uploaded) => {
+            if (isFirebaseStorageUrlClient(uploaded.downloadUrl)) {
+              setMasterUpdationForm((prev) => ({
+                ...prev,
+                imageUrl: uploaded.downloadUrl,
+                images: Array.from(
+                  new Set([
+                    uploaded.downloadUrl,
+                    ...prev.images.filter((u) => isFirebaseStorageUrlClient(u)),
+                  ])
+                ),
+              }));
+            }
+          })
+          .catch(() => null);
+      }
+    },
+    [brands, computeNextEightDigitSku]
+  );
+
   const loadSelectedDraftDetail = useCallback(
     async (draftId: string) => {
       setLoadingDetail(true);
       try {
         const res = await fetchAIProductDraftDetail(draftId);
+        const payload: AIProductContentPayload | null =
+          res.currentVersion?.edited_payload || res.currentVersion?.generated_payload || null;
+
+        // Auto-search product name in `products` table: link if available, otherwise treat as new product
+        let matchedMaster = res.draft.master_product_id
+          ? products.find((p) => p.id === res.draft.master_product_id) || null
+          : null;
+        if (!matchedMaster) {
+          matchedMaster = findMatchingProductByName([
+            res.draft.source_product_name,
+            payload?.english_product_name,
+          ]);
+        }
+
+        const resolvedMasterId = matchedMaster ? matchedMaster.id : '';
+        setIsNewMasterProduct(!matchedMaster);
+        setLinkedMasterId(resolvedMasterId);
+        setSyncTargetMasterId(resolvedMasterId);
+
         setDraftDetail({
-          draft: res.draft,
+          draft: {
+            ...res.draft,
+            master_product_id: resolvedMasterId || null,
+            master_product_name: matchedMaster?.name || null,
+            master_product_sku: matchedMaster?.sku || null,
+          },
           currentVersion: res.currentVersion,
           versions: res.versions || [],
           images: res.images || [],
@@ -325,11 +578,15 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
           events: res.events || [],
           syncLogs: res.syncLogs || [],
         });
-        setLinkedMasterId(res.draft.master_product_id || '');
-        setSyncTargetMasterId(res.draft.master_product_id || '');
 
-        const payload: AIProductContentPayload | null =
-          res.currentVersion?.edited_payload || res.currentVersion?.generated_payload || null;
+        populateMasterUpdationForm({
+          draft: res.draft,
+          payload,
+          research: res.research || null,
+          images: res.images || [],
+          matchedMaster,
+        });
+
         if (payload) {
           setEditedPayload(JSON.parse(JSON.stringify(payload)));
           if (payload.form) setImgProductForm(payload.form);
@@ -372,22 +629,21 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
           );
           setResOffers(res.research.marketResearch?.offers || []);
         } else {
-          const linkedMaster = products.find((p) => p.id === res.draft.master_product_id);
-          const defaultPack = linkedMaster?.packingSize || '100 g';
-          setTaxHsnCode(linkedMaster?.hsnCode || '09103030');
-          setTaxGstRate(Number(linkedMaster?.gstPercentage ?? 5));
+          const defaultPack = matchedMaster?.packingSize || '100 g';
+          setTaxHsnCode(matchedMaster?.hsnCode || '09103030');
+          setTaxGstRate(Number(matchedMaster?.gstPercentage ?? 5));
           setTaxGstReference(
-            linkedMaster?.gstReference ||
+            matchedMaster?.gstReference ||
               'GST Schedule I – Verify 4–8 digit HSN classification against official CBIC tariff'
           );
           setResSelectedPackingSize(defaultPack);
-          setResUnit(linkedMaster?.unit || 'PAC');
+          setResUnit(matchedMaster?.unit || 'PAC');
           setResAvailableSizesText(
-            (linkedMaster?.availablePackingSizes || ['50 g', '100 g', '250 g', '500 g', '1 kg']).join(
+            (matchedMaster?.availablePackingSizes || ['50 g', '100 g', '250 g', '500 g', '1 kg']).join(
               ', '
             )
           );
-          setResOffers(linkedMaster?.webPriceSources || []);
+          setResOffers(matchedMaster?.webPriceSources || []);
         }
       } catch (err: any) {
         setBanner({ type: 'error', message: err?.message || 'Failed to load draft details' });
@@ -395,7 +651,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
         setLoadingDetail(false);
       }
     },
-    [products]
+    [products, findMatchingProductByName, populateMasterUpdationForm]
   );
 
   useEffect(() => {
@@ -416,6 +672,24 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
         const res = await compareAIDraftWithMaster(draftId, targetMasterId || syncTargetMasterId);
         const items: MasterFieldComparisonItem[] = res.comparison || [];
         setComparisonItems(items);
+        if (res.masterProduct?.id) {
+          setSyncTargetMasterId(String(res.masterProduct.id));
+          setLinkedMasterId(String(res.masterProduct.id));
+          setIsNewMasterProduct(false);
+        } else {
+          setSyncTargetMasterId('');
+          setIsNewMasterProduct(true);
+        }
+        const payload =
+          res.version?.edited_payload || res.version?.generated_payload || editedPayload || null;
+        populateMasterUpdationForm({
+          draft: res.draft || draftDetail?.draft,
+          payload,
+          research: res.approvedResearch || draftDetail?.research || null,
+          images: draftDetail?.images || (res.approvedImage ? [res.approvedImage] : []),
+          matchedMaster: res.masterProduct || null,
+          nextAutoSku: res.nextAutoSku,
+        });
         const autoSelected = new Set<string>();
         items.forEach((item) => {
           if (item.selectable && item.hasChanged) {
@@ -429,7 +703,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
         setLoadingCompare(false);
       }
     },
-    [syncTargetMasterId]
+    [syncTargetMasterId, editedPayload, draftDetail, populateMasterUpdationForm]
   );
 
   useEffect(() => {
@@ -645,8 +919,8 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
           needsManualVerification: false,
         },
         packing: {
-          selectedPackingSize: resSelectedPackingSize.trim(),
-          unit: resUnit.trim().toUpperCase(),
+          selectedPackingSize: (resSelectedPackingSize || '').trim(),
+          unit: String(resUnit || 'PAC').trim().toUpperCase(),
           availablePackingSizes: availSizes,
         },
         offers: resOffers,
@@ -678,38 +952,242 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
 
   const handleApplyToProductMaster = async () => {
     if (!selectedDraftId) return;
-    if (!syncTargetMasterId) {
-      setBanner({ type: 'error', message: 'Please select a target Master Product to synchronize.' });
-      return;
-    }
-    if (selectedSyncFields.size === 0 && syncImageAction === 'none') {
-      setBanner({ type: 'error', message: 'Please select at least one field or image action to apply.' });
-      return;
-    }
     setApplyingSync(true);
     setBanner(null);
     try {
       const res = await applyAIDraftToMaster({
         draftId: selectedDraftId,
-        masterProductId: syncTargetMasterId,
+        masterProductId: syncTargetMasterId || null,
         selectedFields: Array.from(selectedSyncFields),
         imageAction: syncImageAction,
         idempotencyKey: `sync_${selectedDraftId}_${Date.now()}`,
+        masterProductOverrides: {
+          ...masterUpdationForm,
+          leafycategory:
+            editedPayload?.category ||
+            masterUpdationForm.leafycategory ||
+            draftDetail?.draft.category_hint ||
+            '',
+        },
         actor,
       });
+      const updatedMasterId = res.masterProduct?.id || syncTargetMasterId || '';
+      if (updatedMasterId) {
+        setSyncTargetMasterId(updatedMasterId);
+        setLinkedMasterId(updatedMasterId);
+        setIsNewMasterProduct(false);
+      }
       await reloadFirestoreData();
       await loadSelectedDraftDetail(selectedDraftId);
       await loadDraftsList();
-      await loadComparison(selectedDraftId, syncTargetMasterId);
+      await loadComparison(selectedDraftId, updatedMasterId);
       setBanner({
         type: 'success',
-        message: `Synchronized ${res.appliedFields?.length || selectedSyncFields.size} approved field(s) to Master Product cleanly inside a single transaction. Selling prices (MRP/Online/Offer) and existing SKU were preserved.`,
+        message: res.createdNewMasterProduct
+          ? `Created new Product Master record "${res.masterProduct?.name || masterUpdationForm.name}" (SKU: ${res.masterProduct?.sku || masterUpdationForm.sku}) and synchronized all selected AI & Product Master fields.`
+          : `Synchronized Product Master "${res.masterProduct?.name || masterUpdationForm.name}" (SKU: ${res.masterProduct?.sku || masterUpdationForm.sku}) with all Product Master Updation fields and ${selectedSyncFields.size} selected AI field(s).`,
       });
     } catch (err: any) {
       setBanner({ type: 'error', message: err?.message || 'Failed to synchronize with Product Master' });
     } finally {
       setApplyingSync(false);
     }
+  };
+
+  const handleExportProductsTable = async (format: 'csv' | 'json') => {
+    let exportedImageUrl = masterUpdationForm.imageUrl;
+    let exportedStoragePath =
+      (products.find((p) => p.id === syncTargetMasterId) as any)?.storagePath || '';
+    if (exportedImageUrl && !isFirebaseStorageUrlClient(exportedImageUrl)) {
+      try {
+        const up = await ensureClientFirebaseStorageUrl({
+          draftId: selectedDraftId || undefined,
+          targetProductId: syncTargetMasterId || undefined,
+          sourceUrl: exportedImageUrl,
+        });
+        if (isFirebaseStorageUrlClient(up.downloadUrl)) {
+          exportedImageUrl = up.downloadUrl;
+          exportedStoragePath = up.storagePath;
+          setMasterUpdationForm((prev) => ({
+            ...prev,
+            imageUrl: up.downloadUrl,
+            images: Array.from(
+              new Set([up.downloadUrl, ...prev.images.filter((u) => isFirebaseStorageUrlClient(u))])
+            ),
+          }));
+        }
+      } catch {
+        // Keep current imageUrl if export fails
+      }
+    }
+
+    const exportedGalleryUrls = Array.from(
+      new Set(
+        [
+          ...(exportedImageUrl ? [exportedImageUrl] : []),
+          ...(masterUpdationForm.images || []).filter((u) => isFirebaseStorageUrlClient(u)),
+        ].filter(Boolean)
+      )
+    );
+
+    // Merge current draft's masterUpdationForm preview into the exported list so all existing
+    // `products` table fields and new fields (including `leafycategory`) are kept updated when exporting
+    const currentPreviewRecord: Record<string, any> = {
+      ...(products.find((p) => p.id === syncTargetMasterId) || {}),
+      id: syncTargetMasterId || `new_${selectedDraftId || 'product'}`,
+      name: masterUpdationForm.name,
+      sku: masterUpdationForm.sku,
+      packingSize: masterUpdationForm.packingSize,
+      unit: masterUpdationForm.unit,
+      mrp: masterUpdationForm.mrp,
+      onlinePrice: masterUpdationForm.onlinePrice,
+      offerPrice: masterUpdationForm.onlinePrice,
+      shopPrice: masterUpdationForm.shopPrice,
+      gstPercentage: masterUpdationForm.gstPercentage,
+      categories: masterUpdationForm.categories,
+      category: masterUpdationForm.categories[0] || 'Uncategorized',
+      leafycategory:
+        editedPayload?.category ||
+        masterUpdationForm.leafycategory ||
+        draftDetail?.draft.category_hint ||
+        '',
+      brand: masterUpdationForm.brand,
+      brandOwner: masterUpdationForm.brandOwner,
+      stockIn: masterUpdationForm.stockIn,
+      imageUrl: exportedImageUrl,
+      storagePath:
+        exportedStoragePath ||
+        `products/${syncTargetMasterId || selectedDraftId || 'product'}/main.jpg`,
+      images: exportedGalleryUrls,
+      uniqueSpec1: masterUpdationForm.uniqueSpec1,
+      uniqueSpec2: masterUpdationForm.uniqueSpec2,
+      uniqueSpec3: masterUpdationForm.uniqueSpec3,
+    };
+    comparisonItems.forEach((item) => {
+      if (selectedSyncFields.has(item.fieldKey) && item.selectable) {
+        if (item.masterField === 'imageUrl' && isFirebaseStorageUrlClient(exportedImageUrl)) {
+          currentPreviewRecord.imageUrl = exportedImageUrl;
+        } else {
+          currentPreviewRecord[item.masterField] = item.proposedAiValue;
+        }
+      }
+    });
+
+    const exportList: Array<Record<string, any>> = products.map((p) =>
+      p.id === syncTargetMasterId ? { ...p, ...currentPreviewRecord } : { ...p }
+    );
+    if (!syncTargetMasterId && masterUpdationForm.name) {
+      exportList.unshift(currentPreviewRecord);
+    }
+
+    if (format === 'json') {
+      const blob = new Blob([JSON.stringify(exportList, null, 2)], {
+        type: 'application/json;charset=utf-8;',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `products_master_export_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    // Collect every existing `products` table column key + new fields so no column is ever dropped
+    const standardColumns = [
+      'id',
+      'name',
+      'sku',
+      'hsnCode',
+      'packingSize',
+      'unit',
+      'mrp',
+      'onlinePrice',
+      'offerPrice',
+      'shopPrice',
+      'discount',
+      'gstPercentage',
+      'categories',
+      'category',
+      'leafycategory',
+      'brand',
+      'brandOwner',
+      'stockIn',
+      'stockOut',
+      'stock',
+      'stockAvailability',
+      'imageUrl',
+      'storagePath',
+      'images',
+      'uniqueSpec1',
+      'uniqueSpec2',
+      'uniqueSpec3',
+      'uniqueSpec4',
+      'title',
+      'englishName',
+      'botanicalName',
+      'botanicalFamily',
+      'productForm',
+      'description',
+      'keyFeatures',
+      'culinaryUses',
+      'storageInstructions',
+      'malayalamName',
+      'hindiName',
+      'tamilName',
+      'kannadaName',
+      'teluguName',
+      'isAyurvedicProduct',
+      'sanskritName',
+      'lowestWebPrice',
+      'highestWebPrice',
+      'availablePackingSizes',
+      'seoTitle',
+      'metaDescription',
+      'seoKeywords',
+      'urlSlug',
+      'googleProductCategory',
+      'productType',
+      'unitsSold',
+      'revenue',
+      'growthRate',
+      'amazonSales',
+      'flipkartSales',
+      'meeshoSales',
+      'vamjoSales',
+      'whatsappSales',
+      'countersaleSales',
+      'preorderactive',
+      'vamjoWeblink',
+      'amazonWeblink',
+      'flipkartWeblink',
+      'meeshoWeblink',
+      'notes',
+    ];
+    const dynamicKeys = new Set<string>(standardColumns);
+    exportList.forEach((row) => {
+      Object.keys(row || {}).forEach((k) => dynamicKeys.add(k));
+    });
+    const headers = Array.from(dynamicKeys);
+    const escapeCsv = (val: any) => {
+      if (val === null || val === undefined) return '';
+      const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+      if (/[",\n\r]/.test(str)) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+    const csvLines = [
+      headers.join(','),
+      ...exportList.map((row) => headers.map((h) => escapeCsv(row[h])).join(',')),
+    ];
+    const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `products_master_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // =========================================================================
@@ -923,17 +1401,18 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
         dietaryAttributes: Array.isArray(prod.dietaryAttributes)
           ? prod.dietaryAttributes
           : ['100% Natural', 'Vegetarian'],
-        allergenInformation:
-          prod.allergenInformation || 'Packed in a facility that handles culinary herbs and spices.',
+        allergenInformation: Array.isArray(prod.allergenInformation)
+          ? prod.allergenInformation.join(', ')
+          : prod.allergenInformation || 'Packed in a facility that handles culinary herbs and spices.',
         googleProductCategory:
           prod.googleProductCategory ||
           'Food, Beverages & Tobacco > Food Items > Seasonings & Spices > Herbs & Spices',
         productType: prod.productType || `Home & Kitchen > Grocery > ${prod.category || 'Botanicals'}`,
         countryOfOrigin: prod.countryOfOrigin || 'India',
         netWeight: prod.netWeight ?? 100,
-        netWeightUnit: prod.netWeightUnit ?? 'g',
+        netWeightUnit: (prod.netWeightUnit as any) ?? 'g',
         netVolume: prod.netVolume ?? null,
-        netVolumeUnit: prod.netVolumeUnit ?? null,
+        netVolumeUnit: (prod.netVolumeUnit as any) ?? null,
       });
     }
   }, [selectedCommerceProductId, commerceOverview, products]);
@@ -1602,18 +2081,34 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={linkedMasterId}
-                    onChange={(e) => setLinkedMasterId(e.target.value)}
-                    className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold bg-slate-50"
-                  >
-                    <option value="">-- Link Master Product --</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} (SKU: {p.sku || 'N/A'})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
+                        syncTargetMasterId
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                      }`}
+                    >
+                      {syncTargetMasterId ? 'Auto-Linked Existing' : 'New Product'}
+                    </span>
+                    <input
+                      type="text"
+                      readOnly
+                      value={
+                        syncTargetMasterId
+                          ? `${
+                              products.find((p) => p.id === syncTargetMasterId)?.name ||
+                              masterUpdationForm.name
+                            } (SKU: ${
+                              products.find((p) => p.id === syncTargetMasterId)?.sku ||
+                              masterUpdationForm.sku
+                            })`
+                          : `${masterUpdationForm.name || draftDetail.draft.source_product_name} (New • Auto SKU: ${masterUpdationForm.sku})`
+                      }
+                      className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold bg-slate-100 text-slate-800 min-w-[260px] cursor-not-allowed"
+                      title="Target Master Product is automatically matched by product name in the products table (non-editable)"
+                    />
+                  </div>
 
                   <button
                     type="button"
@@ -2767,6 +3262,22 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
               price badges.
             </p>
 
+            <div className="p-3 rounded-2xl border border-amber-200 bg-amber-50/50 flex items-center gap-3">
+              <img
+                src="/assets/reference-kraft-pouch-template.jpg"
+                alt="Standard Kraft Pouch Cover Reference"
+                className="w-16 h-16 rounded-xl border border-amber-200 object-contain bg-white shrink-0"
+              />
+              <div className="text-[11px] text-slate-700 leading-snug">
+                <div className="font-black text-amber-900 uppercase tracking-wider text-[10px]">
+                  Default Cover Design Pattern (Enforced)
+                </div>
+                Brown Kraft Stand-Up Zipper Pouch • Cream Label (Bold Serif Name, English Subtitle,{' '}
+                <em>Italic Botanical Name</em>, 3-Leaf Divider, Product + 2 Leaves, Uppercase Form) •
+                Clear Lower Window • Foreground Heap on <strong>#FFFFFF</strong>.
+              </div>
+            </div>
+
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Product Form</label>
@@ -3725,15 +4236,18 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                     >
                       <div className="flex items-center justify-between">
                         <div>
-                          <span className="font-black text-slate-900">{st.platformName}</span>
+                          <span className="font-black text-slate-900">
+                            {st.platformName || st.displayName || st.id}
+                          </span>
                           <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-200 text-slate-800">
-                            {st.priorityTier} • {st.feedFormat.toUpperCase()}
+                            {st.priorityTier || st.priority || 'P0'} •{' '}
+                            {String(st.feedFormat || 'xml').toUpperCase()}
                           </span>
                         </div>
                         <label className="inline-flex items-center gap-1.5 font-bold text-slate-800 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={st.enabled}
+                            checked={Boolean(st.enabled)}
                             onChange={(e) =>
                               handleTogglePlatformSetting(st, { enabled: e.target.checked })
                             }
@@ -3744,7 +4258,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-slate-600">
-                        <span className="font-mono">{st.feedPath}</span>
+                        <span className="font-mono">{st.feedPath || (st as any).feedEndpoint || '/feeds/products.json'}</span>
                         {st.id === 'openai_chatgpt' && (
                           <label className="inline-flex items-center gap-1 font-bold text-indigo-800 cursor-pointer">
                             <input
@@ -3789,10 +4303,11 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                       >
                         <div>
                           <div className="font-bold text-slate-900">
-                            {fd.platform} ({fd.format.toUpperCase()})
+                            {fd.platform} ({String(fd.format || 'xml').toUpperCase()})
                           </div>
                           <div className="text-[10px] font-mono text-slate-500">
-                            Eligible: {fd.eligibleItems}/{fd.totalItems} • Checksum: {fd.checksum}
+                            Eligible: {fd.eligibleItems ?? fd.itemCount ?? fd.count ?? 0}/
+                            {fd.totalItems ?? fd.itemCount ?? fd.count ?? 0} • Checksum: {fd.checksum}
                           </div>
                         </div>
                         {fd.contentPreview && (
@@ -4004,18 +4519,36 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <select
-                    value={syncTargetMasterId}
-                    onChange={(e) => setSyncTargetMasterId(e.target.value)}
-                    className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-bold bg-slate-50"
-                  >
-                    <option value="">-- Select Target Master Product --</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} (SKU: {p.sku || 'N/A'})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider shrink-0 ${
+                        syncTargetMasterId
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                      }`}
+                    >
+                      {syncTargetMasterId ? 'Linked Existing Product' : 'New Product (Auto-Create)'}
+                    </span>
+                    <input
+                      type="text"
+                      readOnly
+                      value={
+                        syncTargetMasterId
+                          ? `${
+                              products.find((p) => p.id === syncTargetMasterId)?.name ||
+                              masterUpdationForm.name
+                            } (SKU: ${
+                              products.find((p) => p.id === syncTargetMasterId)?.sku ||
+                              masterUpdationForm.sku
+                            })`
+                          : `${
+                              masterUpdationForm.name || draftDetail.draft.source_product_name
+                            } — New Product (Auto SKU: ${masterUpdationForm.sku})`
+                      }
+                      className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-bold bg-slate-100 text-slate-800 min-w-[300px] cursor-not-allowed"
+                      title="Automatically matched by product name in products table (non-editable)"
+                    />
+                  </div>
 
                   <select
                     value={syncImageAction}
@@ -4035,11 +4568,30 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => handleExportProductsTable('csv')}
+                    className="px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold flex items-center gap-1.5"
+                    title="Export full products table (including existing fields, Product Master Updation fields, and leafycategory) as CSV"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-slate-600" />
+                    Export Products CSV
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleExportProductsTable('json')}
+                    className="px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold flex items-center gap-1.5"
+                    title="Export full products table as JSON"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-600" />
+                    Export JSON
+                  </button>
+
+                  <button
+                    type="button"
                     disabled={
                       applyingSync ||
                       (draftDetail.draft.status !== 'APPROVED' &&
-                        draftDetail.draft.status !== 'APPLIED') ||
-                      !syncTargetMasterId
+                        draftDetail.draft.status !== 'APPLIED')
                     }
                     onClick={handleApplyToProductMaster}
                     className="px-5 py-2.5 rounded-xl bg-[#2E7D32] hover:bg-[#256628] disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-sm"
@@ -4052,7 +4604,9 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                     ) : (
                       <>
                         <FileCheck className="w-4 h-4" />
-                        Apply Selected ({selectedSyncFields.size}) to Product Master
+                        {syncTargetMasterId
+                          ? `Apply Selected (${selectedSyncFields.size}) & Update Master`
+                          : `Create New Product & Apply (${selectedSyncFields.size})`}
                       </>
                     )}
                   </button>
@@ -4074,6 +4628,528 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                   </button>
                 </div>
               )}
+
+              {/* =================================================================
+                  DEDICATED SECTION JUST ABOVE FIELD MAPPING:
+                  PRODUCT MASTER UPDATION FIELDS (16 CORE FIELDS + LEAFYCATEGORY)
+                 ================================================================= */}
+              <div className="rounded-3xl border border-emerald-200 bg-emerald-50/30 p-6 space-y-5">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-emerald-200/80 pb-3.5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-[#2E7D32] text-white">
+                        Product Master Updation
+                      </span>
+                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                        Core Product Master Fields (`products` Table)
+                      </h3>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1">
+                      {syncTargetMasterId ? (
+                        <>
+                          Matched existing product <strong>{masterUpdationForm.name}</strong> in{' '}
+                          <code>products</code> table. Updating will preserve all existing{' '}
+                          <code>products</code> fields and apply the values below.
+                        </>
+                      ) : (
+                        <>
+                          No matching product name found in <code>products</code> table — treated as a{' '}
+                          <strong>New Product</strong> with auto-allocated 8-digit SKU{' '}
+                          <code>{masterUpdationForm.sku}</code> and all standard <code>products</code>{' '}
+                          table fields initialized.
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-white px-3.5 py-2 rounded-2xl border border-emerald-200 shadow-2xs">
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                      AI Category (<code>products.leafycategory</code>):
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-lg bg-emerald-100 text-emerald-900 text-xs font-black">
+                      {editedPayload?.category ||
+                        masterUpdationForm.leafycategory ||
+                        draftDetail.draft.category_hint ||
+                        'Herbs & Botanicals'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Row 1: PROD NAME, SKU (8-DIGIT AUTO), PACKING SIZE, UNIT (UQC) */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      PROD NAME:
+                    </label>
+                    <input
+                      type="text"
+                      value={masterUpdationForm.name}
+                      onChange={(e) => {
+                        const nextName = e.target.value;
+                        const matched = findMatchingProductByName([nextName]);
+                        if (matched) {
+                          setSyncTargetMasterId(matched.id);
+                          setLinkedMasterId(matched.id);
+                          setIsNewMasterProduct(false);
+                          setMasterUpdationForm((prev) => ({
+                            ...prev,
+                            name: nextName,
+                            sku: /^[0-9]{8}$/.test(String(matched.sku || ''))
+                              ? String(matched.sku)
+                              : prev.sku,
+                          }));
+                        } else {
+                          setSyncTargetMasterId('');
+                          setLinkedMasterId('');
+                          setIsNewMasterProduct(true);
+                          setMasterUpdationForm((prev) => ({
+                            ...prev,
+                            name: nextName,
+                            sku: computeNextEightDigitSku(),
+                          }));
+                        }
+                      }}
+                      placeholder="Enter product name..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      SKU (8-DIGIT AUTO):
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={masterUpdationForm.sku}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-100 text-xs font-mono font-black text-slate-700 cursor-not-allowed"
+                      title="8-digit numeric SKU is automatically allocated and immutable once assigned"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      PACKING SIZE:
+                    </label>
+                    <input
+                      type="text"
+                      value={masterUpdationForm.packingSize}
+                      onChange={(e) =>
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          packingSize: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g., 100 g, 250 g, 1 kg"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      UNIT (UQC):
+                    </label>
+                    <select
+                      value={masterUpdationForm.unit}
+                      onChange={(e) =>
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          unit: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    >
+                      {(units && units.length > 0
+                        ? units
+                        : [
+                            { id: '1', uqc: 'PAC', desc: 'PACKS' },
+                            { id: '2', uqc: 'NOS', desc: 'NUMBERS' },
+                            { id: '3', uqc: 'GMS', desc: 'GRAMS' },
+                            { id: '4', uqc: 'KGS', desc: 'KILOGRAMS' },
+                            { id: '5', uqc: 'BTL', desc: 'BOTTLES' },
+                            { id: '6', uqc: 'BOX', desc: 'BOX' },
+                          ]
+                      ).map((u: any) => (
+                        <option key={u.id || u.uqc} value={u.uqc}>
+                          {u.uqc} — {u.desc}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Row 2: MRP (₹), ONLINE PRICE (₹), SHOP PRICE (₹), GST RATE (%) */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      MRP (₹):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={masterUpdationForm.mrp}
+                      onChange={(e) =>
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          mrp: Number(e.target.value || 0),
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      ONLINE PRICE (₹):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={masterUpdationForm.onlinePrice}
+                      onChange={(e) =>
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          onlinePrice: Number(e.target.value || 0),
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-emerald-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      SHOP PRICE (₹):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={masterUpdationForm.shopPrice}
+                      onChange={(e) =>
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          shopPrice: Number(e.target.value || 0),
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      GST RATE (%):
+                    </label>
+                    <select
+                      value={masterUpdationForm.gstPercentage}
+                      onChange={(e) =>
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          gstPercentage: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    >
+                      {ALLOWED_GST_SLABS.map((slab) => (
+                        <option key={slab} value={slab}>
+                          {slab}% GST
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Row 3: CATEGORIES (SELECT MULTIPLE), BRAND, BRAND OWNER, Stock In (Qty Received) */}
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                  <div className="md:col-span-5">
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      CATEGORIES (SELECT MULTIPLE):
+                    </label>
+                    <div className="p-2.5 rounded-xl border border-slate-200 bg-white space-y-2">
+                      <div className="flex flex-wrap gap-1.5 min-h-[26px]">
+                        {masterUpdationForm.categories.length === 0 ? (
+                          <span className="text-[11px] text-slate-400 italic">
+                            No categories selected — choose below
+                          </span>
+                        ) : (
+                          masterUpdationForm.categories.map((cat) => (
+                            <span
+                              key={cat}
+                              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-900"
+                            >
+                              <span>{cat}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setMasterUpdationForm((prev) => ({
+                                    ...prev,
+                                    categories: prev.categories.filter((c) => c !== cat),
+                                  }))
+                                }
+                                className="text-emerald-700 hover:text-rose-600 font-black"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const val = e.target.value.trim();
+                            if (!val) return;
+                            setMasterUpdationForm((prev) => ({
+                              ...prev,
+                              categories: Array.from(new Set([...prev.categories, val])),
+                            }));
+                          }}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-slate-50 font-semibold"
+                        >
+                          <option value="">+ Add Category from List...</option>
+                          {allCategoryOptions.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          value={customCategoryInput}
+                          onChange={(e) => setCustomCategoryInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && customCategoryInput.trim()) {
+                              e.preventDefault();
+                              const val = customCategoryInput.trim();
+                              setMasterUpdationForm((prev) => ({
+                                ...prev,
+                                categories: Array.from(new Set([...prev.categories, val])),
+                              }));
+                              setCustomCategoryInput('');
+                            }
+                          }}
+                          placeholder="Or type & Enter..."
+                          className="w-36 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      BRAND:
+                    </label>
+                    <input
+                      type="text"
+                      list="ai-master-brand-options"
+                      value={masterUpdationForm.brand}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const matchedBrand = (brands || []).find(
+                          (b: any) => String(b?.name || '').toLowerCase() === val.toLowerCase()
+                        );
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          brand: val,
+                          brandOwner: (matchedBrand as any)?.owner || prev.brandOwner,
+                        }));
+                      }}
+                      placeholder="Brand..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    />
+                    <datalist id="ai-master-brand-options">
+                      {allBrandOptions.map((b) => (
+                        <option key={b} value={b} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div className="md:col-span-3">
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      BRAND OWNER:
+                    </label>
+                    <input
+                      type="text"
+                      list="ai-master-brand-owner-options"
+                      value={masterUpdationForm.brandOwner}
+                      onChange={(e) =>
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          brandOwner: e.target.value,
+                        }))
+                      }
+                      placeholder="Brand Owner..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    />
+                    <datalist id="ai-master-brand-owner-options">
+                      {allBrandOwnerOptions.map((bo) => (
+                        <option key={bo} value={bo} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                      Stock In (Qty Received):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={masterUpdationForm.stockIn}
+                      onChange={(e) =>
+                        setMasterUpdationForm((prev) => ({
+                          ...prev,
+                          stockIn: Math.max(0, Number(e.target.value || 0)),
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 4: PRODUCT PHOTO / IMAGE DETAILS & UNIQUE SPEC 1, 2, 3 */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                  <div className="lg:col-span-5 p-3.5 rounded-2xl border border-slate-200 bg-white flex items-center gap-3.5">
+                    <div className="w-20 h-20 rounded-xl border border-slate-200 bg-white shrink-0 flex items-center justify-center overflow-hidden">
+                      {masterUpdationForm.imageUrl ? (
+                        <img
+                          src={masterUpdationForm.imageUrl}
+                          alt={masterUpdationForm.name}
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <ImageIcon className="w-7 h-7 text-slate-300" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700">
+                          PRODUCT PHOTO / IMAGE DETAILS:
+                        </label>
+                        <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                          1000×1000 #FFFFFF
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        value={masterUpdationForm.imageUrl}
+                        onChange={(e) => {
+                          const url = e.target.value;
+                          setMasterUpdationForm((prev) => ({
+                            ...prev,
+                            imageUrl: url,
+                            images: url ? Array.from(new Set([url, ...prev.images])) : prev.images,
+                          }));
+                        }}
+                        placeholder="https://firebasestorage.googleapis.com/v0/b/..."
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] font-mono"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        {draftDetail.images.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const bestImg =
+                                draftDetail.images.find((i) => i.status === 'APPROVED') ||
+                                draftDetail.images[0];
+                              if (bestImg?.preview_url) {
+                                let resolvedUrl = bestImg.preview_url;
+                                if (!isFirebaseStorageUrlClient(resolvedUrl)) {
+                                  const up = await ensureClientFirebaseStorageUrl({
+                                    draftId: draftDetail.draft.id,
+                                    targetProductId: syncTargetMasterId || undefined,
+                                    sourceUrl: resolvedUrl,
+                                  });
+                                  resolvedUrl = up.downloadUrl;
+                                }
+                                setMasterUpdationForm((prev) => ({
+                                  ...prev,
+                                  imageUrl: resolvedUrl,
+                                  images: Array.from(
+                                    new Set([
+                                      resolvedUrl,
+                                      ...prev.images.filter((u) => isFirebaseStorageUrlClient(u)),
+                                    ])
+                                  ),
+                                }));
+                              }
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold"
+                          >
+                            Use Staged AI 1000×1000 Kraft Image (Firebase Storage)
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onSubmenuChange('images')}
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold"
+                        >
+                          Manage AI Images ({draftDetail.images.length})
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                        UNIQUE SPEC 1:
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={masterUpdationForm.uniqueSpec1}
+                        onChange={(e) =>
+                          setMasterUpdationForm((prev) => ({
+                            ...prev,
+                            uniqueSpec1: e.target.value,
+                          }))
+                        }
+                        placeholder="Unique specification 1..."
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs text-slate-800"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                        UNIQUE SPEC 2:
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={masterUpdationForm.uniqueSpec2}
+                        onChange={(e) =>
+                          setMasterUpdationForm((prev) => ({
+                            ...prev,
+                            uniqueSpec2: e.target.value,
+                          }))
+                        }
+                        placeholder="Unique specification 2..."
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs text-slate-800"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                        UNIQUE SPEC 3:
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={masterUpdationForm.uniqueSpec3}
+                        onChange={(e) =>
+                          setMasterUpdationForm((prev) => ({
+                            ...prev,
+                            uniqueSpec3: e.target.value,
+                          }))
+                        }
+                        placeholder="Unique specification 3..."
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs text-slate-800"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <div className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">

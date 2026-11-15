@@ -5,6 +5,7 @@ import { normalizeUrlSlugClient, validateGtinChecksumClient } from '../utils/aiP
 
 export type ProductMasterV8Fields = Pick<
   ProductPerformance,
+  | 'leafycategory'
   | 'title'
   | 'botanicalName'
   | 'botanicalFamily'
@@ -84,6 +85,7 @@ export type ProductMasterV8Fields = Pick<
 
 export function extractV8FieldsFromProduct(p?: Partial<ProductPerformance> | null): ProductMasterV8Fields {
   return {
+    leafycategory: p?.leafycategory || '',
     title: p?.title || '',
     botanicalName: p?.botanicalName || '',
     botanicalFamily: p?.botanicalFamily || '',

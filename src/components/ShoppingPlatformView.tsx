@@ -211,12 +211,12 @@ export default function ShoppingPlatformView() {
     resolvePublicProductBySlugOrIdClient(slugOrId)
       .then((res) => {
         if (cancelled) return;
-        if (res.status === 'not_found') {
+        if (res.status === 404) {
           setDeepLinkNotFound(slugOrId);
           return;
         }
-        if (res.redirectToSlug && typeof window !== 'undefined') {
-          window.history.replaceState({}, '', `/products/${res.redirectToSlug}`);
+        if (res.canonicalSlug && typeof window !== 'undefined') {
+          window.history.replaceState({}, '', `/products/${res.canonicalSlug}`);
         }
         const matchedMaster = products.find((p) => p.id === res.product?.productId);
         if (matchedMaster) {
@@ -235,7 +235,7 @@ export default function ShoppingPlatformView() {
             offerPrice: res.product.salePrice ?? res.product.price,
             onlinePrice: res.product.price,
             mrp: res.product.price,
-            imageUrl: res.product.imageLink,
+            imageUrl: res.product.imageUrl,
             urlSlug: res.product.urlSlug,
             seoTitle: res.product.seoTitle,
             metaDescription: res.product.metaDescription,

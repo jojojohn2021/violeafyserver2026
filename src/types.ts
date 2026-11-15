@@ -129,6 +129,7 @@ export interface ProductPerformance {
   meeshoWeblink?: string;
   category?: string;
   categories?: string[];
+  leafycategory?: string;
   brand?: string;
   brandOwner?: string;
   // Firebase Storage - main product image
@@ -993,6 +994,9 @@ export interface AIProductVersion {
   approved_by?: string | null;
   approved_at?: string | null;
   seo_status?: 'DRAFT' | 'APPROVED' | 'REJECTED';
+  seo_review_status?: string | null;
+  seo_generated?: AIProductSEOPayload | null;
+  seo_edited?: AIProductSEOPayload | null;
   seo_approved_by?: string | null;
   seo_approved_at?: string | null;
   commerce_status?: 'DRAFT' | 'APPROVED' | 'REJECTED';
@@ -1429,6 +1433,68 @@ export interface PublicProductOfferProjection {
   revision: number;
   updatedAt: string;
 }
+
+export type AIProductSEOContent = AIProductSEOPayload;
+export type ProductFAQItem = AICommerceFAQItem;
+
+export interface AICommerceGeneratedPayload {
+  seoTitle: string;
+  metaDescription: string;
+  seoKeywords: string[];
+  urlSlug: string;
+  productHighlights: string[];
+  productFAQs: ProductFAQItem[];
+  searchTags: string[];
+  dietaryAttributes: string[];
+  allergenInformation: string;
+  googleProductCategory: string;
+  productType: string;
+  countryOfOrigin: string;
+  netWeight: number | null;
+  netWeightUnit: 'g' | 'kg' | 'mg' | null;
+  netVolume: number | null;
+  netVolumeUnit: 'ml' | 'l' | null;
+}
+
+export interface AICommercePlatformSetting extends Partial<AICommercePlatformSettings> {
+  id: AICommercePlatformId;
+  platformName: string;
+  priorityTier: 'P0' | 'P1' | 'P2';
+  feedFormat: 'xml' | 'jsonl' | 'json';
+  feedPath: string;
+  enabled: boolean;
+  featureFlagEnabled?: boolean;
+  autoSyncOnMasterUpdate?: boolean;
+}
+
+export interface AICommerceStagingRecord extends Partial<AICommerceStagingDraft> {
+  id: string;
+  productId: string | null;
+  generatedPayload?: AICommerceGeneratedPayload;
+  editedPayload?: AICommerceGeneratedPayload;
+}
+
+export interface AICommerceFeedRecord extends Partial<AICommerceFeedRun> {
+  id: string;
+  platform: AICommercePlatformId;
+  format: 'xml' | 'jsonl' | 'json';
+  eligibleItems?: number;
+  totalItems?: number;
+  itemCount?: number;
+  dryRun?: boolean;
+  checksum: string;
+  generatedAt?: string;
+  contentPreview?: string;
+}
+
+export interface AICommerceValidationRecord extends Partial<AICommerceValidationReport> {
+  id: string;
+  productId: string;
+  overallReadiness: AICommerceLocalReadiness;
+  platformReadiness: Partial<Record<AICommercePlatformId, AICommerceLocalReadiness>>;
+  issues: AICommerceValidationIssue[];
+}
+
 
 
 

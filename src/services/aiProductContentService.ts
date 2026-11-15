@@ -2,6 +2,8 @@ import type express from 'express';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import zlib from 'zlib';
 import type {
   AIProductContentPayload,
@@ -31,6 +33,12 @@ import {
   validateAICommercePayload,
   validateSEOPayload,
 } from './aiCommerceService';
+import {
+  allocateUniqueEightDigitSku,
+  computeHighestExistingEightDigitSku,
+  isValidEightDigitNumericSku,
+  MIN_EIGHT_DIGIT_SKU,
+} from './skuAllocationService';
 
 export const AI_PRODUCT_DRAFTS_COLLECTION = 'ai_product_drafts';
 export const AI_PRODUCT_VERSIONS_COLLECTION = 'ai_product_versions';
@@ -735,13 +743,21 @@ export function getOpenAIProviderConfigStatus(): OpenAIProviderConfigStatus {
   const provider = (process.env.AI_PROVIDER || 'openai').trim();
   const projectName = (process.env.OPENAI_PROJECT_NAME || 'leafyearthprdcnt').trim();
   const contentEnabled = String(process.env.AI_PRODUCT_CONTENT_ENABLED || 'false').toLowerCase() === 'true';
-  const imageEnabled = String(process.env.AI_PRODUCT_IMAGE_ENABLED || 'false').toLowerCase() === 'true';
+  const imageEnabled =
+    String(
+      process.env.AI_PRODUCT_IMAGE_ENABLED ||
+        process.env.AI_IMAGE_GENERATION_ENABLED ||
+        process.env.AI_PRODUCT_CONTENT_ENABLED ||
+        'false'
+    ).toLowerCase() === 'true';
   const apiKey = (process.env.OPENAI_API_KEY || '').trim();
   const apiKeyConfigured = Boolean(apiKey && !apiKey.startsWith('YOUR_') && !apiKey.startsWith('MY_'));
   const model = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
   const imageModel = (process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1').trim();
-  const imageWidth = Number(process.env.AI_PRODUCT_IMAGE_WIDTH || 1000) || 1000;
-  const imageHeight = Number(process.env.AI_PRODUCT_IMAGE_HEIGHT || 1000) || 1000;
+  const imageWidth =
+    Number(process.env.AI_PRODUCT_IMAGE_WIDTH || process.env.AI_IMAGE_WIDTH || 1000) || 1000;
+  const imageHeight =
+    Number(process.env.AI_PRODUCT_IMAGE_HEIGHT || process.env.AI_IMAGE_HEIGHT || 1000) || 1000;
   const imageBackground = (process.env.AI_PRODUCT_IMAGE_BACKGROUND || '#FFFFFF').trim().toUpperCase();
 
   const readyForLiveContent = provider === 'openai' && contentEnabled && apiKeyConfigured;
@@ -968,6 +984,343 @@ export function generatePureWhite1000x1000PngBuffer(seedText = 'LeafyEarth'): Bu
     makePngChunk('IDAT', compressed),
     makePngChunk('IEND', Buffer.alloc(0)),
   ]);
+}
+
+function escapeXmlForSvg(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+export interface StandardKraftPouchLabelMetadata {
+  primaryTitle: string;
+  englishSubtitle: string;
+  botanicalName: string;
+  formCaptionUpper: string;
+  visualProductDescription: string;
+}
+
+/**
+ * Resolves the standardized 4-part label text & visual product description
+ * matching the reference Kraft Stand-Up Pouch cover design:
+ *  - Line 1 (Large bold serif): primaryTitle (e.g., "Thippili", "Kadukka")
+ *  - Line 2 (Regular sans-serif in parentheses): englishSubtitle (e.g., "(Indian Long Pepper)", "(Chebulic Myrobalan)")
+ *  - Line 3 (Italic serif): botanicalName (e.g., "Piper longum", "Terminalia chebula")
+ *  - Line 4 (Bottom uppercase tracked caption): formCaptionUpper (e.g., "DRIED WHOLE FRUIT SPIKES", "DRIED WHOLE FRUIT")
+ */
+export function resolveStandardKraftPouchLabelMetadata(params: {
+  productName: string;
+  englishProductName?: string;
+  displayTitle?: string;
+  botanicalName?: string;
+  category?: string;
+  productForm?: string;
+}): StandardKraftPouchLabelMetadata {
+  const rawName = String(params.productName || params.englishProductName || 'Natural Botanical').trim();
+  const parenMatch = rawName.match(/^([^(]+)\(([^)]+)\)/);
+  const primaryTitle = (parenMatch ? parenMatch[1].trim() : rawName).slice(0, 28);
+
+  const lowerKey = primaryTitle.toLowerCase();
+  const knownBotanicalDictionary: Record<
+    string,
+    { englishSubtitle: string; botanicalName: string; formCaptionUpper: string; visualDesc: string }
+  > = {
+    kadukka: {
+      englishSubtitle: 'Chebulic Myrobalan',
+      botanicalName: 'Terminalia chebula',
+      formCaptionUpper: 'DRIED WHOLE FRUIT',
+      visualDesc:
+        'whole dried Kadukka (Haritaki / Terminalia chebula) ridged golden-brown to dark-brown oval drupe fruits',
+    },
+    haritaki: {
+      englishSubtitle: 'Chebulic Myrobalan',
+      botanicalName: 'Terminalia chebula',
+      formCaptionUpper: 'DRIED WHOLE FRUIT',
+      visualDesc:
+        'whole dried Haritaki (Kadukka / Terminalia chebula) ridged golden-brown oval drupe fruits',
+    },
+    thippili: {
+      englishSubtitle: 'Indian Long Pepper',
+      botanicalName: 'Piper longum',
+      formCaptionUpper: 'DRIED WHOLE FRUIT SPIKES',
+      visualDesc:
+        'dried whole dark-brown cylindrical textured catkins/fruit spikes of Indian Long Pepper (Piper longum)',
+    },
+    pippali: {
+      englishSubtitle: 'Indian Long Pepper',
+      botanicalName: 'Piper longum',
+      formCaptionUpper: 'DRIED WHOLE FRUIT SPIKES',
+      visualDesc:
+        'dried whole dark-brown cylindrical textured fruit spikes of Indian Long Pepper (Piper longum)',
+    },
+    nellikka: {
+      englishSubtitle: 'Indian Gooseberry',
+      botanicalName: 'Phyllanthus emblica',
+      formCaptionUpper: 'DRIED WHOLE FRUIT SEGMENTS',
+      visualDesc: 'dried dark-brown Amla / Indian Gooseberry (Phyllanthus emblica) fruit segments',
+    },
+    amla: {
+      englishSubtitle: 'Indian Gooseberry',
+      botanicalName: 'Phyllanthus emblica',
+      formCaptionUpper: 'DRIED FRUIT',
+      visualDesc: 'dried dark-brown Amla / Indian Gooseberry (Phyllanthus emblica) fruit pieces',
+    },
+    chukku: {
+      englishSubtitle: 'Dried Ginger Root',
+      botanicalName: 'Zingiber officinale',
+      formCaptionUpper: 'WHOLE DRIED RHIZOME',
+      visualDesc: 'whole sun-dried pale-beige knotted ginger rhizomes (Zingiber officinale)',
+    },
+    kurumulaku: {
+      englishSubtitle: 'Malabar Black Pepper',
+      botanicalName: 'Piper nigrum',
+      formCaptionUpper: 'DRIED WHOLE PEPPERCORNS',
+      visualDesc: 'whole wrinkled dark-black Malabar peppercorns (Piper nigrum)',
+    },
+    manjal: {
+      englishSubtitle: 'Alleppey Turmeric',
+      botanicalName: 'Curcuma longa',
+      formCaptionUpper: 'DRIED WHOLE FINGERS',
+      visualDesc: 'deep golden-orange dried turmeric rhizome fingers (Curcuma longa)',
+    },
+    elakka: {
+      englishSubtitle: 'Green Cardamom',
+      botanicalName: 'Elettaria cardamomum',
+      formCaptionUpper: 'WHOLE GREEN PODS',
+      visualDesc: 'plump aromatic forest-green whole cardamom pods (Elettaria cardamomum)',
+    },
+    grambu: {
+      englishSubtitle: 'Whole Cloves',
+      botanicalName: 'Syzygium aromaticum',
+      formCaptionUpper: 'DRIED FLOWER BUDS',
+      visualDesc: 'aromatic dark reddish-brown whole dried clove flower buds (Syzygium aromaticum)',
+    },
+    jeerakam: {
+      englishSubtitle: 'Cumin Seeds',
+      botanicalName: 'Cuminum cyminum',
+      formCaptionUpper: 'WHOLE AROMATIC SEEDS',
+      visualDesc: 'whole warm-brown ridged aromatic cumin seeds (Cuminum cyminum)',
+    },
+    ashwagandha: {
+      englishSubtitle: 'Indian Winter Cherry',
+      botanicalName: 'Withania somnifera',
+      formCaptionUpper: 'DRIED WHOLE ROOT CUTS',
+      visualDesc: 'pale-ivory beige dried Ashwagandha root sticks and cut pieces (Withania somnifera)',
+    },
+    brahmi: {
+      englishSubtitle: 'Water Hyssop',
+      botanicalName: 'Bacopa monnieri',
+      formCaptionUpper: 'DRIED WHOLE HERB LEAVES',
+      visualDesc: 'dried green-brown whole Brahmi leaves and stems (Bacopa monnieri)',
+    },
+  };
+
+  const dictHit = knownBotanicalDictionary[lowerKey];
+
+  let englishSubtitle = parenMatch ? parenMatch[2].trim() : '';
+  if (!englishSubtitle && params.displayTitle) {
+    const titleParen = params.displayTitle.match(/\(([^)]+)\)/);
+    if (titleParen) englishSubtitle = titleParen[1].trim();
+  }
+  if (!englishSubtitle && dictHit) {
+    englishSubtitle = dictHit.englishSubtitle;
+  }
+  if (
+    !englishSubtitle &&
+    params.englishProductName &&
+    params.englishProductName.toLowerCase() !== primaryTitle.toLowerCase()
+  ) {
+    englishSubtitle = params.englishProductName.trim();
+  }
+  if (!englishSubtitle) {
+    englishSubtitle = params.category || 'Pure Natural Botanical';
+  }
+
+  const botanicalName = (
+    params.botanicalName ||
+    dictHit?.botanicalName ||
+    'Botanical Herb'
+  ).trim();
+
+  const rawForm = String(params.productForm || '').trim();
+  let formCaptionUpper = dictHit?.formCaptionUpper || 'DRIED WHOLE BOTANICAL';
+  if (rawForm) {
+    const upperForm = rawForm.toUpperCase();
+    if (upperForm === 'DRIED FRUIT') {
+      formCaptionUpper = 'DRIED WHOLE FRUIT';
+    } else if (upperForm.length <= 32) {
+      formCaptionUpper = upperForm;
+    }
+  }
+
+  const visualProductDescription =
+    dictHit?.visualDesc ||
+    `natural ${rawForm || 'dried whole botanical'} of ${primaryTitle} (${englishSubtitle}, ${botanicalName})`;
+
+  return {
+    primaryTitle,
+    englishSubtitle: englishSubtitle.replace(/^\(|\)$/g, '').slice(0, 34),
+    botanicalName: botanicalName.slice(0, 38),
+    formCaptionUpper: formCaptionUpper.slice(0, 32),
+    visualProductDescription,
+  };
+}
+
+/**
+ * Builds the standardized OpenAI prompt that enforces the exact brown kraft stand-up
+ * zipper pouch cover design from the reference sample image.
+ */
+export function buildStandardKraftPouchPrompt(params: {
+  productName: string;
+  englishProductName?: string;
+  displayTitle?: string;
+  botanicalName?: string;
+  category?: string;
+  productForm?: string;
+  customPrompt?: string;
+}): string {
+  const meta = resolveStandardKraftPouchLabelMetadata(params);
+  const customExtra = params.customPrompt ? ` ${params.customPrompt.trim()}` : '';
+  return [
+    `High-resolution 1000x1000 square commercial e-commerce studio product photograph following the exact standardized LeafyEarth brown kraft stand-up pouch cover design on a 100% pure solid white (#FFFFFF) background:`,
+    `1. POUCH STRUCTURE: One centered upright natural matte brown kraft paper stand-up zipper pouch (Doypack) with side tear notches near the top and a horizontal resealable zip-lock heat-seal strip across the upper part.`,
+    `2. STANDARD CREAM FRONT LABEL (UPPER HALF): A rounded-rectangle warm cream textured paper label sticker (#F4EFE3) centered on the upper front of the kraft pouch containing this exact centered vertical layout:`,
+    `   - Top Title (large bold dark-brown serif font): "${meta.primaryTitle}"`,
+    `   - Second Line Subtitle in parentheses (clean dark-brown regular font): "(${meta.englishSubtitle})"`,
+    `   - Third Line Scientific Name (medium dark-brown italic serif font): "${meta.botanicalName}"`,
+    `   - Divider: A thin horizontal olive-green line with a small 3-leaf green sprout icon centered in the middle.`,
+    `   - Center Label Illustration: A crisp photorealistic studio pile of ${meta.visualProductDescription} centered on the cream label with two fresh green botanical leaves tucked behind the right side of the pile.`,
+    `   - Bottom Label Caption (uppercase letter-spaced dark-brown sans-serif font): "${meta.formCaptionUpper}"`,
+    `3. LOWER TRANSPARENT WINDOW: Directly below the cream label, a wide rectangular/slightly curved clear transparent window on the lower half of the kraft pouch clearly packed full of ${meta.visualProductDescription} visible inside the pouch.`,
+    `4. FOREGROUND PRODUCT HEAP: Resting on the pure white (#FFFFFF) surface directly in front of the bottom base of the kraft pouch, a neat, realistic heap/mound of loose ${meta.visualProductDescription} with a soft natural contact shadow.`,
+    `No watermarks, no extra props, no price badges.${customExtra}`,
+  ].join(' ');
+}
+
+/**
+ * Builds a crisp 1000x1000 #FFFFFF studio product visual SVG data URL matching the
+ * exact standardized Brown Kraft Stand-Up Zipper Pouch + Cream Label + Clear Window + Foreground Heap
+ * reference cover design when running in deterministic/offline fallback mode.
+ */
+export function buildStudio1000x1000SvgPreviewDataUrl(params: {
+  productName: string;
+  englishProductName?: string;
+  displayTitle?: string;
+  botanicalName?: string;
+  category?: string;
+  productForm?: string;
+  packagingStyle?: string;
+}): string {
+  const meta = resolveStandardKraftPouchLabelMetadata(params);
+  const title = escapeXmlForSvg(meta.primaryTitle);
+  const subtitle = escapeXmlForSvg(`(${meta.englishSubtitle})`);
+  const botanical = escapeXmlForSvg(meta.botanicalName);
+  const formUpper = escapeXmlForSvg(meta.formCaptionUpper);
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+  <!-- 100% Pure White #FFFFFF Studio Background -->
+  <rect width="1000" height="1000" fill="#FFFFFF"/>
+  <!-- Soft Studio Contact Shadows -->
+  <ellipse cx="500" cy="855" rx="260" ry="26" fill="#000000" fill-opacity="0.10"/>
+  <ellipse cx="500" cy="915" rx="235" ry="22" fill="#000000" fill-opacity="0.13"/>
+
+  <!-- Upright Natural Brown Kraft Stand-Up Zipper Pouch -->
+  <path d="M235,65 Q235,42 260,42 L740,42 Q765,42 765,65 L765,98 L752,98 Q744,98 744,104 Q744,110 752,110 L764,110 L740,835 Q738,860 710,860 L290,860 Q262,860 260,835 L236,110 L248,110 Q256,110 256,104 Q256,98 248,98 L235,98 Z" fill="#C49666" stroke="#A97B4B" stroke-width="3"/>
+  <!-- Kraft Pouch Subtle Side Shading Highlights -->
+  <path d="M242,115 L268,835" stroke="#B38354" stroke-width="18" stroke-opacity="0.35"/>
+  <path d="M758,115 L732,835" stroke="#B38354" stroke-width="18" stroke-opacity="0.35"/>
+  <!-- Resealable Zipper Track Lines -->
+  <rect x="242" y="118" width="516" height="22" fill="#B88756" fill-opacity="0.55"/>
+  <line x1="242" y1="124" x2="758" y2="124" stroke="#9B6E41" stroke-width="2"/>
+  <line x1="242" y1="136" x2="758" y2="136" stroke="#D3A97B" stroke-width="2"/>
+
+  <!-- Standard Cream Paper Front Label (#F4EFE3) -->
+  <rect x="295" y="192" width="410" height="388" rx="22" fill="#F4EFE3" stroke="#DFD5C3" stroke-width="2.5"/>
+
+  <!-- Label Line 1: Bold Dark-Brown Serif Product Name -->
+  <text x="500" y="268" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="56" font-weight="700" fill="#3A2313">${title}</text>
+  <!-- Label Line 2: Common English Name in Parentheses -->
+  <text x="500" y="308" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="25" font-weight="400" fill="#4A301D">${subtitle}</text>
+  <!-- Label Line 3: Italic Scientific Botanical Name -->
+  <text x="500" y="340" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="23" fill="#4A301D">${botanical}</text>
+
+  <!-- Green Horizontal Divider with 3-Leaf Sprout Motif -->
+  <line x1="412" y1="366" x2="482" y2="366" stroke="#557A2E" stroke-width="2"/>
+  <line x1="518" y1="366" x2="588" y2="366" stroke="#557A2E" stroke-width="2"/>
+  <path d="M500,368 C496,356 498,348 500,344 C502,348 504,356 500,368 Z" fill="#557A2E"/>
+  <path d="M498,368 C488,364 484,358 486,353 C491,354 496,360 498,368 Z" fill="#689438"/>
+  <path d="M502,368 C512,364 516,358 514,353 C509,354 504,360 502,368 Z" fill="#689438"/>
+
+  <!-- Two Fresh Green Botanical Leaves Behind Label Product Cluster -->
+  <path d="M535,442 C552,402 595,385 622,388 C610,422 578,446 535,442 Z" fill="#4F7F28" stroke="#3B621C" stroke-width="1.5"/>
+  <line x1="540" y1="438" x2="612" y2="393" stroke="#7BA84F" stroke-width="1.5"/>
+  <path d="M555,462 C588,438 632,442 655,458 C628,482 588,482 555,462 Z" fill="#5D8E32" stroke="#3B621C" stroke-width="1.5"/>
+  <line x1="562" y1="461" x2="644" y2="458" stroke="#88B65C" stroke-width="1.5"/>
+
+  <!-- Center Label Product Cluster Illustration -->
+  <ellipse cx="495" cy="512" rx="125" ry="14" fill="#000000" fill-opacity="0.12"/>
+  <g fill="#6B4423" stroke="#472B13" stroke-width="2">
+    <ellipse cx="455" cy="488" rx="38" ry="22" transform="rotate(-14 455 488)"/>
+    <ellipse cx="520" cy="492" rx="40" ry="23" transform="rotate(12 520 492)"/>
+    <ellipse cx="425" cy="462" rx="36" ry="20" transform="rotate(-24 425 462)"/>
+    <ellipse cx="490" cy="460" rx="42" ry="24" transform="rotate(6 490 460)"/>
+    <ellipse cx="548" cy="468" rx="36" ry="21" transform="rotate(22 548 468)"/>
+    <ellipse cx="465" cy="434" rx="38" ry="22" transform="rotate(-10 465 434)"/>
+    <ellipse cx="518" cy="438" rx="37" ry="21" transform="rotate(16 518 438)"/>
+  </g>
+  <g stroke="#8C5D34" stroke-width="1.5" fill="none">
+    <path d="M430,488 Q455,478 480,486"/>
+    <path d="M495,492 Q520,482 545,490"/>
+    <path d="M465,460 Q490,450 515,458"/>
+  </g>
+
+  <!-- Label Line 4: Bottom All-Caps Form Descriptor -->
+  <text x="500" y="558" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" fill="#3A2313" letter-spacing="2.5">${formUpper}</text>
+
+  <!-- Lower Transparent Pouch Window Packed with Product -->
+  <path d="M292,596 L708,596 L704,705 Q500,775 296,705 Z" fill="#432814" stroke="#9B6E41" stroke-width="3"/>
+  <clipPath id="windowClip">
+    <path d="M292,596 L708,596 L704,705 Q500,775 296,705 Z"/>
+  </clipPath>
+  <g clip-path="url(#windowClip)" fill="#6E4725" stroke="#3E2410" stroke-width="2">
+    <ellipse cx="335" cy="630" rx="44" ry="25" transform="rotate(-18 335 630)"/>
+    <ellipse cx="415" cy="625" rx="46" ry="26" transform="rotate(14 415 625)"/>
+    <ellipse cx="500" cy="628" rx="45" ry="25" transform="rotate(-8 500 628)"/>
+    <ellipse cx="585" cy="626" rx="46" ry="26" transform="rotate(19 585 626)"/>
+    <ellipse cx="665" cy="632" rx="44" ry="25" transform="rotate(-15 665 632)"/>
+    <ellipse cx="365" cy="675" rx="46" ry="26" transform="rotate(12 365 675)"/>
+    <ellipse cx="455" cy="678" rx="48" ry="27" transform="rotate(-14 455 678)"/>
+    <ellipse cx="545" cy="676" rx="48" ry="27" transform="rotate(10 545 676)"/>
+    <ellipse cx="635" cy="674" rx="46" ry="26" transform="rotate(-12 635 674)"/>
+    <ellipse cx="410" cy="720" rx="46" ry="25" transform="rotate(-6 410 720)"/>
+    <ellipse cx="500" cy="724" rx="48" ry="26" transform="rotate(8 500 724)"/>
+    <ellipse cx="590" cy="718" rx="46" ry="25" transform="rotate(-10 590 718)"/>
+    <!-- Window Gloss Reflection -->
+    <path d="M295,600 L705,600 L690,645 L310,625 Z" fill="#FFFFFF" fill-opacity="0.10" stroke="none"/>
+  </g>
+
+  <!-- Foreground Heap of Raw Product in Front of Pouch Base -->
+  <g fill="#6B4423" stroke="#3E2410" stroke-width="2.2">
+    <ellipse cx="315" cy="892" rx="46" ry="25" transform="rotate(-16 315 892)"/>
+    <ellipse cx="395" cy="902" rx="48" ry="26" transform="rotate(10 395 902)"/>
+    <ellipse cx="485" cy="908" rx="50" ry="27" transform="rotate(-6 485 908)"/>
+    <ellipse cx="575" cy="904" rx="48" ry="26" transform="rotate(14 575 904)"/>
+    <ellipse cx="665" cy="894" rx="46" ry="25" transform="rotate(-12 665 894)"/>
+    <ellipse cx="355" cy="858" rx="46" ry="25" transform="rotate(18 355 858)"/>
+    <ellipse cx="445" cy="862" rx="48" ry="26" transform="rotate(-12 445 862)"/>
+    <ellipse cx="535" cy="860" rx="48" ry="26" transform="rotate(15 535 860)"/>
+    <ellipse cx="622" cy="858" rx="46" ry="25" transform="rotate(-18 622 858)"/>
+    <ellipse cx="415" cy="822" rx="45" ry="25" transform="rotate(-8 415 822)"/>
+    <ellipse cx="500" cy="818" rx="48" ry="26" transform="rotate(6 500 818)"/>
+    <ellipse cx="582" cy="824" rx="45" ry="25" transform="rotate(16 582 824)"/>
+    <ellipse cx="465" cy="788" rx="44" ry="24" transform="rotate(-12 465 788)"/>
+    <ellipse cx="532" cy="790" rx="44" ry="24" transform="rotate(12 532 790)"/>
+  </g>
+</svg>`;
+  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf-8').toString('base64')}`;
 }
 
 /**
@@ -1210,7 +1563,7 @@ export function buildMasterComparisonDiff(params: {
     pushItem('englishName', 'English Product Name', 'general', 'englishName', payload.english_product_name);
     pushItem('botanicalName', 'Botanical Name', 'general', 'botanicalName', payload.botanical_name);
     pushItem('botanicalFamily', 'Botanical Family', 'general', 'botanicalFamily', payload.family);
-    pushItem('category', 'Product Category', 'general', 'category', payload.category);
+    pushItem('leafycategory', 'Product Category (leafycategory)', 'general', 'leafycategory', payload.category);
     pushItem('productForm', 'Product Form', 'general', 'productForm', payload.form);
     pushItem('description', 'E-Commerce Description', 'general', 'description', payload.description);
     pushItem('keyFeatures', 'Key Features', 'general', 'keyFeatures', payload.key_features);
@@ -1394,6 +1747,400 @@ export function buildSelectedMasterUpdatePayload(params: {
   return { updatePatch, beforeSnapshot, afterSnapshot };
 }
 
+export interface MasterProductUpdationOverrides {
+  name?: string;
+  sku?: string;
+  packingSize?: string;
+  unit?: string;
+  mrp?: number;
+  onlinePrice?: number;
+  shopPrice?: number;
+  gstPercentage?: number;
+  categories?: string[];
+  brand?: string;
+  brandOwner?: string;
+  stockIn?: number;
+  imageUrl?: string;
+  storagePath?: string;
+  images?: string[];
+  uniqueSpec1?: string;
+  uniqueSpec2?: string;
+  uniqueSpec3?: string;
+  leafycategory?: string;
+}
+
+/**
+ * Searches the `products` list for a matching product name (`name` or `englishName`).
+ * Matches exact case-insensitive name first, then base name (before parentheses).
+ */
+export function matchMasterProductByName(
+  products: Array<Record<string, any>>,
+  candidateNames: Array<string | null | undefined>
+): Record<string, any> | null {
+  const norm = (val: unknown) =>
+    String(val || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+  const baseName = (val: unknown) =>
+    norm(val)
+      .replace(/\([^)]*\)/g, '')
+      .trim()
+      .replace(/\s+/g, ' ');
+
+  const validCandidates = (candidateNames || []).map(norm).filter((s) => s.length >= 2);
+  if (validCandidates.length === 0) return null;
+
+  // Pass 1: Exact case-insensitive match on name or englishName
+  for (const cand of validCandidates) {
+    const exactHit = (products || []).find(
+      (p) => norm(p.name) === cand || norm(p.englishName) === cand
+    );
+    if (exactHit) return exactHit;
+  }
+
+  // Pass 2: Base name match (before parenthetical suffix)
+  const baseCandidates = validCandidates.map(baseName).filter((s) => s.length >= 3);
+  for (const bCand of baseCandidates) {
+    const baseHit = (products || []).find(
+      (p) => baseName(p.name) === bCand || baseName(p.englishName) === bCand
+    );
+    if (baseHit) return baseHit;
+  }
+
+  return null;
+}
+
+/**
+ * Merges `MasterProductUpdationOverrides` (the 16 Product Master Updation fields above
+ * the field mapping table) while preserving all existing `products` table fields.
+ */
+export function mergeMasterProductUpdationOverrides(params: {
+  existingMasterProduct: Record<string, any> | null;
+  updatePatch: Record<string, any>;
+  beforeSnapshot: Record<string, any>;
+  afterSnapshot: Record<string, any>;
+  overrides?: MasterProductUpdationOverrides | null;
+  allocatedSku: string;
+}): {
+  mergedMasterProduct: Record<string, any>;
+  finalPatch: Record<string, any>;
+} {
+  const existing = params.existingMasterProduct || {};
+  const isNew = !params.existingMasterProduct || !params.existingMasterProduct.id;
+  const ov = params.overrides || {};
+  const patch: Record<string, any> = { ...params.updatePatch };
+
+  const setField = (key: string, val: any) => {
+    if (val === undefined) return;
+    if (!(key in params.beforeSnapshot)) {
+      params.beforeSnapshot[key] = existing[key] ?? null;
+    }
+    patch[key] = val;
+    params.afterSnapshot[key] = val;
+  };
+
+  if (typeof ov.name === 'string' && ov.name.trim()) {
+    setField('name', ov.name.trim());
+  }
+
+  // Enforce 8-digit numeric SKU (immutable on existing products that already have a valid 8-digit SKU)
+  const existingSku = String(existing.sku || '').trim();
+  const finalSku = isValidEightDigitNumericSku(existingSku)
+    ? existingSku
+    : isValidEightDigitNumericSku(ov.sku)
+    ? String(ov.sku).trim()
+    : params.allocatedSku;
+  setField('sku', finalSku);
+
+  if (typeof ov.packingSize === 'string') {
+    setField('packingSize', ov.packingSize.trim());
+  }
+  if (typeof ov.unit === 'string' && ov.unit.trim()) {
+    setField('unit', ov.unit.trim().toUpperCase());
+  }
+  if (ov.mrp !== undefined && ov.mrp !== null && Number.isFinite(Number(ov.mrp))) {
+    setField('mrp', Number(ov.mrp));
+  }
+  if (
+    ov.onlinePrice !== undefined &&
+    ov.onlinePrice !== null &&
+    Number.isFinite(Number(ov.onlinePrice))
+  ) {
+    const online = Number(ov.onlinePrice);
+    setField('onlinePrice', online);
+    setField('offerPrice', online);
+    const mrpVal = Number(patch.mrp ?? existing.mrp ?? 0);
+    if (mrpVal > 0 && online > 0 && mrpVal >= online) {
+      setField('discount', Math.round(((mrpVal - online) / mrpVal) * 100));
+    }
+  }
+  if (
+    ov.shopPrice !== undefined &&
+    ov.shopPrice !== null &&
+    Number.isFinite(Number(ov.shopPrice))
+  ) {
+    setField('shopPrice', Number(ov.shopPrice));
+  }
+  if (
+    ov.gstPercentage !== undefined &&
+    ov.gstPercentage !== null &&
+    Number.isFinite(Number(ov.gstPercentage))
+  ) {
+    setField('gstPercentage', Number(ov.gstPercentage));
+  }
+  if (Array.isArray(ov.categories)) {
+    const cleanCats = Array.from(
+      new Set(ov.categories.map((c) => String(c || '').trim()).filter(Boolean))
+    );
+    setField('categories', cleanCats);
+    setField('category', cleanCats[0] || existing.category || 'Uncategorized');
+  }
+  if (typeof ov.leafycategory === 'string' && ov.leafycategory.trim()) {
+    setField('leafycategory', ov.leafycategory.trim());
+  }
+  if (typeof ov.brand === 'string') {
+    setField('brand', ov.brand.trim());
+  }
+  if (typeof ov.brandOwner === 'string') {
+    setField('brandOwner', ov.brandOwner.trim());
+  }
+  if (ov.stockIn !== undefined && ov.stockIn !== null && Number.isFinite(Number(ov.stockIn))) {
+    const stockInNum = Math.max(0, Number(ov.stockIn));
+    setField('stockIn', stockInNum);
+    const stockOutNum = Number(existing.stockOut ?? 0);
+    const computedStock = Math.max(0, stockInNum - stockOutNum);
+    setField('stock', computedStock);
+    setField('stockAvailability', computedStock > 0 ? 'In Stock' : 'Out of Stock');
+  }
+  if (typeof ov.imageUrl === 'string' && ov.imageUrl.trim()) {
+    setField('imageUrl', ov.imageUrl.trim());
+  }
+  if (typeof ov.storagePath === 'string' && ov.storagePath.trim()) {
+    setField('storagePath', ov.storagePath.trim());
+  }
+  if (Array.isArray(ov.images) && ov.images.length > 0) {
+    setField('images', ov.images.filter(Boolean));
+  } else if (patch.imageUrl && (!Array.isArray(existing.images) || existing.images.length === 0)) {
+    setField('images', [patch.imageUrl]);
+  }
+  if (typeof ov.uniqueSpec1 === 'string') {
+    setField('uniqueSpec1', ov.uniqueSpec1.trim());
+  }
+  if (typeof ov.uniqueSpec2 === 'string') {
+    setField('uniqueSpec2', ov.uniqueSpec2.trim());
+  }
+  if (typeof ov.uniqueSpec3 === 'string') {
+    setField('uniqueSpec3', ov.uniqueSpec3.trim());
+  }
+
+  // Base defaults for a brand-new `products` record so all `products` table fields exist
+  const baseDefaults: Record<string, any> = isNew
+    ? {
+        name: patch.name || existing.name || 'New Product',
+        sku: finalSku,
+        hsnCode: patch.hsnCode || '',
+        packingSize: patch.packingSize || '100 g',
+        unit: patch.unit || 'PAC',
+        mrp: patch.mrp ?? 0,
+        onlinePrice: patch.onlinePrice ?? 0,
+        offerPrice: patch.offerPrice ?? patch.onlinePrice ?? 0,
+        shopPrice: patch.shopPrice ?? 0,
+        discount: patch.discount ?? 0,
+        gstPercentage: patch.gstPercentage ?? 5,
+        categories: patch.categories || [],
+        category: patch.category || (patch.categories?.[0] ?? 'Uncategorized'),
+        leafycategory: patch.leafycategory || '',
+        brand: patch.brand || '',
+        brandOwner: patch.brandOwner || '',
+        stockIn: patch.stockIn ?? 0,
+        stockOut: 0,
+        stock: patch.stock ?? patch.stockIn ?? 0,
+        stockAvailability: (patch.stock ?? patch.stockIn ?? 0) > 0 ? 'In Stock' : 'Out of Stock',
+        imageUrl: patch.imageUrl || '',
+        storagePath: patch.storagePath || '',
+        images: patch.images || (patch.imageUrl ? [patch.imageUrl] : []),
+        videos: [],
+        description: patch.description || '',
+        ingredients: '',
+        uniqueSpec1: patch.uniqueSpec1 || '',
+        uniqueSpec2: patch.uniqueSpec2 || '',
+        uniqueSpec3: patch.uniqueSpec3 || '',
+        uniqueSpec4: '',
+        specifications: '',
+        variants: '',
+        notes: '',
+        unitsSold: 0,
+        revenue: 0,
+        growthRate: 0,
+        amazonSales: 0,
+        flipkartSales: 0,
+        meeshoSales: 0,
+        vamjoSales: 0,
+        whatsappSales: 0,
+        countersaleSales: 0,
+        preorderactive: false,
+        vamjoWeblink: '',
+        amazonWeblink: '',
+        flipkartWeblink: '',
+        meeshoWeblink: '',
+        rating: 4.8,
+        reviewsCount: 0,
+      }
+    : {};
+
+  const finalPatch = isNew ? { ...baseDefaults, ...patch } : patch;
+  const mergedMasterProduct = { ...baseDefaults, ...existing, ...finalPatch };
+  return { mergedMasterProduct, finalPatch };
+}
+
+// ============================================================================
+// Firebase Storage Upload & Canonical URL Helpers (https://firebasestorage.googleapis.com)
+// ============================================================================
+
+export function isFirebaseStorageDownloadUrl(url: unknown): boolean {
+  return (
+    typeof url === 'string' &&
+    url.trim().startsWith('https://firebasestorage.googleapis.com/v0/b/')
+  );
+}
+
+export function buildFirebaseStorageDownloadUrl(
+  bucketName: string,
+  storagePath: string,
+  downloadToken: string
+): string {
+  const cleanBucket = String(bucketName || 'violeafybasket.firebasestorage.app').trim();
+  const cleanPath = String(storagePath || '').replace(/^\/+/, '');
+  return `https://firebasestorage.googleapis.com/v0/b/${cleanBucket}/o/${encodeURIComponent(cleanPath)}?alt=media&token=${downloadToken}`;
+}
+
+export async function uploadBufferToFirebaseStorage(params: {
+  storage: any;
+  buffer: Buffer;
+  storagePath: string;
+  contentType: string;
+  downloadToken?: string;
+}): Promise<{
+  downloadUrl: string;
+  storagePath: string;
+  contentType: string;
+  downloadToken: string;
+}> {
+  const bucket = params.storage.bucket();
+  const cleanPath = String(params.storagePath || '').replace(/^\/+/, '');
+  const token = params.downloadToken || crypto.randomUUID();
+  const contentType = params.contentType || 'image/jpeg';
+  const fileRef = bucket.file(cleanPath);
+  await fileRef.save(params.buffer, {
+    metadata: {
+      contentType,
+      metadata: {
+        firebaseStorageDownloadTokens: token,
+      },
+    },
+    resumable: false,
+  });
+  const downloadUrl = buildFirebaseStorageDownloadUrl(bucket.name, cleanPath, token);
+  return {
+    downloadUrl,
+    storagePath: cleanPath,
+    contentType,
+    downloadToken: token,
+  };
+}
+
+export async function ensureFirebaseStorageImageUrl(params: {
+  storage: any;
+  sourceUrl: string;
+  targetStoragePath: string;
+  fallbackProductName?: string;
+  forceCopyToTargetPath?: boolean;
+}): Promise<{
+  downloadUrl: string;
+  storagePath: string;
+  contentType: string;
+  buffer?: Buffer;
+}> {
+  const rawUrl = String(params.sourceUrl || '').trim();
+  const cleanTarget = String(params.targetStoragePath || '').replace(/^\/+/, '');
+  if (!params.storage || typeof params.storage.bucket !== 'function' || !rawUrl) {
+    return {
+      downloadUrl: rawUrl,
+      storagePath: cleanTarget,
+      contentType: 'image/jpeg',
+    };
+  }
+
+  if (!params.forceCopyToTargetPath && isFirebaseStorageDownloadUrl(rawUrl)) {
+    return {
+      downloadUrl: rawUrl,
+      storagePath: cleanTarget,
+      contentType: 'image/jpeg',
+    };
+  }
+
+  let buffer: Buffer | null = null;
+  let contentType = 'image/jpeg';
+
+  if (rawUrl.startsWith('data:')) {
+    const b64Match = rawUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
+    if (b64Match) {
+      const mime = b64Match[1].toLowerCase();
+      if (mime.includes('svg')) {
+        buffer = generatePureWhite1000x1000PngBuffer(
+          `${params.fallbackProductName || 'Product'}:${Date.now()}`
+        );
+        contentType = 'image/png';
+      } else {
+        buffer = Buffer.from(b64Match[2], 'base64');
+        contentType = mime === 'image/jpg' ? 'image/jpeg' : mime;
+      }
+    } else if (rawUrl.startsWith('data:image/svg+xml')) {
+      buffer = generatePureWhite1000x1000PngBuffer(
+        `${params.fallbackProductName || 'Product'}:${Date.now()}`
+      );
+      contentType = 'image/png';
+    }
+  } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    try {
+      const resp = await fetch(rawUrl);
+      if (resp.ok) {
+        const arrBuf = await resp.arrayBuffer();
+        buffer = Buffer.from(arrBuf);
+        const hdrType = (resp.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (hdrType.startsWith('image/') && !hdrType.includes('svg')) {
+          contentType = hdrType;
+        }
+      }
+    } catch {
+      // Fallback below if fetch fails
+    }
+  }
+
+  if (!buffer || buffer.length === 0) {
+    return {
+      downloadUrl: rawUrl,
+      storagePath: cleanTarget,
+      contentType,
+    };
+  }
+
+  const uploaded = await uploadBufferToFirebaseStorage({
+    storage: params.storage,
+    buffer,
+    storagePath: cleanTarget,
+    contentType,
+  });
+
+  return {
+    downloadUrl: uploaded.downloadUrl,
+    storagePath: uploaded.storagePath,
+    contentType: uploaded.contentType,
+    buffer,
+  };
+}
+
 // ============================================================================
 // Express Route Registration (Sections 6, 17.5, 21.8)
 // ============================================================================
@@ -1450,6 +2197,363 @@ export function registerAIProductContentRoutes(
     return eventDoc;
   };
 
+  const ensureDraftImagesInFirebaseStorage = async (
+    db: Firestore,
+    draft: AIProductDraft,
+    images: AIProductImage[]
+  ): Promise<AIProductImage[]> => {
+    if (!deps.storage || typeof deps.storage.bucket !== 'function' || images.length === 0) {
+      return images;
+    }
+    const updatedList: AIProductImage[] = [];
+    for (const img of images) {
+      if (isFirebaseStorageDownloadUrl(img.preview_url)) {
+        updatedList.push(img);
+        continue;
+      }
+      try {
+        const isPng = String(img.preview_url || '').startsWith('data:image/png');
+        const ext = isPng ? 'png' : 'jpg';
+        const targetPath = `products/${draft.id}/images/${img.id}.${ext}`;
+        const uploaded = await ensureFirebaseStorageImageUrl({
+          storage: deps.storage,
+          sourceUrl: img.preview_url,
+          targetStoragePath: targetPath,
+          fallbackProductName: draft.source_product_name,
+        });
+        if (isFirebaseStorageDownloadUrl(uploaded.downloadUrl)) {
+          const patched: AIProductImage = {
+            ...img,
+            preview_url: uploaded.downloadUrl,
+            storage_key: uploaded.storagePath,
+          };
+          await db
+            .collection(AI_PRODUCT_IMAGES_COLLECTION)
+            .doc(img.id)
+            .set(
+              {
+                preview_url: patched.preview_url,
+                storage_key: patched.storage_key,
+              },
+              { merge: true }
+            );
+          updatedList.push(patched);
+          continue;
+        }
+      } catch (err) {
+        console.warn('[AI-PRODUCT-IMAGE] Failed to migrate image to Firebase Storage:', err);
+      }
+      updatedList.push(img);
+    }
+    return updatedList;
+  };
+
+  /**
+   * Generates and stages a 1000x1000 #FFFFFF candidate product image for a draft.
+   * Attempts live OpenAI image generation when enabled, uploads the image binary to
+   * Firebase Storage (`https://firebasestorage.googleapis.com/v0/b/...`), and falls back
+   * to the deterministic 1000x1000 #FFFFFF studio product visual.
+   */
+  const createStagedCandidateImageForDraft = async (params: {
+    db: Firestore;
+    draft: AIProductDraft;
+    payload?: AIProductContentPayload | null;
+    productForm?: string;
+    packagingStyle?: string;
+    customPrompt?: string;
+    actor: { uid: string; email?: string; role?: string };
+  }): Promise<AIProductImage> => {
+    const startMs = Date.now();
+    const config = getOpenAIProviderConfigStatus();
+    const productForm =
+      params.productForm ||
+      params.payload?.form ||
+      params.draft.category_hint ||
+      'Natural Botanical Product';
+    const packagingStyle =
+      params.packagingStyle ||
+      'Standard Brown Kraft Stand-Up Zipper Pouch with Cream Label, Clear Lower Window & Foreground Heap';
+    const customPrompt = params.customPrompt || '';
+
+    const labelMeta = resolveStandardKraftPouchLabelMetadata({
+      productName: params.draft.source_product_name,
+      englishProductName: params.payload?.english_product_name,
+      displayTitle: params.payload?.title,
+      botanicalName: params.payload?.botanical_name,
+      category: params.payload?.category || params.draft.category_hint || 'Herbs & Botanicals',
+      productForm: String(productForm),
+    });
+
+    const prompt = buildStandardKraftPouchPrompt({
+      productName: params.draft.source_product_name,
+      englishProductName: params.payload?.english_product_name,
+      displayTitle: params.payload?.title,
+      botanicalName: params.payload?.botanical_name,
+      category: params.payload?.category || params.draft.category_hint || 'Herbs & Botanicals',
+      productForm: String(productForm),
+      customPrompt,
+    });
+
+    const pngBuffer = generatePureWhite1000x1000PngBuffer(
+      `${params.draft.source_product_name}:${Date.now()}`
+    );
+    const dims = inspectPngDimensions(pngBuffer);
+    if (!dims.validPng || dims.width !== 1000 || dims.height !== 1000) {
+      throw new Error('Generated image failed 1000x1000 PNG validation.');
+    }
+
+    let checksum = crypto.createHash('sha256').update(pngBuffer).digest('hex');
+    const imageId = `aiimg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    let storageKey = `products/${params.draft.id}/images/${imageId}.png`;
+    let candidateBuffer: Buffer = pngBuffer;
+    let candidateContentType = 'image/png';
+
+    let previewUrl = buildStudio1000x1000SvgPreviewDataUrl({
+      productName: params.draft.source_product_name,
+      englishProductName: params.payload?.english_product_name,
+      displayTitle: params.payload?.title,
+      botanicalName: params.payload?.botanical_name,
+      category: params.payload?.category || params.draft.category_hint || 'Herbs & Botanicals',
+      productForm: String(productForm),
+      packagingStyle: String(packagingStyle),
+    });
+    let liveApiUsed = false;
+    let modelUsed = `${config.imageModel} (studio-1000x1000)`;
+
+    if (config.readyForLiveImages) {
+      const apiKey = (process.env.OPENAI_API_KEY || '').trim();
+      const candidateModels = Array.from(
+        new Set([
+          config.imageModel,
+          'gpt-image-2.5-flare',
+          'gpt-image-2',
+          'gpt-image-1.5',
+          'gpt-image-1-mini',
+          'chatgpt-image-latest',
+        ])
+      );
+
+      const refTemplatePath = path.resolve(
+        process.cwd(),
+        'public/assets/reference-kraft-pouch-template.jpg'
+      );
+      const hasRefTemplate = fs.existsSync(refTemplatePath);
+      const refBuffer = hasRefTemplate ? fs.readFileSync(refTemplatePath) : null;
+
+      for (const candidateModel of candidateModels) {
+        if (liveApiUsed) break;
+
+        // Step A: Try reference-image-guided edit (/v1/images/edits) so the exact brown kraft stand-up
+        // pouch cover design from reference-kraft-pouch-template.jpg is strictly replicated
+        if (refBuffer) {
+          const editController = new AbortController();
+          const editTimer = setTimeout(() => editController.abort(), 45000);
+          try {
+            const editPrompt = [
+              `Strictly preserve the exact brown kraft stand-up zipper pouch cover design, pouch shape, cream textured front label sticker (#F4EFE3), typography style, thin green horizontal line with 3-leaf sprout icon in the center, lower transparent pouch window, and foreground pile on a 100% pure solid white (#FFFFFF) background.`,
+              `Replace ONLY the product text on the cream label and the 3 product photo regions with "${labelMeta.primaryTitle}":`,
+              `1. Cream Label Top Title (large bold dark-brown serif font): "${labelMeta.primaryTitle}"`,
+              `2. Cream Label Second Line in parentheses (regular dark-brown font): "(${labelMeta.englishSubtitle})"`,
+              `3. Cream Label Third Line (italic dark-brown serif font): "${labelMeta.botanicalName}"`,
+              `4. Cream Label Center Illustration: Replace the long pepper spikes with a photorealistic cluster of ${labelMeta.visualProductDescription}, keeping the two fresh green botanical leaves tucked behind the right side.`,
+              `5. Cream Label Bottom Caption (all-caps tracked dark-brown sans-serif): "${labelMeta.formCaptionUpper}"`,
+              `6. Lower Transparent Window: Fill the clear pouch window with realistic ${labelMeta.visualProductDescription}.`,
+              `7. Foreground Heap: Replace the bottom foreground pile in front of the pouch with a neat realistic heap of ${labelMeta.visualProductDescription} on the pure white (#FFFFFF) surface.`,
+              customPrompt ? customPrompt.trim() : '',
+            ]
+              .filter(Boolean)
+              .join(' ');
+
+            const form = new FormData();
+            form.append('model', candidateModel);
+            form.append(
+              'image',
+              new Blob([refBuffer], { type: 'image/jpeg' }),
+              'reference-kraft-pouch-template.jpg'
+            );
+            form.append('prompt', editPrompt);
+            form.append('size', '1024x1024');
+            form.append('output_format', 'jpeg');
+            form.append('output_compression', '85');
+
+            const editRes = await fetch('https://api.openai.com/v1/images/edits', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: form,
+              signal: editController.signal,
+            });
+            clearTimeout(editTimer);
+            if (editRes.ok) {
+              const editData: any = await editRes.json();
+              const b64Json = editData?.data?.[0]?.b64_json;
+              const remoteUrl = editData?.data?.[0]?.url;
+              const outFmt = String(editData?.output_format || 'jpeg').toLowerCase();
+              const mimeSub = outFmt === 'png' ? 'png' : outFmt === 'webp' ? 'webp' : 'jpeg';
+              const ext = mimeSub === 'png' ? 'png' : mimeSub === 'webp' ? 'webp' : 'jpg';
+              if (b64Json && typeof b64Json === 'string') {
+                const rawBuf = Buffer.from(b64Json, 'base64');
+                checksum = crypto.createHash('sha256').update(rawBuf).digest('hex');
+                candidateBuffer = rawBuf;
+                candidateContentType = `image/${mimeSub}`;
+                storageKey = `products/${params.draft.id}/images/${imageId}.${ext}`;
+                previewUrl = `data:image/${mimeSub};base64,${b64Json}`;
+                liveApiUsed = true;
+                modelUsed = `${candidateModel} (ref-kraft-template)`;
+                break;
+              } else if (remoteUrl && typeof remoteUrl === 'string') {
+                previewUrl = remoteUrl;
+                storageKey = `products/${params.draft.id}/images/${imageId}.${ext}`;
+                try {
+                  const rResp = await fetch(remoteUrl);
+                  if (rResp.ok) {
+                    const rBuf = Buffer.from(await rResp.arrayBuffer());
+                    checksum = crypto.createHash('sha256').update(rBuf).digest('hex');
+                    candidateBuffer = rBuf;
+                    candidateContentType = `image/${mimeSub}`;
+                  }
+                } catch {
+                  // Keep remoteUrl if fetch fails
+                }
+                liveApiUsed = true;
+                modelUsed = `${candidateModel} (ref-kraft-template)`;
+                break;
+              }
+            }
+          } catch {
+            clearTimeout(editTimer);
+          }
+        }
+
+        if (liveApiUsed) break;
+
+        // Step B: Fallback to /v1/images/generations with the strict standardized Kraft Pouch prompt
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 35000);
+        try {
+          const bodyPayload: Record<string, any> = {
+            model: candidateModel,
+            prompt,
+            n: 1,
+            size: '1024x1024',
+            output_format: 'jpeg',
+            output_compression: 85,
+          };
+          const openAiRes = await fetch('https://api.openai.com/v1/images/generations', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(bodyPayload),
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          if (openAiRes.ok) {
+            const imgData: any = await openAiRes.json();
+            const remoteUrl = imgData?.data?.[0]?.url;
+            const b64Json = imgData?.data?.[0]?.b64_json;
+            const outFmt = String(imgData?.output_format || 'jpeg').toLowerCase();
+            const mimeSub = outFmt === 'png' ? 'png' : outFmt === 'webp' ? 'webp' : 'jpeg';
+            const ext = mimeSub === 'png' ? 'png' : mimeSub === 'webp' ? 'webp' : 'jpg';
+            if (b64Json && typeof b64Json === 'string') {
+              const rawBuf = Buffer.from(b64Json, 'base64');
+              checksum = crypto.createHash('sha256').update(rawBuf).digest('hex');
+              candidateBuffer = rawBuf;
+              candidateContentType = `image/${mimeSub}`;
+              storageKey = `products/${params.draft.id}/images/${imageId}.${ext}`;
+              previewUrl = `data:image/${mimeSub};base64,${b64Json}`;
+              liveApiUsed = true;
+              modelUsed = candidateModel;
+              break;
+            } else if (remoteUrl && typeof remoteUrl === 'string') {
+              previewUrl = remoteUrl;
+              storageKey = `products/${params.draft.id}/images/${imageId}.${ext}`;
+              try {
+                const rResp = await fetch(remoteUrl);
+                if (rResp.ok) {
+                  const rBuf = Buffer.from(await rResp.arrayBuffer());
+                  checksum = crypto.createHash('sha256').update(rBuf).digest('hex');
+                  candidateBuffer = rBuf;
+                  candidateContentType = `image/${mimeSub}`;
+                }
+              } catch {
+                // Keep remoteUrl if fetch fails
+              }
+              liveApiUsed = true;
+              modelUsed = candidateModel;
+              break;
+            }
+          }
+        } catch {
+          clearTimeout(timer);
+        }
+      }
+    }
+
+    // Always upload the generated candidate image to Firebase Storage so preview_url is a canonical
+    // https://firebasestorage.googleapis.com/v0/b/<bucket>/o/...?alt=media&token=<token> URL
+    if (deps.storage && typeof deps.storage.bucket === 'function' && candidateBuffer) {
+      try {
+        const uploaded = await uploadBufferToFirebaseStorage({
+          storage: deps.storage,
+          buffer: candidateBuffer,
+          storagePath: storageKey,
+          contentType: candidateContentType,
+        });
+        previewUrl = uploaded.downloadUrl;
+        storageKey = uploaded.storagePath;
+      } catch (storageErr) {
+        console.warn('[AI-PRODUCT-IMAGE] Firebase Storage upload warning:', storageErr);
+      }
+    }
+
+    const now = new Date().toISOString();
+    const imageDoc: AIProductImage = {
+      id: imageId,
+      draft_id: params.draft.id,
+      version_id: params.draft.current_version_id,
+      storage_key: storageKey,
+      preview_url: previewUrl,
+      mime_type: 'image/png',
+      width: 1000,
+      height: 1000,
+      background_hex: '#FFFFFF',
+      checksum,
+      prompt,
+      model: modelUsed,
+      generation_metadata: {
+        provider: config.provider,
+        project_name: config.projectName,
+        product_form: String(productForm),
+        packaging_style: String(packagingStyle),
+        estimated_cost_usd: liveApiUsed ? 0.04 : 0,
+        latency_ms: Math.max(25, Date.now() - startMs),
+        live_api_used: liveApiUsed,
+        source_type: 'ai_generated',
+      },
+      status: 'GENERATED',
+      rejection_reason: null,
+      created_by: params.actor.uid,
+      created_at: now,
+      reviewed_by: null,
+      reviewed_at: null,
+    };
+
+    await params.db.collection(AI_PRODUCT_IMAGES_COLLECTION).doc(imageId).set(imageDoc);
+    await logEvent(params.db, params.draft.id, 'IMAGE_GENERATED', params.actor, {
+      image_id: imageId,
+      width: 1000,
+      height: 1000,
+      background_hex: '#FFFFFF',
+      model: modelUsed,
+      storage_key: storageKey,
+    });
+
+    return imageDoc;
+  };
+
   // 0. GET /api/admin/ai-products/config-status
   const handleGetConfigStatus = async (_req: express.Request, res: express.Response) => {
     try {
@@ -1474,17 +2578,30 @@ export function registerAIProductContentRoutes(
       }
 
       let masterProduct: Record<string, any> | null = null;
+      let allProductsCache: Array<Record<string, any>> | null = null;
       if (productId) {
         const masterSnap = await db.collection('products').doc(String(productId)).get();
         if (masterSnap.exists) {
           masterProduct = { id: masterSnap.id, ...masterSnap.data() };
         }
       }
+      if (!masterProduct) {
+        const allSnap = await db.collection('products').get();
+        allProductsCache = allSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        masterProduct = matchMasterProductByName(allProductsCache, [cleanName]);
+      }
 
       const { payload, usage } = await generateProductContentViaProvider(cleanName, {
         categoryHint: categoryHint || masterProduct?.category,
         brandHint: brandHint || masterProduct?.brand,
       });
+
+      if (!masterProduct && allProductsCache) {
+        masterProduct = matchMasterProductByName(allProductsCache, [
+          cleanName,
+          payload.english_product_name,
+        ]);
+      }
 
       const now = new Date().toISOString();
       const draftId = `aidraft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -1536,6 +2653,20 @@ export function registerAIProductContentRoutes(
         live_api_used: usage.live_api_used,
       });
 
+      // Automatically generate initial 1000x1000 #FFFFFF studio candidate image for the draft
+      let initialImage: AIProductImage | null = null;
+      try {
+        initialImage = await createStagedCandidateImageForDraft({
+          db,
+          draft: draftDoc,
+          payload,
+          productForm: payload.form,
+          actor,
+        });
+      } catch (imgErr) {
+        console.warn('[AI-PRODUCT-IMAGE] Initial candidate image generation warning:', imgErr);
+      }
+
       return res.json({
         success: true,
         draftId,
@@ -1544,6 +2675,7 @@ export function registerAIProductContentRoutes(
         draft: draftDoc,
         versionRecord: versionDoc,
         generatedContent: payload,
+        initialImage,
       });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Failed to generate AI product draft' });
@@ -1652,9 +2784,49 @@ export function registerAIProductContentRoutes(
         .sort((a, b) => b.version_no - a.version_no);
       const currentVersion =
         versions.find((v) => v.id === draft.current_version_id) || versions[0] || null;
-      const images = imagesSnap.docs
+      let images = imagesSnap.docs
         .map((d) => ({ id: d.id, ...(d.data() as any) } as AIProductImage))
         .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+
+      // Backfill or upgrade a 1000x1000 #FFFFFF candidate studio image if an existing draft has 0 images
+      // or only has a non-live placeholder image while OpenAI live image generation is configured
+      const hasOnlyPlaceholderImages =
+        images.length > 0 &&
+        getOpenAIProviderConfigStatus().readyForLiveImages &&
+        images.every((img) => img.generation_metadata?.live_api_used !== true);
+
+      if (images.length === 0 || hasOnlyPlaceholderImages) {
+        try {
+          const autoImg = await createStagedCandidateImageForDraft({
+            db,
+            draft,
+            payload: currentVersion?.edited_payload || currentVersion?.generated_payload || null,
+            productForm:
+              currentVersion?.edited_payload?.form ||
+              currentVersion?.generated_payload?.form ||
+              draft.category_hint ||
+              'Natural Botanical',
+            actor: {
+              uid: draft.created_by || 'admin-user',
+              email: draft.created_by_email || 'admin@leafyearth.com',
+              role: 'Admin',
+            },
+          });
+          if (hasOnlyPlaceholderImages && autoImg.generation_metadata?.live_api_used) {
+            await Promise.all(
+              images.map((oldImg) =>
+                db.collection(AI_PRODUCT_IMAGES_COLLECTION).doc(oldImg.id).delete().catch(() => null)
+              )
+            );
+            images = [autoImg];
+          } else if (images.length === 0) {
+            images = [autoImg];
+          }
+        } catch (autoImgErr) {
+          console.warn('[AI-PRODUCT-IMAGE] Auto-backfill candidate image warning:', autoImgErr);
+        }
+      }
+      images = await ensureDraftImagesInFirebaseStorage(db, draft, images);
       const researchRecords = researchSnap.docs
         .map((d) => ({ id: d.id, ...(d.data() as any) } as AIProductResearchRecord))
         .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
@@ -1973,77 +3145,32 @@ export function registerAIProductContentRoutes(
       if (!draftSnap.exists) return res.status(404).json({ error: 'Draft not found' });
       const draft = { id: draftSnap.id, ...(draftSnap.data() as any) } as AIProductDraft;
 
-      const config = getOpenAIProviderConfigStatus();
-      const {
-        packagingStyle = 'Clean retail stand-up pouch / glass jar',
-        productForm = draft.category_hint || 'Natural Product',
-        customPrompt = '',
-      } = req.body || {};
-
-      const prompt = `Commercial e-commerce studio product photograph of "${draft.source_product_name}" (${productForm}, ${packagingStyle}). Centered composition occupying 75-85% of frame, pure white background (#FFFFFF, RGB 255,255,255), soft natural contact shadow only, 1000x1000 pixels, no watermarks, no props, no misleading seals. ${customPrompt}`.trim();
-
-      const pngBuffer = generatePureWhite1000x1000PngBuffer(`${draft.source_product_name}:${Date.now()}`);
-      const dims = inspectPngDimensions(pngBuffer);
-      if (!dims.validPng || dims.width !== 1000 || dims.height !== 1000) {
-        return res.status(500).json({ error: 'Generated image failed 1000x1000 PNG validation.' });
-      }
-
-      const checksum = crypto.createHash('sha256').update(pngBuffer).digest('hex');
-      const imageId = `aiimg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const storageKey = `ai_products/${draftId}/images/${imageId}.png`;
-      let previewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
-
-      if (deps.storage) {
-        try {
-          const bucket = deps.storage.bucket();
-          const fileRef = bucket.file(storageKey);
-          await fileRef.save(pngBuffer, { metadata: { contentType: 'image/png' } });
-          const expires = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000);
-          const [signedUrl] = await fileRef.getSignedUrl({ action: 'read', expires });
-          if (signedUrl) previewUrl = signedUrl;
-        } catch (storageErr) {
-          console.warn('[AI-IMAGE] Cloud Storage upload fallback to inline PNG preview:', storageErr);
+      let currentPayload: AIProductContentPayload | null = null;
+      if (draft.current_version_id) {
+        const verSnap = await db
+          .collection(AI_PRODUCT_VERSIONS_COLLECTION)
+          .doc(draft.current_version_id)
+          .get();
+        if (verSnap.exists) {
+          const v = verSnap.data() as AIProductVersion;
+          currentPayload = v?.edited_payload || v?.generated_payload || null;
         }
       }
 
-      const now = new Date().toISOString();
-      const imageDoc: AIProductImage = {
-        id: imageId,
-        draft_id: draftId,
-        version_id: draft.current_version_id,
-        storage_key: storageKey,
-        preview_url: previewUrl,
-        mime_type: 'image/png',
-        width: 1000,
-        height: 1000,
-        background_hex: '#FFFFFF',
-        checksum,
-        prompt,
-        model: config.readyForLiveImages ? config.imageModel : `${config.imageModel} (studio-1000x1000)`,
-        generation_metadata: {
-          provider: config.provider,
-          project_name: config.projectName,
-          product_form: String(productForm),
-          packaging_style: String(packagingStyle),
-          estimated_cost_usd: config.readyForLiveImages ? 0.04 : 0,
-          latency_ms: 45,
-          live_api_used: config.readyForLiveImages,
-          source_type: 'ai_generated',
-        },
-        status: 'GENERATED',
-        rejection_reason: null,
-        created_by: actor.uid,
-        created_at: now,
-        reviewed_by: null,
-        reviewed_at: null,
-      };
+      const {
+        packagingStyle = 'Clean retail stand-up pouch / glass jar',
+        productForm = currentPayload?.form || draft.category_hint || 'Natural Product',
+        customPrompt = '',
+      } = req.body || {};
 
-      await db.collection(AI_PRODUCT_IMAGES_COLLECTION).doc(imageId).set(imageDoc);
-      await logEvent(db, draftId, 'IMAGE_GENERATED', actor, {
-        image_id: imageId,
-        width: 1000,
-        height: 1000,
-        background_hex: '#FFFFFF',
+      const imageDoc = await createStagedCandidateImageForDraft({
+        db,
+        draft,
+        payload: currentPayload,
+        productForm,
+        packagingStyle,
+        customPrompt,
+        actor,
       });
 
       return res.json({ success: true, image: imageDoc });
@@ -2059,13 +3186,17 @@ export function registerAIProductContentRoutes(
     try {
       const db = getDb();
       const draftId = req.params.id;
-      const snap = await db
-        .collection(AI_PRODUCT_IMAGES_COLLECTION)
-        .where('draft_id', '==', draftId)
-        .get();
-      const images = snap.docs
+      const [draftSnap, snap] = await Promise.all([
+        db.collection(AI_PRODUCT_DRAFTS_COLLECTION).doc(draftId).get(),
+        db.collection(AI_PRODUCT_IMAGES_COLLECTION).where('draft_id', '==', draftId).get(),
+      ]);
+      const draft = draftSnap.exists
+        ? ({ id: draftSnap.id, ...(draftSnap.data() as any) } as AIProductDraft)
+        : ({ id: draftId, source_product_name: 'Product' } as AIProductDraft);
+      let images = snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as any) } as AIProductImage))
         .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      images = await ensureDraftImagesInFirebaseStorage(db, draft, images);
       return res.json({ success: true, images });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || 'Failed to list AI product images' });
@@ -2109,8 +3240,30 @@ export function registerAIProductContentRoutes(
         return res.json({ success: true, image: rejectedImg });
       }
 
+      let previewUrl = img.preview_url;
+      let storageKey = img.storage_key;
+      if (deps.storage && typeof deps.storage.bucket === 'function' && !isFirebaseStorageDownloadUrl(previewUrl)) {
+        try {
+          const isPng = String(previewUrl || '').startsWith('data:image/png');
+          const ext = isPng ? 'png' : 'jpg';
+          const uploaded = await ensureFirebaseStorageImageUrl({
+            storage: deps.storage,
+            sourceUrl: previewUrl,
+            targetStoragePath: `products/${draftId}/images/${img.id}.${ext}`,
+          });
+          if (isFirebaseStorageDownloadUrl(uploaded.downloadUrl)) {
+            previewUrl = uploaded.downloadUrl;
+            storageKey = uploaded.storagePath;
+          }
+        } catch {
+          // Keep existing previewUrl if storage upload fails
+        }
+      }
+
       const approvedImg: AIProductImage = {
         ...img,
+        preview_url: previewUrl,
+        storage_key: storageKey,
         status: 'APPROVED',
         rejection_reason: null,
         reviewed_by: actor.uid,
@@ -2127,6 +3280,57 @@ export function registerAIProductContentRoutes(
   };
   app.post('/api/admin/ai-products/:id/images/:imageId/approve', handleApproveOrRejectImage);
   app.post('/api/v1/admin/ai-products/:id/images/:imageId/approve', handleApproveOrRejectImage);
+
+  // 10b. POST /api/admin/ai-products/:id/images/export-firebase
+  const handleExportImageToFirebaseStorage = async (req: express.Request, res: express.Response) => {
+    try {
+      const db = getDb();
+      const draftId = req.params.id;
+      const { imageUrl, storagePath, targetProductId } = req.body || {};
+      const sourceUrl = String(imageUrl || '').trim();
+      if (!sourceUrl) {
+        return res.status(400).json({ error: 'imageUrl is required' });
+      }
+      const cleanEntityId = String(targetProductId || draftId || 'product').trim();
+      const defaultPath = targetProductId
+        ? `products/${cleanEntityId}/main.jpg`
+        : `products/${cleanEntityId}/images/export_${Date.now()}.jpg`;
+      const finalTargetPath = String(storagePath || defaultPath).trim();
+      const uploaded = await ensureFirebaseStorageImageUrl({
+        storage: deps.storage,
+        sourceUrl,
+        targetStoragePath: finalTargetPath,
+        forceCopyToTargetPath: !isFirebaseStorageDownloadUrl(sourceUrl),
+      });
+      if (draftId && isFirebaseStorageDownloadUrl(uploaded.downloadUrl)) {
+        const imgsSnap = await db
+          .collection(AI_PRODUCT_IMAGES_COLLECTION)
+          .where('draft_id', '==', draftId)
+          .get();
+        await Promise.all(
+          imgsSnap.docs
+            .filter((d) => !isFirebaseStorageDownloadUrl(d.data()?.preview_url))
+            .map((d) =>
+              d.ref.set(
+                { preview_url: uploaded.downloadUrl, storage_key: uploaded.storagePath },
+                { merge: true }
+              )
+            )
+        );
+      }
+      return res.json({
+        success: true,
+        downloadUrl: uploaded.downloadUrl,
+        storagePath: uploaded.storagePath,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        error: err?.message || 'Failed to export image to Firebase Storage',
+      });
+    }
+  };
+  app.post('/api/admin/ai-products/:id/images/export-firebase', handleExportImageToFirebaseStorage);
+  app.post('/api/v1/admin/ai-products/:id/images/export-firebase', handleExportImageToFirebaseStorage);
 
   // ==========================================================================
   // Section 21: Taxation, Web Price Research & Package Sizes Endpoints (V8)
@@ -2414,9 +3618,19 @@ export function registerAIProductContentRoutes(
       const draftId = req.params.id;
       const queryMasterId = req.query.masterProductId ? String(req.query.masterProductId) : null;
 
-      const draftSnap = await db.collection(AI_PRODUCT_DRAFTS_COLLECTION).doc(draftId).get();
+      const draftRef = db.collection(AI_PRODUCT_DRAFTS_COLLECTION).doc(draftId);
+      const draftSnap = await draftRef.get();
       if (!draftSnap.exists) return res.status(404).json({ error: 'Draft not found' });
-      const draft = { id: draftSnap.id, ...(draftSnap.data() as any) } as AIProductDraft;
+      let draft = { id: draftSnap.id, ...(draftSnap.data() as any) } as AIProductDraft;
+
+      const verId = draft.approved_version_id || draft.current_version_id;
+      const verSnap = verId
+        ? await db.collection(AI_PRODUCT_VERSIONS_COLLECTION).doc(verId).get()
+        : null;
+      const version = verSnap?.exists
+        ? ({ id: verSnap.id, ...(verSnap.data() as any) } as AIProductVersion)
+        : null;
+      const payload = version?.edited_payload || version?.generated_payload || null;
 
       const targetMasterId = queryMasterId || draft.master_product_id;
       let masterProduct: Record<string, any> | null = null;
@@ -2427,20 +3641,46 @@ export function registerAIProductContentRoutes(
         }
       }
 
-      const verId = draft.approved_version_id || draft.current_version_id;
-      const verSnap = verId
-        ? await db.collection(AI_PRODUCT_VERSIONS_COLLECTION).doc(verId).get()
-        : null;
-      const version = verSnap?.exists
-        ? ({ id: verSnap.id, ...(verSnap.data() as any) } as AIProductVersion)
-        : null;
+      let nextAutoSku = String(MIN_EIGHT_DIGIT_SKU);
+      if (!masterProduct) {
+        const allSnap = await db.collection('products').get();
+        const allProducts = allSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        nextAutoSku = String(computeHighestExistingEightDigitSku(allProducts) + 1).padStart(8, '0');
+        const autoMatched = matchMasterProductByName(allProducts, [
+          draft.source_product_name,
+          payload?.english_product_name,
+        ]);
+        if (autoMatched) {
+          masterProduct = autoMatched;
+          draft = {
+            ...draft,
+            master_product_id: String(autoMatched.id),
+            master_product_name: autoMatched.name || null,
+            master_product_sku: autoMatched.sku || null,
+          };
+          await draftRef.set(
+            {
+              master_product_id: draft.master_product_id,
+              master_product_name: draft.master_product_name,
+              master_product_sku: draft.master_product_sku,
+            },
+            { merge: true }
+          );
+        }
+      } else if (isValidEightDigitNumericSku(masterProduct.sku)) {
+        nextAutoSku = String(masterProduct.sku).trim();
+      }
 
       const imgSnap = draft.approved_image_id
         ? await db.collection(AI_PRODUCT_IMAGES_COLLECTION).doc(draft.approved_image_id).get()
         : null;
-      const approvedImage = imgSnap?.exists
+      let approvedImage = imgSnap?.exists
         ? ({ id: imgSnap.id, ...(imgSnap.data() as any) } as AIProductImage)
         : null;
+      if (approvedImage && !isFirebaseStorageDownloadUrl(approvedImage.preview_url)) {
+        const migrated = await ensureDraftImagesInFirebaseStorage(db, draft, [approvedImage]);
+        approvedImage = migrated[0] || approvedImage;
+      }
 
       const resSnap = draft.approved_research_id
         ? await db.collection(AI_PRODUCT_RESEARCH_COLLECTION).doc(draft.approved_research_id).get()
@@ -2460,6 +3700,8 @@ export function registerAIProductContentRoutes(
         success: true,
         draft,
         masterProduct,
+        isNewMasterProduct: !masterProduct,
+        nextAutoSku,
         version,
         approvedImage,
         approvedResearch,
@@ -2484,6 +3726,7 @@ export function registerAIProductContentRoutes(
         imageAction = 'none',
         expectedMasterRevision,
         idempotencyKey,
+        masterProductOverrides = null,
       } = req.body || {};
 
       const idemKey = String(
@@ -2521,14 +3764,12 @@ export function registerAIProductContentRoutes(
         });
       }
 
-      const targetMasterId = String(masterProductId || draft.master_product_id || '').trim();
-      if (!targetMasterId) {
-        return res.status(400).json({
-          error: 'A target Master Product (masterProductId) must be linked before synchronizing.',
-        });
-      }
+      const hasMasterOverrides =
+        masterProductOverrides &&
+        typeof masterProductOverrides === 'object' &&
+        Object.keys(masterProductOverrides).length > 0;
 
-      if (!Array.isArray(selectedFields) || selectedFields.length === 0) {
+      if ((!Array.isArray(selectedFields) || selectedFields.length === 0) && !hasMasterOverrides) {
         return res.status(400).json({
           error: 'At least one field must be selected for master synchronization.',
         });
@@ -2548,12 +3789,145 @@ export function registerAIProductContentRoutes(
       const version = verSnap?.exists
         ? ({ id: verSnap.id, ...(verSnap.data() as any) } as AIProductVersion)
         : null;
-      const approvedImage = imgSnap?.exists
+      const payload = version?.edited_payload || version?.generated_payload || null;
+      let approvedImage = imgSnap?.exists
         ? ({ id: imgSnap.id, ...(imgSnap.data() as any) } as AIProductImage)
         : null;
       const approvedResearch = resSnap?.exists
         ? ({ id: resSnap.id, ...(resSnap.data() as any) } as AIProductResearchRecord)
         : null;
+
+      // Resolve existing master product by ID or by product name search in `products`;
+      // if not found in `products`, treat as a new product and create a new `products` document.
+      let targetMasterId = String(masterProductId || draft.master_product_id || '').trim();
+      let preMatchedProduct: Record<string, any> | null = null;
+      if (targetMasterId) {
+        const checkSnap = await db.collection('products').doc(targetMasterId).get();
+        if (checkSnap.exists) {
+          preMatchedProduct = { id: checkSnap.id, ...(checkSnap.data() as any) };
+        } else {
+          targetMasterId = '';
+        }
+      }
+      if (!preMatchedProduct) {
+        const allSnap = await db.collection('products').get();
+        const allProducts = allSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        const matchedByName = matchMasterProductByName(allProducts, [
+          masterProductOverrides?.name,
+          draft.source_product_name,
+          payload?.english_product_name,
+        ]);
+        if (matchedByName) {
+          preMatchedProduct = matchedByName;
+          targetMasterId = String(matchedByName.id);
+        }
+      }
+
+      const isCreatingNewProduct = !preMatchedProduct;
+      if (isCreatingNewProduct && !targetMasterId) {
+        targetMasterId = db.collection('products').doc().id;
+      }
+
+      const needsAllocatedSku =
+        isCreatingNewProduct || !isValidEightDigitNumericSku(preMatchedProduct?.sku);
+      const allocatedSku = needsAllocatedSku
+        ? await allocateUniqueEightDigitSku(db)
+        : String(preMatchedProduct?.sku).trim();
+
+      // Export AI product images into Firebase Storage (https://firebasestorage.googleapis.com)
+      // under `products/${targetMasterId}/main.jpg` and `products/${targetMasterId}/images/...`
+      let normalizedOverrides: MasterProductUpdationOverrides | null = masterProductOverrides
+        ? { ...masterProductOverrides }
+        : null;
+
+      if (deps.storage && typeof deps.storage.bucket === 'function') {
+        if (approvedImage && approvedImage.preview_url) {
+          const isGallery = imageAction === 'append_gallery';
+          const targetImgPath = isGallery
+            ? `products/${targetMasterId}/images/${approvedImage.id}.jpg`
+            : `products/${targetMasterId}/main.jpg`;
+          const needsProductCopy =
+            !isFirebaseStorageDownloadUrl(approvedImage.preview_url) ||
+            !approvedImage.preview_url.includes(encodeURIComponent(`products/${targetMasterId}/`));
+          const exported = await ensureFirebaseStorageImageUrl({
+            storage: deps.storage,
+            sourceUrl: approvedImage.preview_url,
+            targetStoragePath: targetImgPath,
+            fallbackProductName: draft.source_product_name,
+            forceCopyToTargetPath: needsProductCopy,
+          });
+          if (isFirebaseStorageDownloadUrl(exported.downloadUrl)) {
+            if (!isFirebaseStorageDownloadUrl(approvedImage.preview_url)) {
+              await db
+                .collection(AI_PRODUCT_IMAGES_COLLECTION)
+                .doc(approvedImage.id)
+                .set(
+                  {
+                    preview_url: exported.downloadUrl,
+                    storage_key: exported.storagePath,
+                  },
+                  { merge: true }
+                );
+            }
+            approvedImage = {
+              ...approvedImage,
+              preview_url: exported.downloadUrl,
+              storage_key: exported.storagePath,
+            };
+          }
+        }
+
+        if (normalizedOverrides?.imageUrl && String(normalizedOverrides.imageUrl).trim()) {
+          const ovImgUrl = String(normalizedOverrides.imageUrl).trim();
+          const needsOvCopy =
+            !isFirebaseStorageDownloadUrl(ovImgUrl) ||
+            !ovImgUrl.includes(encodeURIComponent(`products/${targetMasterId}/`));
+          const exportedMain = await ensureFirebaseStorageImageUrl({
+            storage: deps.storage,
+            sourceUrl: ovImgUrl,
+            targetStoragePath: `products/${targetMasterId}/main.jpg`,
+            fallbackProductName: normalizedOverrides.name || draft.source_product_name,
+            forceCopyToTargetPath: needsOvCopy,
+          });
+          if (isFirebaseStorageDownloadUrl(exportedMain.downloadUrl)) {
+            normalizedOverrides.imageUrl = exportedMain.downloadUrl;
+            normalizedOverrides.storagePath = exportedMain.storagePath;
+          }
+        }
+
+        if (Array.isArray(normalizedOverrides?.images) && normalizedOverrides.images.length > 0) {
+          const exportedGallery: string[] = [];
+          for (let idx = 0; idx < normalizedOverrides.images.length; idx++) {
+            const gUrl = String(normalizedOverrides.images[idx] || '').trim();
+            if (!gUrl) continue;
+            if (
+              idx === 0 &&
+              normalizedOverrides.imageUrl &&
+              isFirebaseStorageDownloadUrl(normalizedOverrides.imageUrl) &&
+              !isFirebaseStorageDownloadUrl(gUrl)
+            ) {
+              exportedGallery.push(normalizedOverrides.imageUrl);
+              continue;
+            }
+            if (isFirebaseStorageDownloadUrl(gUrl)) {
+              exportedGallery.push(gUrl);
+              continue;
+            }
+            const gPath =
+              idx === 0
+                ? `products/${targetMasterId}/main.jpg`
+                : `products/${targetMasterId}/images/gallery_${idx}_${Date.now()}.jpg`;
+            const exportedItem = await ensureFirebaseStorageImageUrl({
+              storage: deps.storage,
+              sourceUrl: gUrl,
+              targetStoragePath: gPath,
+              fallbackProductName: normalizedOverrides.name || draft.source_product_name,
+            });
+            exportedGallery.push(exportedItem.downloadUrl);
+          }
+          normalizedOverrides.images = Array.from(new Set(exportedGallery.filter(Boolean)));
+        }
+      }
 
       const masterRef = db.collection('products').doc(targetMasterId);
       const syncLogId = `aisync_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -2562,13 +3936,13 @@ export function registerAIProductContentRoutes(
 
       const txResult = await db.runTransaction(async (tx) => {
         const masterSnap = await tx.get(masterRef);
-        if (!masterSnap.exists) {
-          throw new Error(`Target master product '${targetMasterId}' does not exist in products collection.`);
-        }
-        const existingMaster = { id: masterSnap.id, ...(masterSnap.data() as any) };
-        const currentRevision = Number(existingMaster.revision || 1);
+        const existingMaster: Record<string, any> = masterSnap.exists
+          ? { id: masterSnap.id, ...(masterSnap.data() as any) }
+          : {};
+        const currentRevision = masterSnap.exists ? Number(existingMaster.revision || 1) : 0;
 
         if (
+          masterSnap.exists &&
           expectedMasterRevision !== undefined &&
           expectedMasterRevision !== null &&
           Number(expectedMasterRevision) !== currentRevision
@@ -2579,18 +3953,28 @@ export function registerAIProductContentRoutes(
         }
 
         const comparisonItems = buildMasterComparisonDiff({
-          masterProduct: existingMaster,
+          masterProduct: masterSnap.exists ? existingMaster : null,
           version,
           approvedImage,
           approvedResearch,
         });
 
-        const { updatePatch, beforeSnapshot, afterSnapshot } = buildSelectedMasterUpdatePayload({
-          selectedFields,
-          comparisonItems,
-          existingMasterProduct: existingMaster,
-          approvedImage,
-          imageAction,
+        const { updatePatch: baseUpdatePatch, beforeSnapshot, afterSnapshot } =
+          buildSelectedMasterUpdatePayload({
+            selectedFields,
+            comparisonItems,
+            existingMasterProduct: existingMaster,
+            approvedImage,
+            imageAction,
+          });
+
+        const { finalPatch: updatePatch } = mergeMasterProductUpdationOverrides({
+          existingMasterProduct: masterSnap.exists ? existingMaster : null,
+          updatePatch: baseUpdatePatch,
+          beforeSnapshot,
+          afterSnapshot,
+          overrides: normalizedOverrides,
+          allocatedSku,
         });
 
         if (Object.keys(updatePatch).length === 0) {
@@ -2712,8 +4096,8 @@ export function registerAIProductContentRoutes(
           draftRef,
           {
             master_product_id: targetMasterId,
-            master_product_name: updatePatch.name || existingMaster.name || null,
-            master_product_sku: existingMaster.sku || null,
+            master_product_name: updatePatch.name || existingMaster.name || draft.source_product_name,
+            master_product_sku: updatePatch.sku || existingMaster.sku || allocatedSku,
             status: 'APPLIED',
             last_synced_at: now,
             updated_at: now,
@@ -2721,7 +4105,11 @@ export function registerAIProductContentRoutes(
           { merge: true }
         );
 
-        return { syncLogDoc, updatedMaster: { ...existingMaster, ...updatePatch } };
+        return {
+          syncLogDoc,
+          updatedMaster: { id: targetMasterId, ...existingMaster, ...updatePatch },
+          createdNewMasterProduct: !masterSnap.exists,
+        };
       });
 
       await syncProductToPublicProjectionAndQueueJobs(db, txResult.updatedMaster, actor.uid);
@@ -2729,6 +4117,7 @@ export function registerAIProductContentRoutes(
       await logEvent(db, draftId, 'MASTER_SYNC_APPLIED', actor, {
         sync_log_id: syncLogId,
         master_product_id: targetMasterId,
+        created_new_master_product: txResult.createdNewMasterProduct,
         selected_fields: selectedFields,
       });
 
@@ -2736,6 +4125,7 @@ export function registerAIProductContentRoutes(
         success: true,
         syncLog: txResult.syncLogDoc,
         masterProduct: txResult.updatedMaster,
+        createdNewMasterProduct: txResult.createdNewMasterProduct,
       });
     } catch (err: any) {
       const msg = String(err?.message || 'Master product synchronization failed');

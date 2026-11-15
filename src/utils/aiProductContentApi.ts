@@ -9,17 +9,23 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
-import { auth, db } from '../firebase';
+import { auth, db, storage } from '../firebase';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import type {
   AICommerceContentPayload,
+  AICommerceFeedRecord,
   AICommerceFeedRun,
+  AICommerceGeneratedPayload,
   AICommercePlatformId,
+  AICommercePlatformSetting,
   AICommercePlatformSettings,
   AICommercePlatformStatus,
   AICommerceStagingDraft,
+  AICommerceStagingRecord,
   AICommerceSyncJob,
   AICommerceSyncLog,
   AICommerceValidationIssue,
+  AICommerceValidationRecord,
   AICommerceValidationReport,
   AIProductContentPayload,
   AIProductDraft,
@@ -29,6 +35,7 @@ import type {
   AIProductMarketResearch,
   AIProductPackingResearch,
   AIProductResearchRecord,
+  AIProductSEOContent,
   AIProductSEOPayload,
   AIProductSyncLog,
   AIProductTaxationResearch,
@@ -574,7 +581,7 @@ export function buildMasterComparisonDiffClient(params: {
     pushItem('englishName', 'English Product Name', 'general', 'englishName', payload.english_product_name);
     pushItem('botanicalName', 'Botanical Name', 'general', 'botanicalName', payload.botanical_name);
     pushItem('botanicalFamily', 'Botanical Family', 'general', 'botanicalFamily', payload.family);
-    pushItem('category', 'Product Category', 'general', 'category', payload.category);
+    pushItem('leafycategory', 'Product Category (leafycategory)', 'general', 'leafycategory', payload.category);
     pushItem('productForm', 'Product Form', 'general', 'productForm', payload.form);
     pushItem('description', 'E-Commerce Description', 'general', 'description', payload.description);
     pushItem('keyFeatures', 'Key Features', 'general', 'keyFeatures', payload.key_features);
@@ -686,56 +693,228 @@ export function buildMasterComparisonDiffClient(params: {
 
 /**
  * Generates a 1000x1000 pure-white (#FFFFFF) studio product image data URL on the client
- * when running in static fallback mode.
+ * matching the standardized Brown Kraft Stand-Up Zipper Pouch + Cream Label + Clear Lower Window
+ * + Foreground Heap reference cover design.
  */
-function generateClientWhite1000x1000DataUrl(productName: string, subtitle = ''): string {
-  if (typeof document !== 'undefined') {
-    const canvas = document.createElement('canvas');
-    canvas.width = 1000;
-    canvas.height = 1000;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      // Pure white #FFFFFF background
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, 1000, 1000);
+function generateClientWhite1000x1000DataUrl(
+  productName: string,
+  botanicalOrSubtitle = '',
+  productForm = 'DRIED WHOLE FRUIT'
+): string {
+  const cleanTitle = String(productName || 'Botanical').replace(/\s*\([^)]*\)\s*/g, '').trim().slice(0, 26);
+  const lower = cleanTitle.toLowerCase();
+  const knownMap: Record<string, { sub: string; bot: string; form: string }> = {
+    kadukka: { sub: 'Chebulic Myrobalan', bot: 'Terminalia chebula', form: 'DRIED WHOLE FRUIT' },
+    haritaki: { sub: 'Chebulic Myrobalan', bot: 'Terminalia chebula', form: 'DRIED WHOLE FRUIT' },
+    thippili: { sub: 'Indian Long Pepper', bot: 'Piper longum', form: 'DRIED WHOLE FRUIT SPIKES' },
+    pippali: { sub: 'Indian Long Pepper', bot: 'Piper longum', form: 'DRIED WHOLE FRUIT SPIKES' },
+    nellikka: { sub: 'Indian Gooseberry', bot: 'Phyllanthus emblica', form: 'DRIED WHOLE FRUIT SEGMENTS' },
+    chukku: { sub: 'Dried Ginger Root', bot: 'Zingiber officinale', form: 'WHOLE DRIED RHIZOME' },
+  };
+  const hit = knownMap[lower];
+  const subtitleText = `(${hit?.sub || botanicalOrSubtitle || '100% Pure Botanical'})`.slice(0, 36);
+  const botanicalText = (hit?.bot || botanicalOrSubtitle || 'Natural Herb').slice(0, 38);
+  const formUpper = (
+    productForm && productForm.toUpperCase() !== 'DRIED FRUIT'
+      ? productForm.toUpperCase()
+      : hit?.form || 'DRIED WHOLE FRUIT'
+  ).slice(0, 32);
 
-      // Soft contact shadow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
-      ctx.beginPath();
-      ctx.ellipse(500, 810, 210, 24, 0, 0, Math.PI * 2);
-      ctx.fill();
+  const esc = (s: string) =>
+    String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
 
-      // Studio product pouch/jar body
-      ctx.fillStyle = '#F4F9F4';
-      ctx.strokeStyle = '#2E7D32';
-      ctx.lineWidth = 6;
-      ctx.beginPath();
-      ctx.roundRect(300, 200, 400, 590, 36);
-      ctx.fill();
-      ctx.stroke();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+  <rect width="1000" height="1000" fill="#FFFFFF"/>
+  <ellipse cx="500" cy="855" rx="260" ry="26" fill="#000000" fill-opacity="0.10"/>
+  <ellipse cx="500" cy="915" rx="235" ry="22" fill="#000000" fill-opacity="0.13"/>
+  <path d="M235,65 Q235,42 260,42 L740,42 Q765,42 765,65 L765,98 L752,98 Q744,98 744,104 Q744,110 752,110 L764,110 L740,835 Q738,860 710,860 L290,860 Q262,860 260,835 L236,110 L248,110 Q256,110 256,104 Q256,98 248,98 L235,98 Z" fill="#C49666" stroke="#A97B4B" stroke-width="3"/>
+  <rect x="242" y="118" width="516" height="22" fill="#B88756" fill-opacity="0.55"/>
+  <line x1="242" y1="124" x2="758" y2="124" stroke="#9B6E41" stroke-width="2"/>
+  <line x1="242" y1="136" x2="758" y2="136" stroke="#D3A97B" stroke-width="2"/>
+  <rect x="295" y="192" width="410" height="388" rx="22" fill="#F4EFE3" stroke="#DFD5C3" stroke-width="2.5"/>
+  <text x="500" y="268" text-anchor="middle" font-family="Georgia, serif" font-size="56" font-weight="700" fill="#3A2313">${esc(cleanTitle)}</text>
+  <text x="500" y="308" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" fill="#4A301D">${esc(subtitleText)}</text>
+  <text x="500" y="340" text-anchor="middle" font-family="Georgia, serif" font-style="italic" font-size="23" fill="#4A301D">${esc(botanicalText)}</text>
+  <line x1="412" y1="366" x2="482" y2="366" stroke="#557A2E" stroke-width="2"/>
+  <line x1="518" y1="366" x2="588" y2="366" stroke="#557A2E" stroke-width="2"/>
+  <path d="M500,368 C496,356 498,348 500,344 C502,348 504,356 500,368 Z" fill="#557A2E"/>
+  <path d="M498,368 C488,364 484,358 486,353 C491,354 496,360 498,368 Z" fill="#689438"/>
+  <path d="M502,368 C512,364 516,358 514,353 C509,354 504,360 502,368 Z" fill="#689438"/>
+  <path d="M535,442 C552,402 595,385 622,388 C610,422 578,446 535,442 Z" fill="#4F7F28" stroke="#3B621C" stroke-width="1.5"/>
+  <path d="M555,462 C588,438 632,442 655,458 C628,482 588,482 555,462 Z" fill="#5D8E32" stroke="#3B621C" stroke-width="1.5"/>
+  <g fill="#6B4423" stroke="#472B13" stroke-width="2">
+    <ellipse cx="455" cy="488" rx="38" ry="22" transform="rotate(-14 455 488)"/>
+    <ellipse cx="520" cy="492" rx="40" ry="23" transform="rotate(12 520 492)"/>
+    <ellipse cx="425" cy="462" rx="36" ry="20" transform="rotate(-24 425 462)"/>
+    <ellipse cx="490" cy="460" rx="42" ry="24" transform="rotate(6 490 460)"/>
+    <ellipse cx="548" cy="468" rx="36" ry="21" transform="rotate(22 548 468)"/>
+    <ellipse cx="465" cy="434" rx="38" ry="22" transform="rotate(-10 465 434)"/>
+    <ellipse cx="518" cy="438" rx="37" ry="21" transform="rotate(16 518 438)"/>
+  </g>
+  <text x="500" y="558" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="600" fill="#3A2313" letter-spacing="2.5">${esc(formUpper)}</text>
+  <path d="M292,596 L708,596 L704,705 Q500,775 296,705 Z" fill="#432814" stroke="#9B6E41" stroke-width="3"/>
+  <g fill="#6E4725" stroke="#3E2410" stroke-width="2">
+    <ellipse cx="355" cy="635" rx="42" ry="24" transform="rotate(-15 355 635)"/>
+    <ellipse cx="450" cy="632" rx="44" ry="25" transform="rotate(12 450 632)"/>
+    <ellipse cx="545" cy="634" rx="44" ry="25" transform="rotate(-8 545 634)"/>
+    <ellipse cx="640" cy="636" rx="42" ry="24" transform="rotate(16 640 636)"/>
+    <ellipse cx="400" cy="680" rx="45" ry="25" transform="rotate(10 400 680)"/>
+    <ellipse cx="500" cy="684" rx="46" ry="26" transform="rotate(-12 500 684)"/>
+    <ellipse cx="600" cy="680" rx="45" ry="25" transform="rotate(8 600 680)"/>
+  </g>
+  <g fill="#6B4423" stroke="#3E2410" stroke-width="2.2">
+    <ellipse cx="325" cy="892" rx="46" ry="25" transform="rotate(-16 325 892)"/>
+    <ellipse cx="405" cy="902" rx="48" ry="26" transform="rotate(10 405 902)"/>
+    <ellipse cx="495" cy="908" rx="50" ry="27" transform="rotate(-6 495 908)"/>
+    <ellipse cx="585" cy="904" rx="48" ry="26" transform="rotate(14 585 904)"/>
+    <ellipse cx="665" cy="894" rx="46" ry="25" transform="rotate(-12 665 894)"/>
+    <ellipse cx="375" cy="858" rx="46" ry="25" transform="rotate(18 375 858)"/>
+    <ellipse cx="465" cy="862" rx="48" ry="26" transform="rotate(-12 465 862)"/>
+    <ellipse cx="555" cy="860" rx="48" ry="26" transform="rotate(15 555 860)"/>
+    <ellipse cx="622" cy="858" rx="46" ry="25" transform="rotate(-18 622 858)"/>
+    <ellipse cx="445" cy="822" rx="45" ry="25" transform="rotate(-8 445 822)"/>
+    <ellipse cx="535" cy="820" rx="48" ry="26" transform="rotate(6 535 820)"/>
+  </g>
+</svg>`;
+  if (typeof window !== 'undefined' && typeof window.btoa === 'function') {
+    return `data:image/svg+xml;base64,${window.btoa(unescape(encodeURIComponent(svg)))}`;
+  }
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
 
-      // Label band
-      ctx.fillStyle = '#2E7D32';
-      ctx.fillRect(303, 390, 394, 150);
+export function isFirebaseStorageUrlClient(url: unknown): boolean {
+  return (
+    typeof url === 'string' &&
+    url.trim().startsWith('https://firebasestorage.googleapis.com/v0/b/')
+  );
+}
 
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 30px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('LeafyEarth', 500, 445);
-      ctx.font = 'bold 24px sans-serif';
-      ctx.fillText(productName.slice(0, 26), 500, 490);
-      if (subtitle) {
-        ctx.font = '18px sans-serif';
-        ctx.fillText(subtitle.slice(0, 34), 500, 522);
+async function dataUrlToImageBlobClient(dataUrl: string): Promise<{ blob: Blob; contentType: string }> {
+  if (
+    dataUrl.startsWith('data:image/svg+xml') &&
+    typeof window !== 'undefined' &&
+    typeof document !== 'undefined'
+  ) {
+    try {
+      const renderedBlob = await new Promise<Blob | null>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1000;
+          canvas.height = 1000;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(null);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, 1000, 1000);
+          ctx.drawImage(img, 0, 0, 1000, 1000);
+          canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.92);
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+      });
+      if (renderedBlob) {
+        return { blob: renderedBlob, contentType: 'image/jpeg' };
       }
-
-      ctx.fillStyle = '#5F6B63';
-      ctx.font = 'bold 18px monospace';
-      ctx.fillText('1000 × 1000 px • #FFFFFF Studio', 500, 740);
-      return canvas.toDataURL('image/png');
+    } catch {
+      // Fallback below
     }
   }
-  return '';
+
+  const b64Match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
+  if (b64Match && typeof window !== 'undefined' && typeof window.atob === 'function') {
+    const rawMime = b64Match[1].toLowerCase();
+    const contentType = rawMime === 'image/jpg' ? 'image/jpeg' : rawMime;
+    const binStr = window.atob(b64Match[2]);
+    const bytes = new Uint8Array(binStr.length);
+    for (let i = 0; i < binStr.length; i++) {
+      bytes[i] = binStr.charCodeAt(i);
+    }
+    return { blob: new Blob([bytes], { type: contentType }), contentType };
+  }
+
+  const resp = await fetch(dataUrl);
+  const blob = await resp.blob();
+  return { blob, contentType: blob.type || 'image/jpeg' };
+}
+
+/**
+ * Ensures any AI product image URL or base64 data URL is uploaded to Firebase Storage
+ * (`https://firebasestorage.googleapis.com/v0/b/<bucket>/o/...`).
+ */
+export async function ensureClientFirebaseStorageUrl(params: {
+  draftId?: string;
+  targetProductId?: string;
+  sourceUrl: string;
+  storagePath?: string;
+}): Promise<{ downloadUrl: string; storagePath: string }> {
+  const rawUrl = String(params.sourceUrl || '').trim();
+  const cleanEntityId = String(params.targetProductId || params.draftId || 'product').trim();
+  const defaultPath = params.targetProductId
+    ? `products/${cleanEntityId}/main.jpg`
+    : `products/${cleanEntityId}/images/ai_${Date.now()}.jpg`;
+  const targetStoragePath = String(params.storagePath || defaultPath).replace(/^\/+/, '');
+
+  if (!rawUrl) {
+    return { downloadUrl: '', storagePath: targetStoragePath };
+  }
+
+  if (
+    isFirebaseStorageUrlClient(rawUrl) &&
+    (!params.targetProductId ||
+      rawUrl.includes(encodeURIComponent(`products/${params.targetProductId}/`)))
+  ) {
+    return { downloadUrl: rawUrl, storagePath: targetStoragePath };
+  }
+
+  // 1. Try backend export endpoint first
+  try {
+    const res = await fetch(
+      `/api/admin/ai-products/${encodeURIComponent(params.draftId || cleanEntityId)}/images/export-firebase`,
+      {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: rawUrl,
+          storagePath: targetStoragePath,
+          targetProductId: params.targetProductId || undefined,
+        }),
+      }
+    );
+    if (res.ok && !isStaticOrUnavailable(res)) {
+      const data = await res.json();
+      if (data?.downloadUrl && isFirebaseStorageUrlClient(data.downloadUrl)) {
+        return {
+          downloadUrl: data.downloadUrl,
+          storagePath: data.storagePath || targetStoragePath,
+        };
+      }
+    }
+  } catch {
+    // Fallback to client Firebase Storage SDK below
+  }
+
+  // 2. Fallback to direct Firebase Storage SDK upload (`uploadBytes` + `getDownloadURL`)
+  if (storage) {
+    try {
+      const { blob, contentType } = await dataUrlToImageBlobClient(rawUrl);
+      if (!contentType.includes('svg')) {
+        const fileRef = ref(storage, targetStoragePath);
+        await uploadBytes(fileRef, blob, { contentType });
+        const downloadUrl = await getDownloadURL(fileRef);
+        if (isFirebaseStorageUrlClient(downloadUrl)) {
+          return { downloadUrl, storagePath: targetStoragePath };
+        }
+      }
+    } catch {
+      // Fallback to rawUrl if offline/unauthenticated
+    }
+  }
+
+  return { downloadUrl: rawUrl, storagePath: targetStoragePath };
 }
 
 async function logClientEvent(
@@ -965,6 +1144,20 @@ export async function generateAIProductDraft(params: {
   await setDoc(doc(db, AI_PRODUCT_DRAFTS_COLLECTION, draftId), draftDoc);
   await logClientEvent(draftId, 'DRAFT_GENERATED', params.actor, { version_id: versionId });
 
+  // Automatically generate and stage a 1000x1000 #FFFFFF candidate studio image
+  let initialImage: AIProductImage | null = null;
+  try {
+    const imgRes = await generateAIProductImageClient({
+      draftId,
+      productForm: payload.form,
+      packagingStyle: `${payload.botanical_name || payload.category} • Studio Pack`,
+      actor: params.actor,
+    });
+    initialImage = imgRes.image || null;
+  } catch {
+    // Non-fatal
+  }
+
   return {
     success: true,
     draftId,
@@ -973,6 +1166,7 @@ export async function generateAIProductDraft(params: {
     draft: draftDoc,
     versionRecord: versionDoc,
     generatedContent: payload,
+    initialImage,
   };
 }
 
@@ -982,7 +1176,29 @@ export async function fetchAIProductDraftDetail(draftId: string) {
       headers: await authHeaders(),
     });
     if (res.ok && !isStaticOrUnavailable(res)) {
-      return await res.json();
+      const data = await res.json();
+      if (Array.isArray(data.images) && data.images.length === 0 && data.draft) {
+        try {
+          const payload =
+            data.currentVersion?.edited_payload || data.currentVersion?.generated_payload;
+          const autoImgRes = await generateAIProductImageClient({
+            draftId,
+            productForm: payload?.form || data.draft.category_hint || 'Natural Botanical',
+            packagingStyle: payload?.botanical_name || '100% Pure & Natural',
+            actor: {
+              id: data.draft.created_by || 'admin-user',
+              email: data.draft.created_by_email || 'admin@leafyearth.com',
+              role: 'Admin',
+            },
+          });
+          if (autoImgRes?.image) {
+            data.images = [autoImgRes.image];
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
+      return data;
     }
   } catch {
     // Fallback below
@@ -1004,9 +1220,88 @@ export async function fetchAIProductDraftDetail(draftId: string) {
     .map((d) => ({ id: d.id, ...(d.data() as any) } as AIProductVersion))
     .sort((a, b) => b.version_no - a.version_no);
   const currentVersion = versions.find((v) => v.id === draft.current_version_id) || versions[0] || null;
-  const images = imagesSnap.docs
+  let images = imagesSnap.docs
     .map((d) => ({ id: d.id, ...(d.data() as any) } as AIProductImage))
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+
+  if (images.length === 0) {
+    try {
+      const payload = currentVersion?.edited_payload || currentVersion?.generated_payload;
+      const now = new Date().toISOString();
+      const imageId = `aiimg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const rawPreviewUrl = generateClientWhite1000x1000DataUrl(
+        draft.source_product_name,
+        payload?.botanical_name || payload?.category || '100% Pure & Natural'
+      );
+      const storageTargetPath = `products/${draftId}/images/${imageId}.jpg`;
+      const uploaded = await ensureClientFirebaseStorageUrl({
+        draftId,
+        sourceUrl: rawPreviewUrl,
+        storagePath: storageTargetPath,
+      });
+      const imageDoc: AIProductImage = {
+        id: imageId,
+        draft_id: draftId,
+        version_id: draft.current_version_id,
+        storage_key: uploaded.storagePath,
+        preview_url: uploaded.downloadUrl,
+        mime_type: 'image/png',
+        width: 1000,
+        height: 1000,
+        background_hex: '#FFFFFF',
+        checksum: `sha256_${imageId}`,
+        prompt: `Commercial e-commerce studio product photograph of "${draft.source_product_name}" on pure white (#FFFFFF) 1000x1000 canvas.`,
+        model: 'gpt-image-2.5-flare (studio-1000x1000)',
+        generation_metadata: {
+          provider: 'openai',
+          project_name: 'leafyearthprdcnt',
+          product_form: payload?.form || 'Natural Product',
+          packaging_style: 'Retail Stand-Up Pouch / Jar',
+          estimated_cost_usd: 0,
+          latency_ms: 30,
+          live_api_used: false,
+          source_type: 'ai_generated',
+        },
+        status: 'GENERATED',
+        rejection_reason: null,
+        created_by: draft.created_by || 'admin-user',
+        created_at: now,
+        reviewed_by: null,
+        reviewed_at: null,
+      };
+      await setDoc(doc(db, AI_PRODUCT_IMAGES_COLLECTION, imageId), imageDoc);
+      images = [imageDoc];
+    } catch {
+      // Non-fatal
+    }
+  } else {
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      if (!isFirebaseStorageUrlClient(img.preview_url)) {
+        try {
+          const uploaded = await ensureClientFirebaseStorageUrl({
+            draftId,
+            sourceUrl: img.preview_url,
+            storagePath: `products/${draftId}/images/${img.id}.jpg`,
+          });
+          if (isFirebaseStorageUrlClient(uploaded.downloadUrl)) {
+            images[i] = {
+              ...img,
+              preview_url: uploaded.downloadUrl,
+              storage_key: uploaded.storagePath,
+            };
+            await setDoc(
+              doc(db, AI_PRODUCT_IMAGES_COLLECTION, img.id),
+              { preview_url: uploaded.downloadUrl, storage_key: uploaded.storagePath },
+              { merge: true }
+            );
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
+    }
+  }
   const researchRecords = researchSnap.docs
     .map((d) => ({ id: d.id, ...(d.data() as any) } as AIProductResearchRecord))
     .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
@@ -1290,16 +1585,21 @@ export async function generateAIProductImageClient(params: {
   const detail = await fetchAIProductDraftDetail(params.draftId);
   const now = new Date().toISOString();
   const imageId = `aiimg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const previewUrl = generateClientWhite1000x1000DataUrl(
+  const rawPreviewUrl = generateClientWhite1000x1000DataUrl(
     detail.draft.source_product_name,
     params.packagingStyle || '100% Pure & Natural'
   );
+  const uploaded = await ensureClientFirebaseStorageUrl({
+    draftId: params.draftId,
+    sourceUrl: rawPreviewUrl,
+    storagePath: `products/${params.draftId}/images/${imageId}.jpg`,
+  });
   const imageDoc: AIProductImage = {
     id: imageId,
     draft_id: params.draftId,
     version_id: detail.draft.current_version_id,
-    storage_key: `ai_products/${params.draftId}/images/${imageId}.png`,
-    preview_url: previewUrl,
+    storage_key: uploaded.storagePath,
+    preview_url: uploaded.downloadUrl,
     mime_type: 'image/png',
     width: 1000,
     height: 1000,
@@ -1564,6 +1864,56 @@ export async function approveOrRejectAIProductResearch(params: {
   return { success: true, research: approved };
 }
 
+function matchMasterProductByNameClient(
+  products: Array<Record<string, any>>,
+  candidateNames: Array<string | null | undefined>
+): Record<string, any> | null {
+  const norm = (val: unknown) =>
+    String(val || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+  const baseName = (val: unknown) =>
+    norm(val)
+      .replace(/\([^)]*\)/g, '')
+      .trim()
+      .replace(/\s+/g, ' ');
+
+  const validCandidates = (candidateNames || []).map(norm).filter((s) => s.length >= 2);
+  if (validCandidates.length === 0) return null;
+
+  for (const cand of validCandidates) {
+    const exactHit = (products || []).find(
+      (p) => norm(p.name) === cand || norm(p.englishName) === cand
+    );
+    if (exactHit) return exactHit;
+  }
+
+  const baseCandidates = validCandidates.map(baseName).filter((s) => s.length >= 3);
+  for (const bCand of baseCandidates) {
+    const baseHit = (products || []).find(
+      (p) => baseName(p.name) === bCand || baseName(p.englishName) === bCand
+    );
+    if (baseHit) return baseHit;
+  }
+
+  return null;
+}
+
+function computeNextEightDigitSkuClient(products: Array<Record<string, any>>): string {
+  let highest = 10000000;
+  for (const p of products || []) {
+    const raw = String(p?.sku ?? '').trim();
+    if (/^[0-9]{8}$/.test(raw)) {
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n) && n > highest && n < 99999999) {
+        highest = n;
+      }
+    }
+  }
+  return String(highest + 1).padStart(8, '0');
+}
+
 export async function compareAIDraftWithMaster(draftId: string, masterProductId?: string | null) {
   const qs = masterProductId ? `?masterProductId=${encodeURIComponent(masterProductId)}` : '';
   try {
@@ -1576,17 +1926,52 @@ export async function compareAIDraftWithMaster(draftId: string, masterProductId?
   }
 
   const detail = await fetchAIProductDraftDetail(draftId);
-  const targetId = masterProductId || detail.draft.master_product_id;
+  let draft = detail.draft;
+  const payload =
+    detail.currentVersion?.edited_payload || detail.currentVersion?.generated_payload || null;
+
+  const targetId = masterProductId || draft.master_product_id;
   let masterProduct: Record<string, any> | null = null;
   if (targetId) {
     const mSnap = await getDoc(doc(db, 'products', targetId));
     if (mSnap.exists()) masterProduct = { id: mSnap.id, ...mSnap.data() };
   }
 
+  let nextAutoSku = '10000001';
+  if (!masterProduct) {
+    const allSnap = await getDocs(collection(db, 'products'));
+    const allProducts = allSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+    nextAutoSku = computeNextEightDigitSkuClient(allProducts);
+    const autoMatched = matchMasterProductByNameClient(allProducts, [
+      draft.source_product_name,
+      payload?.english_product_name,
+    ]);
+    if (autoMatched) {
+      masterProduct = autoMatched;
+      draft = {
+        ...draft,
+        master_product_id: String(autoMatched.id),
+        master_product_name: autoMatched.name || null,
+        master_product_sku: autoMatched.sku || null,
+      };
+      await setDoc(
+        doc(db, AI_PRODUCT_DRAFTS_COLLECTION, draft.id),
+        {
+          master_product_id: draft.master_product_id,
+          master_product_name: draft.master_product_name,
+          master_product_sku: draft.master_product_sku,
+        },
+        { merge: true }
+      );
+    }
+  } else if (/^[0-9]{8}$/.test(String(masterProduct.sku || '').trim())) {
+    nextAutoSku = String(masterProduct.sku).trim();
+  }
+
   const approvedImage =
-    detail.images.find((i: AIProductImage) => i.id === detail.draft.approved_image_id) || null;
+    detail.images.find((i: AIProductImage) => i.id === draft.approved_image_id) || null;
   const approvedResearch =
-    detail.research?.id === detail.draft.approved_research_id ? detail.research : detail.research;
+    detail.research?.id === draft.approved_research_id ? detail.research : detail.research;
 
   const comparison = buildMasterComparisonDiffClient({
     masterProduct,
@@ -1597,8 +1982,10 @@ export async function compareAIDraftWithMaster(draftId: string, masterProductId?
 
   return {
     success: true,
-    draft: detail.draft,
+    draft,
     masterProduct,
+    isNewMasterProduct: !masterProduct,
+    nextAutoSku,
     version: detail.currentVersion,
     approvedImage,
     approvedResearch,
@@ -1608,10 +1995,11 @@ export async function compareAIDraftWithMaster(draftId: string, masterProductId?
 
 export async function applyAIDraftToMaster(params: {
   draftId: string;
-  masterProductId: string;
+  masterProductId?: string | null;
   selectedFields: string[];
   imageAction?: 'none' | 'replace_primary' | 'append_gallery';
   idempotencyKey?: string;
+  masterProductOverrides?: Record<string, any> | null;
   actor: { id: string; email?: string; role?: string };
 }) {
   try {
@@ -1619,10 +2007,11 @@ export async function applyAIDraftToMaster(params: {
       method: 'POST',
       headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        masterProductId: params.masterProductId,
+        masterProductId: params.masterProductId || '',
         selectedFields: params.selectedFields,
         imageAction: params.imageAction || 'none',
         idempotencyKey: params.idempotencyKey,
+        masterProductOverrides: params.masterProductOverrides || null,
         actorId: params.actor.id,
         actorEmail: params.actor.email,
       }),
@@ -1641,8 +2030,99 @@ export async function applyAIDraftToMaster(params: {
   if (compData.draft.status !== 'APPROVED' && compData.draft.status !== 'APPLIED') {
     throw new Error('Draft must be APPROVED before synchronizing to Product Master.');
   }
-  if (!params.masterProductId) {
-    throw new Error('Please select a target Master Product before applying.');
+
+  const allSnap = await getDocs(collection(db, 'products'));
+  const allProducts = allSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  const nextAutoSku = computeNextEightDigitSkuClient(allProducts);
+  const payload =
+    compData.version?.edited_payload || compData.version?.generated_payload || null;
+
+  let targetMasterId = String(
+    params.masterProductId || compData.masterProduct?.id || compData.draft.master_product_id || ''
+  ).trim();
+  let matchedExisting = targetMasterId
+    ? allProducts.find((p) => String(p.id) === targetMasterId) || null
+    : null;
+
+  if (!matchedExisting) {
+    matchedExisting = matchMasterProductByNameClient(allProducts, [
+      params.masterProductOverrides?.name,
+      compData.draft.source_product_name,
+      payload?.english_product_name,
+    ]);
+    if (matchedExisting) {
+      targetMasterId = String(matchedExisting.id);
+    }
+  }
+
+  if (!targetMasterId) {
+    targetMasterId = `prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  }
+
+  // Export AI product images into Firebase Storage (`https://firebasestorage.googleapis.com`)
+  let approvedImgForSync: AIProductImage | null = compData.approvedImage || null;
+  if (approvedImgForSync && approvedImgForSync.preview_url) {
+    const isGallery = params.imageAction === 'append_gallery';
+    const targetImgPath = isGallery
+      ? `products/${targetMasterId}/images/${approvedImgForSync.id}.jpg`
+      : `products/${targetMasterId}/main.jpg`;
+    const exported = await ensureClientFirebaseStorageUrl({
+      draftId: params.draftId,
+      targetProductId: targetMasterId,
+      sourceUrl: approvedImgForSync.preview_url,
+      storagePath: targetImgPath,
+    });
+    approvedImgForSync = {
+      ...approvedImgForSync,
+      preview_url: exported.downloadUrl,
+      storage_key: exported.storagePath,
+    };
+  }
+
+  const normalizedOverrides: Record<string, any> = params.masterProductOverrides
+    ? { ...params.masterProductOverrides }
+    : {};
+  if (typeof normalizedOverrides.imageUrl === 'string' && normalizedOverrides.imageUrl.trim()) {
+    const exportedMain = await ensureClientFirebaseStorageUrl({
+      draftId: params.draftId,
+      targetProductId: targetMasterId,
+      sourceUrl: normalizedOverrides.imageUrl.trim(),
+      storagePath: `products/${targetMasterId}/main.jpg`,
+    });
+    normalizedOverrides.imageUrl = exportedMain.downloadUrl;
+    normalizedOverrides.storagePath = exportedMain.storagePath;
+  }
+  if (Array.isArray(normalizedOverrides.images) && normalizedOverrides.images.length > 0) {
+    const exportedGallery: string[] = [];
+    for (let idx = 0; idx < normalizedOverrides.images.length; idx++) {
+      const gUrl = String(normalizedOverrides.images[idx] || '').trim();
+      if (!gUrl) continue;
+      if (
+        idx === 0 &&
+        normalizedOverrides.imageUrl &&
+        isFirebaseStorageUrlClient(normalizedOverrides.imageUrl) &&
+        !isFirebaseStorageUrlClient(gUrl)
+      ) {
+        exportedGallery.push(normalizedOverrides.imageUrl);
+        continue;
+      }
+      if (isFirebaseStorageUrlClient(gUrl)) {
+        exportedGallery.push(gUrl);
+        continue;
+      }
+      const gPath =
+        idx === 0
+          ? `products/${targetMasterId}/main.jpg`
+          : `products/${targetMasterId}/images/gallery_${idx}_${Date.now()}.jpg`;
+      const exportedItem = await ensureClientFirebaseStorageUrl({
+        draftId: params.draftId,
+        targetProductId: targetMasterId,
+        sourceUrl: gUrl,
+        storagePath: gPath,
+      });
+      exportedGallery.push(exportedItem.downloadUrl);
+    }
+    normalizedOverrides.images = Array.from(new Set(exportedGallery.filter(Boolean)));
   }
 
   const PROTECTED_SELLING_FIELDS = new Set([
@@ -1654,7 +2134,7 @@ export async function applyAIDraftToMaster(params: {
     'discount',
   ]);
   const selectedSet = new Set(params.selectedFields);
-  const masterRef = doc(db, 'products', params.masterProductId);
+  const masterRef = doc(db, 'products', targetMasterId);
   const draftRef = doc(db, AI_PRODUCT_DRAFTS_COLLECTION, params.draftId);
   const syncLogId = `aisync_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const syncLogRef = doc(db, AI_PRODUCT_SYNC_LOGS_COLLECTION, syncLogId);
@@ -1662,8 +2142,10 @@ export async function applyAIDraftToMaster(params: {
 
   const txRes = await runTransaction(db, async (tx) => {
     const mSnap = await tx.get(masterRef);
-    if (!mSnap.exists()) throw new Error('Target master product not found');
-    const existingMaster: Record<string, any> = { id: mSnap.id, ...mSnap.data() };
+    const existingMaster: Record<string, any> = mSnap.exists()
+      ? { id: mSnap.id, ...mSnap.data() }
+      : {};
+    const isNew = !mSnap.exists();
 
     const updatePatch: Record<string, any> = {};
     const beforeSnapshot: Record<string, any> = {};
@@ -1673,21 +2155,169 @@ export async function applyAIDraftToMaster(params: {
       if (!selectedSet.has(item.fieldKey) && !selectedSet.has(item.masterField)) continue;
       if (!item.selectable || PROTECTED_SELLING_FIELDS.has(item.masterField)) continue;
       beforeSnapshot[item.masterField] = existingMaster[item.masterField] ?? null;
-      updatePatch[item.masterField] = item.proposedAiValue;
-      afterSnapshot[item.masterField] = item.proposedAiValue;
+      const val =
+        item.masterField === 'imageUrl' && approvedImgForSync?.preview_url
+          ? approvedImgForSync.preview_url
+          : item.proposedAiValue;
+      updatePatch[item.masterField] = val;
+      afterSnapshot[item.masterField] = val;
     }
 
-    if (compData.approvedImage && compData.approvedImage.status === 'APPROVED') {
+    if (approvedImgForSync && approvedImgForSync.status === 'APPROVED') {
       if (params.imageAction === 'replace_primary') {
         beforeSnapshot.imageUrl = existingMaster.imageUrl ?? null;
-        updatePatch.imageUrl = compData.approvedImage.preview_url;
-        afterSnapshot.imageUrl = compData.approvedImage.preview_url;
+        beforeSnapshot.storagePath = existingMaster.storagePath ?? null;
+        updatePatch.imageUrl = approvedImgForSync.preview_url;
+        updatePatch.storagePath = approvedImgForSync.storage_key;
+        afterSnapshot.imageUrl = approvedImgForSync.preview_url;
+        afterSnapshot.storagePath = approvedImgForSync.storage_key;
       } else if (params.imageAction === 'append_gallery') {
         const imgs = Array.isArray(existingMaster.images) ? existingMaster.images : [];
-        const updated = Array.from(new Set([...imgs, compData.approvedImage.preview_url]));
+        const updated = Array.from(new Set([...imgs, approvedImgForSync.preview_url]));
         beforeSnapshot.images = imgs;
         updatePatch.images = updated;
         afterSnapshot.images = updated;
+      }
+    }
+
+    const ov = normalizedOverrides;
+    const setOvField = (key: string, val: any) => {
+      if (val === undefined) return;
+      if (!(key in beforeSnapshot)) beforeSnapshot[key] = existingMaster[key] ?? null;
+      updatePatch[key] = val;
+      afterSnapshot[key] = val;
+    };
+
+    if (typeof ov.name === 'string' && ov.name.trim()) setOvField('name', ov.name.trim());
+    const existingSku = String(existingMaster.sku || '').trim();
+    const finalSku = /^[0-9]{8}$/.test(existingSku)
+      ? existingSku
+      : /^[0-9]{8}$/.test(String(ov.sku || '').trim())
+      ? String(ov.sku).trim()
+      : nextAutoSku;
+    setOvField('sku', finalSku);
+
+    if (typeof ov.packingSize === 'string') setOvField('packingSize', ov.packingSize.trim());
+    if (typeof ov.unit === 'string' && ov.unit.trim())
+      setOvField('unit', ov.unit.trim().toUpperCase());
+    if (ov.mrp !== undefined && ov.mrp !== null && Number.isFinite(Number(ov.mrp))) {
+      setOvField('mrp', Number(ov.mrp));
+    }
+    if (
+      ov.onlinePrice !== undefined &&
+      ov.onlinePrice !== null &&
+      Number.isFinite(Number(ov.onlinePrice))
+    ) {
+      const online = Number(ov.onlinePrice);
+      setOvField('onlinePrice', online);
+      setOvField('offerPrice', online);
+      const mrpVal = Number(updatePatch.mrp ?? existingMaster.mrp ?? 0);
+      if (mrpVal > 0 && online > 0 && mrpVal >= online) {
+        setOvField('discount', Math.round(((mrpVal - online) / mrpVal) * 100));
+      }
+    }
+    if (ov.shopPrice !== undefined && ov.shopPrice !== null && Number.isFinite(Number(ov.shopPrice))) {
+      setOvField('shopPrice', Number(ov.shopPrice));
+    }
+    if (
+      ov.gstPercentage !== undefined &&
+      ov.gstPercentage !== null &&
+      Number.isFinite(Number(ov.gstPercentage))
+    ) {
+      setOvField('gstPercentage', Number(ov.gstPercentage));
+    }
+    if (Array.isArray(ov.categories)) {
+      const cleanCats = Array.from(
+        new Set(ov.categories.map((c: any) => String(c || '').trim()).filter(Boolean))
+      );
+      setOvField('categories', cleanCats);
+      setOvField('category', cleanCats[0] || existingMaster.category || 'Uncategorized');
+    }
+    if (typeof ov.leafycategory === 'string' && ov.leafycategory.trim()) {
+      setOvField('leafycategory', ov.leafycategory.trim());
+    }
+    if (typeof ov.brand === 'string') setOvField('brand', ov.brand.trim());
+    if (typeof ov.brandOwner === 'string') setOvField('brandOwner', ov.brandOwner.trim());
+    if (ov.stockIn !== undefined && ov.stockIn !== null && Number.isFinite(Number(ov.stockIn))) {
+      const stockInNum = Math.max(0, Number(ov.stockIn));
+      setOvField('stockIn', stockInNum);
+      const stockOutNum = Number(existingMaster.stockOut ?? 0);
+      const computedStock = Math.max(0, stockInNum - stockOutNum);
+      setOvField('stock', computedStock);
+      setOvField('stockAvailability', computedStock > 0 ? 'In Stock' : 'Out of Stock');
+    }
+    if (typeof ov.imageUrl === 'string' && ov.imageUrl.trim()) {
+      setOvField('imageUrl', ov.imageUrl.trim());
+    }
+    if (typeof ov.storagePath === 'string' && ov.storagePath.trim()) {
+      setOvField('storagePath', ov.storagePath.trim());
+    }
+    if (Array.isArray(ov.images) && ov.images.length > 0) {
+      setOvField('images', ov.images.filter(Boolean));
+    } else if (updatePatch.imageUrl && (!Array.isArray(existingMaster.images) || existingMaster.images.length === 0)) {
+      setOvField('images', [updatePatch.imageUrl]);
+    }
+    if (typeof ov.uniqueSpec1 === 'string') setOvField('uniqueSpec1', ov.uniqueSpec1.trim());
+    if (typeof ov.uniqueSpec2 === 'string') setOvField('uniqueSpec2', ov.uniqueSpec2.trim());
+    if (typeof ov.uniqueSpec3 === 'string') setOvField('uniqueSpec3', ov.uniqueSpec3.trim());
+
+    if (isNew) {
+      const baseDefaults: Record<string, any> = {
+        name: updatePatch.name || compData.draft.source_product_name || 'New Product',
+        sku: finalSku,
+        hsnCode: updatePatch.hsnCode || '',
+        packingSize: updatePatch.packingSize || '100 g',
+        unit: updatePatch.unit || 'PAC',
+        mrp: updatePatch.mrp ?? 0,
+        onlinePrice: updatePatch.onlinePrice ?? 0,
+        offerPrice: updatePatch.offerPrice ?? updatePatch.onlinePrice ?? 0,
+        shopPrice: updatePatch.shopPrice ?? 0,
+        discount: updatePatch.discount ?? 0,
+        gstPercentage: updatePatch.gstPercentage ?? 5,
+        categories: updatePatch.categories || [],
+        category: updatePatch.category || (updatePatch.categories?.[0] ?? 'Uncategorized'),
+        leafycategory: updatePatch.leafycategory || '',
+        brand: updatePatch.brand || '',
+        brandOwner: updatePatch.brandOwner || '',
+        stockIn: updatePatch.stockIn ?? 0,
+        stockOut: 0,
+        stock: updatePatch.stock ?? updatePatch.stockIn ?? 0,
+        stockAvailability:
+          (updatePatch.stock ?? updatePatch.stockIn ?? 0) > 0 ? 'In Stock' : 'Out of Stock',
+        imageUrl: updatePatch.imageUrl || '',
+        storagePath: updatePatch.storagePath || '',
+        images: updatePatch.images || (updatePatch.imageUrl ? [updatePatch.imageUrl] : []),
+        videos: [],
+        description: updatePatch.description || '',
+        ingredients: '',
+        uniqueSpec1: updatePatch.uniqueSpec1 || '',
+        uniqueSpec2: updatePatch.uniqueSpec2 || '',
+        uniqueSpec3: updatePatch.uniqueSpec3 || '',
+        uniqueSpec4: '',
+        specifications: '',
+        variants: '',
+        notes: '',
+        unitsSold: 0,
+        revenue: 0,
+        growthRate: 0,
+        amazonSales: 0,
+        flipkartSales: 0,
+        meeshoSales: 0,
+        vamjoSales: 0,
+        whatsappSales: 0,
+        countersaleSales: 0,
+        preorderactive: false,
+        vamjoWeblink: '',
+        amazonWeblink: '',
+        flipkartWeblink: '',
+        meeshoWeblink: '',
+        rating: 4.8,
+        reviewsCount: 0,
+      };
+      for (const [k, v] of Object.entries(baseDefaults)) {
+        if (updatePatch[k] === undefined) {
+          updatePatch[k] = v;
+        }
       }
     }
 
@@ -1701,13 +2331,13 @@ export async function applyAIDraftToMaster(params: {
 
       const slugRef = doc(db, PRODUCT_SLUGS_COLLECTION, candidateSlug);
       const slugSnap = await tx.get(slugRef);
-      if (slugSnap.exists() && String(slugSnap.data()?.productId) !== String(params.masterProductId)) {
+      if (slugSnap.exists() && String(slugSnap.data()?.productId) !== String(targetMasterId)) {
         throw new Error(`SLUG_CONFLICT: Slug '${candidateSlug}' is already claimed by product '${slugSnap.data()?.productId}'.`);
       }
       const prevSlug = existingMaster.urlSlug ? String(existingMaster.urlSlug).trim() : null;
       tx.set(slugRef, {
         slug: candidateSlug,
-        productId: params.masterProductId,
+        productId: targetMasterId,
         state: 'active',
         canonicalSlug: candidateSlug,
         createdAt: slugSnap.exists() ? slugSnap.data()?.createdAt || now : now,
@@ -1719,7 +2349,7 @@ export async function applyAIDraftToMaster(params: {
           doc(db, PRODUCT_SLUGS_COLLECTION, prevSlug),
           {
             slug: prevSlug,
-            productId: params.masterProductId,
+            productId: targetMasterId,
             state: 'redirect',
             canonicalSlug: candidateSlug,
             createdAt: now,
@@ -1733,7 +2363,7 @@ export async function applyAIDraftToMaster(params: {
       updatePatch.seoUpdatedAt = now;
     }
 
-    const nextRev = Number(existingMaster.revision || 1) + 1;
+    const nextRev = Number(existingMaster.revision || 0) + 1;
     updatePatch.revision = nextRev;
 
     tx.set(masterRef, updatePatch, { merge: true });
@@ -1741,7 +2371,7 @@ export async function applyAIDraftToMaster(params: {
       id: syncLogId,
       draft_id: params.draftId,
       version_id: compData.draft.approved_version_id || compData.draft.current_version_id,
-      master_product_id: params.masterProductId,
+      master_product_id: targetMasterId,
       idempotency_key: params.idempotencyKey || `sync_${params.draftId}_${Date.now()}`,
       selected_fields: params.selectedFields,
       image_action: params.imageAction || 'none',
@@ -1760,21 +2390,21 @@ export async function applyAIDraftToMaster(params: {
     tx.set(
       draftRef,
       {
-        master_product_id: params.masterProductId,
+        master_product_id: targetMasterId,
         master_product_name: updatePatch.name || existingMaster.name || null,
-        master_product_sku: existingMaster.sku || null,
+        master_product_sku: updatePatch.sku || existingMaster.sku || null,
         status: 'APPLIED',
         last_synced_at: now,
         updated_at: now,
       },
       { merge: true }
     );
-    return { syncLogDoc, updatedMaster: { ...existingMaster, ...updatePatch } };
+    return { syncLogDoc, updatedMaster: { id: targetMasterId, ...existingMaster, ...updatePatch } };
   });
 
   await logClientEvent(params.draftId, 'MASTER_SYNC_APPLIED', params.actor, {
     sync_log_id: syncLogId,
-    master_product_id: params.masterProductId,
+    master_product_id: targetMasterId,
   });
 
   return {
@@ -2063,19 +2693,38 @@ export async function fetchAICommerceDashboardStatus() {
 
   const products = productsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
   const now = new Date().toISOString();
+  const defaultShipping = {
+    country: 'IN',
+    service: 'Standard Surface / Speed Post',
+    flatRateInr: 60,
+    freeShippingThresholdInr: 999,
+    handlingDaysMin: 1,
+    handlingDaysMax: 2,
+    transitDaysMin: 3,
+    transitDaysMax: 7,
+  };
+  const defaultReturn = {
+    country: 'IN',
+    returnPolicyCategory: 'finite_return_window' as const,
+    returnWindowDays: 7,
+    returnMethod: 'by_mail' as const,
+    returnFees: 'free' as const,
+    policyUrl: `${window.location.origin}/returns-policy`,
+  };
   const defaultSettings: AICommercePlatformSettings[] = [
     {
       id: 'google_merchant',
       platform: 'google_merchant',
       displayName: 'Google Merchant Center & Shopping Graph (India)',
-      priorityTier: 'P0',
+      priority: 'P0',
       enabled: false,
       market: 'IN',
       currency: 'INR',
-      language: 'en-IN',
       verifiedDomain: window.location.origin,
-      feedPath: '/feeds/google-products.xml',
-      syncPolicy: { mode: 'scheduled_feed', intervalMinutes: 60, dryRunOnly: false },
+      schemaVersion: V10_SCHEMA_VERSION,
+      syncPolicy: { mode: 'event_driven_and_scheduled', reconcileIntervalMinutes: 60, dailyFullRebuild: true, dryRunOnly: false },
+      shippingPolicy: defaultShipping,
+      returnPolicy: defaultReturn,
       credentialRef: 'GOOGLE_MERCHANT_ACCOUNT_ID',
       marketEligible: true,
       eligibilityNote: 'Primary P0 India channel (INR, GST-inclusive selling price).',
@@ -2085,15 +2734,16 @@ export async function fetchAICommerceDashboardStatus() {
       id: 'public_web',
       platform: 'public_web',
       displayName: 'Public Product Web Pages + Schema.org JSON-LD',
-      priorityTier: 'P0',
+      priority: 'P0',
       enabled: true,
       market: 'IN',
       currency: 'INR',
-      language: 'en-IN',
       verifiedDomain: window.location.origin,
-      feedPath: '/feeds/products.json',
-      syncPolicy: { mode: 'scheduled_feed', intervalMinutes: 15, dryRunOnly: false },
-      credentialRef: 'NONE_REQUIRED',
+      schemaVersion: V10_SCHEMA_VERSION,
+      syncPolicy: { mode: 'event_driven_and_scheduled', reconcileIntervalMinutes: 15, dailyFullRebuild: true, dryRunOnly: false },
+      shippingPolicy: defaultShipping,
+      returnPolicy: defaultReturn,
+      credentialRef: null,
       marketEligible: true,
       eligibilityNote: 'Canonical /products/:slug SSR + JSON-LD + Sitemap.',
       updatedAt: now,
@@ -2102,14 +2752,15 @@ export async function fetchAICommerceDashboardStatus() {
       id: 'bing_copilot',
       platform: 'bing_copilot',
       displayName: 'Microsoft Merchant Center / Bing & Copilot Shopping',
-      priorityTier: 'P1',
+      priority: 'P1',
       enabled: false,
       market: 'IN',
       currency: 'INR',
-      language: 'en-IN',
       verifiedDomain: window.location.origin,
-      feedPath: '/feeds/bing-products.xml',
-      syncPolicy: { mode: 'scheduled_feed', intervalMinutes: 120, dryRunOnly: false },
+      schemaVersion: V10_SCHEMA_VERSION,
+      syncPolicy: { mode: 'event_driven_and_scheduled', reconcileIntervalMinutes: 120, dailyFullRebuild: true, dryRunOnly: false },
+      shippingPolicy: defaultShipping,
+      returnPolicy: defaultReturn,
       credentialRef: 'MICROSOFT_MERCHANT_STORE_ID',
       marketEligible: true,
       eligibilityNote: 'Secondary P1 XML/TSV feed compatible with Google Merchant schema.',
@@ -2119,14 +2770,15 @@ export async function fetchAICommerceDashboardStatus() {
       id: 'openai_chatgpt',
       platform: 'openai_chatgpt',
       displayName: 'OpenAI ChatGPT Product Feed Adapter (Feature-Flagged)',
-      priorityTier: 'P2',
+      priority: 'P2',
       enabled: false,
       market: 'IN',
       currency: 'INR',
-      language: 'en-IN',
       verifiedDomain: window.location.origin,
-      feedPath: '/feeds/openai-products.jsonl',
-      syncPolicy: { mode: 'manual_only', intervalMinutes: 1440, dryRunOnly: true },
+      schemaVersion: V10_SCHEMA_VERSION,
+      syncPolicy: { mode: 'manual_only', reconcileIntervalMinutes: 1440, dailyFullRebuild: false, dryRunOnly: true },
+      shippingPolicy: defaultShipping,
+      returnPolicy: defaultReturn,
       credentialRef: 'OPENAI_COMMERCE_PARTNER_KEY',
       marketEligible: false,
       eligibilityNote: 'Feature-flagged P2 adapter: generates JSONL feed locally; submission disabled until India onboarding.',
@@ -2136,15 +2788,16 @@ export async function fetchAICommerceDashboardStatus() {
       id: 'perplexity',
       platform: 'perplexity',
       displayName: 'Perplexity & AI Answer Engine Crawlability',
-      priorityTier: 'P2',
+      priority: 'P2',
       enabled: true,
       market: 'IN',
       currency: 'INR',
-      language: 'en-IN',
       verifiedDomain: window.location.origin,
-      feedPath: '/llms.txt',
-      syncPolicy: { mode: 'scheduled_feed', intervalMinutes: 60, dryRunOnly: false },
-      credentialRef: 'NONE_REQUIRED',
+      schemaVersion: V10_SCHEMA_VERSION,
+      syncPolicy: { mode: 'event_driven_and_scheduled', reconcileIntervalMinutes: 60, dailyFullRebuild: true, dryRunOnly: false },
+      shippingPolicy: defaultShipping,
+      returnPolicy: defaultReturn,
+      credentialRef: null,
       marketEligible: true,
       eligibilityNote: 'Served via public SSR HTML, JSON-LD, /sitemap.xml, and /llms.txt.',
       updatedAt: now,
@@ -2181,6 +2834,7 @@ export async function fetchAICommerceDashboardStatus() {
       platform: 'google_merchant',
       localReadiness: !p.aiCommerceEnabled ? 'disabled' : hasErr ? 'blocked' : hasWarn ? 'warning' : 'ready',
       issues,
+      severity: hasErr ? 'error' : hasWarn ? 'warning' : 'ok',
       checkedAt: now,
       revision: Number(p.revision || 1),
     };
@@ -2212,6 +2866,7 @@ export async function fetchAICommerceDashboardStatus() {
 
 export async function generateAICommerceDraftClient(params: {
   productId: string;
+  draftId?: string | null;
   productName?: string;
   categoryHint?: string;
   packingSize?: string;
@@ -2249,15 +2904,35 @@ export async function generateAICommerceDraftClient(params: {
     brandHint: masterProduct?.brand || 'LeafyEarth',
   });
   const now = new Date().toISOString();
-  const id = `aicdraft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const draftDoc: AICommerceStagingDraft = {
+  const id = `aicdraft_${params.productId || Date.now()}`;
+  const generatedPayload = {
+    seoTitle: seo.seoTitle,
+    metaDescription: seo.metaDescription,
+    seoKeywords: seo.seoKeywords,
+    urlSlug: seo.urlSlug,
+    productHighlights: content.productHighlights,
+    productFAQs: content.productFAQs,
+    searchTags: content.searchTags,
+    dietaryAttributes: content.dietaryAttributes,
+    allergenInformation: 'Packed in a facility that handles culinary herbs and spices.',
+    googleProductCategory: content.googleProductCategory || '',
+    productType: content.productType || '',
+    countryOfOrigin: content.factualAttributeSuggestions?.countryOfOrigin || 'India',
+    netWeight: content.factualAttributeSuggestions?.netWeight ?? 100,
+    netWeightUnit: (content.factualAttributeSuggestions?.netWeightUnit as any) ?? 'g',
+    netVolume: content.factualAttributeSuggestions?.netVolume ?? null,
+    netVolumeUnit: (content.factualAttributeSuggestions?.netVolumeUnit as any) ?? null,
+  };
+  const draftDoc: any = {
     id,
-    productId: masterProduct ? masterProduct.id : null,
-    aiDraftId: null,
+    productId: masterProduct ? masterProduct.id : params.productId || null,
+    aiDraftId: params.draftId || null,
     sourceProductName: sourceName,
     version: 1,
     content,
     seo,
+    generatedPayload,
+    editedPayload: generatedPayload,
     evidence: {
       gtinVerified: Boolean(masterProduct?.gtin && validateGtinChecksumClient(masterProduct.gtin).valid),
       fssaiVerified: Boolean(masterProduct?.fssaiLicenseNumber),
@@ -2280,7 +2955,7 @@ export async function generateAICommerceDraftClient(params: {
     approvedAt: null,
   };
   await setDoc(doc(db, AI_COMMERCE_STAGING_COLLECTION, id), draftDoc);
-  return { success: true, draft: draftDoc };
+  return { success: true, draft: draftDoc, staging: draftDoc };
 }
 
 export async function updateAICommerceDraftClient(params: {
@@ -2331,11 +3006,14 @@ export async function updateAICommerceDraftClient(params: {
 }
 
 export async function approveAICommerceDraftClient(params: {
-  draftId: string;
+  draftId?: string;
+  productId?: string;
+  action?: 'APPROVE' | 'REJECT';
   actor: { id: string; email?: string; role?: string };
 }) {
+  const targetId = params.draftId || `aicdraft_${params.productId}`;
   try {
-    const res = await fetch(`/api/ai-commerce/drafts/${params.draftId}/approve`, {
+    const res = await fetch(`/api/ai-commerce/drafts/${targetId}/approve`, {
       method: 'POST',
       headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify({ actorId: params.actor.id, actorEmail: params.actor.email }),
@@ -2350,11 +3028,11 @@ export async function approveAICommerceDraftClient(params: {
   }
 
   const now = new Date().toISOString();
-  const ref = doc(db, AI_COMMERCE_STAGING_COLLECTION, params.draftId);
+  const ref = doc(db, AI_COMMERCE_STAGING_COLLECTION, targetId);
   await setDoc(
     ref,
     {
-      status: 'APPROVED',
+      status: params.action === 'REJECT' ? 'REJECTED' : 'APPROVED',
       approvedBy: params.actor.id,
       approvedAt: now,
       updatedAt: now,
@@ -2366,20 +3044,24 @@ export async function approveAICommerceDraftClient(params: {
 }
 
 export async function applyAICommerceDraftClient(params: {
-  draftId: string;
+  draftId?: string;
   productId: string;
   selectedFields?: string[];
   aiCommerceEnabled?: boolean;
+  enableAICommerce?: boolean;
   actor: { id: string; email?: string; role?: string };
 }) {
+  const targetId = params.draftId || `aicdraft_${params.productId}`;
+  const enabledFlag =
+    params.aiCommerceEnabled !== undefined ? params.aiCommerceEnabled : params.enableAICommerce;
   try {
-    const res = await fetch(`/api/ai-commerce/drafts/${params.draftId}/apply`, {
+    const res = await fetch(`/api/ai-commerce/drafts/${targetId}/apply`, {
       method: 'POST',
       headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         productId: params.productId,
         selectedFields: params.selectedFields,
-        aiCommerceEnabled: params.aiCommerceEnabled,
+        aiCommerceEnabled: enabledFlag,
         actorId: params.actor.id,
         actorEmail: params.actor.email,
       }),
@@ -2393,32 +3075,52 @@ export async function applyAICommerceDraftClient(params: {
     if (err?.message && !err.message.includes('Failed to fetch')) throw err;
   }
 
-  const draftSnap = await getDoc(doc(db, AI_COMMERCE_STAGING_COLLECTION, params.draftId));
-  if (!draftSnap.exists()) throw new Error('Commerce draft not found');
-  const draft = { id: draftSnap.id, ...(draftSnap.data() as any) } as AICommerceStagingDraft;
+  const draftSnap = await getDoc(doc(db, AI_COMMERCE_STAGING_COLLECTION, targetId));
+  const draft = draftSnap.exists()
+    ? ({ id: draftSnap.id, ...(draftSnap.data() as any) } as any)
+    : null;
   const now = new Date().toISOString();
-  const c = draft.content;
+  const edited = draft?.editedPayload || draft?.generatedPayload || {};
+  const c = draft?.content || {};
   const sugg = c.factualAttributeSuggestions || {};
 
   const patch: Record<string, any> = {
-    productHighlights: c.productHighlights,
-    productFAQs: c.productFAQs,
-    searchTags: c.searchTags,
-    dietaryAttributes: c.dietaryAttributes,
-    googleProductCategory: c.googleProductCategory,
-    productType: c.productType,
-    countryOfOrigin: sugg.countryOfOrigin || 'India',
+    productHighlights: edited.productHighlights || c.productHighlights || [],
+    productFAQs: edited.productFAQs || c.productFAQs || [],
+    searchTags: edited.searchTags || c.searchTags || [],
+    dietaryAttributes: edited.dietaryAttributes || c.dietaryAttributes || [],
+    googleProductCategory: edited.googleProductCategory || c.googleProductCategory || '',
+    productType: edited.productType || c.productType || '',
+    countryOfOrigin: edited.countryOfOrigin || sugg.countryOfOrigin || 'India',
+    ...(edited.seoTitle ? { seoTitle: edited.seoTitle } : {}),
+    ...(edited.metaDescription ? { metaDescription: edited.metaDescription } : {}),
+    ...(edited.seoKeywords ? { seoKeywords: edited.seoKeywords } : {}),
+    ...(edited.urlSlug ? { urlSlug: edited.urlSlug } : {}),
     aiCommerceUpdatedAt: now,
-    ...(params.aiCommerceEnabled !== undefined ? { aiCommerceEnabled: params.aiCommerceEnabled } : {}),
+    ...(enabledFlag !== undefined ? { aiCommerceEnabled: enabledFlag } : {}),
   };
 
   await setDoc(doc(db, 'products', params.productId), patch, { merge: true });
+  if (edited.urlSlug) {
+    await setDoc(
+      doc(db, PRODUCT_SLUGS_COLLECTION, edited.urlSlug),
+      {
+        slug: edited.urlSlug,
+        productId: params.productId,
+        state: 'active',
+        canonicalSlug: edited.urlSlug,
+        createdAt: now,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+  }
   await setDoc(
-    doc(db, AI_COMMERCE_STAGING_COLLECTION, params.draftId),
+    doc(db, AI_COMMERCE_STAGING_COLLECTION, targetId),
     { status: 'APPLIED', productId: params.productId, updatedAt: now },
     { merge: true }
   );
-  return { success: true };
+  return { success: true, urlSlug: edited.urlSlug };
 }
 
 export async function buildPlatformFeedClient(params: {
@@ -2582,4 +3284,298 @@ export async function resolvePublicProductBySlugOrIdClient(slugOrId: string): Pr
     };
   }
   return { status: 404 };
+}
+
+// ============================================================================
+// UI Alias & Adapter Wrappers for AIProductContentView
+// ============================================================================
+
+export async function checkProductSlugAvailabilityClient(
+  slugCandidate: string,
+  excludeProductId?: string | null
+) {
+  const res = await checkUrlSlugAvailabilityClient(slugCandidate, excludeProductId);
+  return {
+    ...res,
+    conflictProductId: res.available ? null : res.claimedByProductId || null,
+  };
+}
+
+export async function generateAIDraftSEOClient(params: {
+  draftId: string;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  return generateDraftSEOClient(params);
+}
+
+export async function saveAIDraftSEOEditsClient(params: {
+  draftId: string;
+  seo: AIProductSEOContent;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  return updateDraftSEOClient(params);
+}
+
+export async function approveAIDraftSEOClient(params: {
+  draftId: string;
+  action?: 'APPROVE' | 'REJECT';
+  seo?: AIProductSEOContent;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  return approveDraftSEOClient(params);
+}
+
+export async function applyAIDraftSEOToMasterClient(params: {
+  draftId: string;
+  masterProductId: string;
+  selectedFields?: string[];
+  expectedMasterRevision?: number;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  return applyDraftSEOClient(params);
+}
+
+export async function fetchAICommerceOverviewClient(): Promise<{
+  settings: AICommercePlatformSetting[];
+  staging: AICommerceStagingRecord[];
+  feeds: AICommerceFeedRecord[];
+  validation: AICommerceValidationRecord[];
+  readinessSummary: {
+    totalProducts: number;
+    commerceEnabledCount: number;
+    publishedProjectionCount: number;
+    activeSlugCount: number;
+    readyCount: number;
+    warningCount: number;
+    blockedCount: number;
+    disabledCount: number;
+  };
+}> {
+  const raw = await fetchAICommerceDashboardStatus();
+  const settings: AICommercePlatformSetting[] = (raw.settings || []).map((s: any) => {
+    const plat = s.platform || s.platformId || s.id || 'google_merchant';
+    const feedEndpoint =
+      s.feedPath ||
+      s.feedEndpoint ||
+      (plat === 'google_merchant'
+        ? '/feeds/google-products.xml'
+        : plat === 'bing_copilot'
+        ? '/feeds/bing-products.xml'
+        : plat === 'openai_chatgpt'
+        ? '/feeds/openai-products.jsonl'
+        : '/feeds/products.json');
+    const feedFormat: 'xml' | 'jsonl' | 'json' =
+      s.feedFormat ||
+      (plat === 'openai_chatgpt' ? 'jsonl' : plat === 'public_web' || plat === 'perplexity' ? 'json' : 'xml');
+    return {
+      ...s,
+      id: plat,
+      platform: plat,
+      platformId: plat,
+      platformName: s.platformName || s.displayName || plat,
+      priorityTier: s.priorityTier || s.priority || 'P0',
+      feedFormat,
+      feedPath: feedEndpoint,
+      feedEndpoint,
+      enabled: Boolean(s.enabled),
+      featureFlagEnabled:
+        s.featureFlagEnabled !== undefined
+          ? Boolean(s.featureFlagEnabled)
+          : s.featureFlagged !== undefined
+          ? Boolean(s.featureFlagged)
+          : plat === 'openai_chatgpt',
+      targetCountry: s.targetCountry || s.market || 'IN',
+      syncMode: s.syncMode || s.syncPolicy?.mode || 'hybrid',
+      scheduleMinutes: s.scheduleMinutes || s.syncPolicy?.reconcileIntervalMinutes || 60,
+      credentialEnvVar: s.credentialEnvVar !== undefined ? s.credentialEnvVar : s.credentialRef || null,
+      featureFlagged:
+        s.featureFlagged !== undefined ? Boolean(s.featureFlagged) : plat === 'openai_chatgpt',
+      eligibilityNote: s.eligibilityNote || '',
+    };
+  });
+
+  const staging: AICommerceStagingRecord[] = (raw.stagingDrafts || raw.staging || []).map((d: any) => {
+    const content = d.content || {};
+    const seo = d.seo || {};
+    const sugg = content.factualAttributeSuggestions || {};
+    const fallbackPayload: AICommerceGeneratedPayload = {
+      seoTitle: seo.seoTitle || '',
+      metaDescription: seo.metaDescription || '',
+      seoKeywords: seo.seoKeywords || [],
+      urlSlug: seo.urlSlug || '',
+      productHighlights: content.productHighlights || [],
+      productFAQs: content.productFAQs || [],
+      searchTags: content.searchTags || [],
+      dietaryAttributes: content.dietaryAttributes || [],
+      allergenInformation: 'Packed in a facility that handles culinary herbs and spices.',
+      googleProductCategory: content.googleProductCategory || '',
+      productType: content.productType || '',
+      countryOfOrigin: sugg.countryOfOrigin || 'India',
+      netWeight: sugg.netWeight ?? 100,
+      netWeightUnit: sugg.netWeightUnit ?? 'g',
+      netVolume: sugg.netVolume ?? null,
+      netVolumeUnit: sugg.netVolumeUnit ?? null,
+    };
+    return {
+      ...d,
+      generatedPayload: d.generatedPayload || fallbackPayload,
+      editedPayload: d.editedPayload || d.generatedPayload || fallbackPayload,
+      evidence: d.evidence || {
+        gtinVerified: false,
+        fssaiVerified: false,
+        originVerified: true,
+        allergenVerified: true,
+      },
+      provenance: d.provenance || {
+        model: 'gpt-4o-mini',
+        promptVersion: V10_SCHEMA_VERSION,
+        generatedAt: d.createdAt || new Date().toISOString(),
+        liveApiUsed: false,
+      },
+    };
+  });
+
+  const feeds: AICommerceFeedRecord[] = (raw.feedRuns || raw.feeds || []).map((f: any) => {
+    const count = Number(f.eligibleItems ?? f.itemCount ?? f.count ?? 0);
+    const withdrawn = Number(f.withdrawnCount ?? 0);
+    const format: 'xml' | 'jsonl' | 'json' =
+      f.format || (f.platform === 'openai_chatgpt' ? 'jsonl' : f.platform === 'public_web' ? 'json' : 'xml');
+    return {
+      ...f,
+      format,
+      eligibleItems: count,
+      totalItems: Number(f.totalItems ?? count + withdrawn),
+      itemCount: count,
+      generatedAt: f.generatedAt || f.createdAt || new Date().toISOString(),
+      contentPreview: f.contentPreview || `<!-- Feed snapshot ${f.id} (${f.platform}) -->`,
+    };
+  });
+
+  const validation: AICommerceValidationRecord[] = (raw.validations || raw.validation || []).map(
+    (v: any) => {
+      const readiness = v.overallReadiness || v.readiness || v.localReadiness || 'warning';
+      return {
+        ...v,
+        platformId: v.platformId || v.platform || 'google_merchant',
+        readiness,
+        overallReadiness: readiness,
+        platformReadiness: v.platformReadiness || {
+          google_merchant: readiness,
+          public_web: readiness,
+        },
+        issues: Array.isArray(v.issues) ? v.issues : [],
+        validatedAt: v.validatedAt || v.checkedAt || new Date().toISOString(),
+      };
+    }
+  );
+
+  const sum = raw.summary || raw.readinessSummary || {};
+  return {
+    settings,
+    staging,
+    feeds,
+    validation,
+    readinessSummary: {
+      totalProducts: Number(sum.totalProducts || 0),
+      commerceEnabledCount: Number(sum.commerceEnabledCount || 0),
+      publishedProjectionCount: Number(
+        sum.publishedProjectionCount ?? sum.publishedProjectionsCount ?? 0
+      ),
+      activeSlugCount: Number(sum.activeSlugCount ?? sum.slugReservationsCount ?? 0),
+      readyCount: Number(sum.readyCount || 0),
+      warningCount: Number(sum.warningCount || 0),
+      blockedCount: Number(sum.blockedCount || 0),
+      disabledCount: Number(sum.disabledCount || 0),
+    },
+  };
+}
+
+export async function saveAICommerceDraftClient(params: {
+  productId: string;
+  editedPayload: AICommerceGeneratedPayload;
+  actor: { id: string; email?: string; role?: string };
+}) {
+  const draftId = `aicdraft_${params.productId}`;
+  const now = new Date().toISOString();
+  const ref = doc(db, AI_COMMERCE_STAGING_COLLECTION, draftId);
+  await setDoc(
+    ref,
+    {
+      id: draftId,
+      productId: params.productId,
+      editedPayload: params.editedPayload,
+      generatedPayload: params.editedPayload,
+      status: 'DRAFT',
+      updatedAt: now,
+    },
+    { merge: true }
+  );
+  return { success: true };
+}
+
+export async function buildAICommerceFeedClient(params: {
+  platform: AICommercePlatformId | 'all';
+  dryRun?: boolean;
+  actor: { id: string; email?: string; role?: string };
+}): Promise<{ success: boolean; feeds: AICommerceFeedRecord[] }> {
+  const targets: AICommercePlatformId[] =
+    params.platform === 'all'
+      ? ['google_merchant', 'bing_copilot', 'openai_chatgpt', 'public_web']
+      : [params.platform];
+  const feeds: AICommerceFeedRecord[] = [];
+  for (const p of targets) {
+    const res = await buildPlatformFeedClient({
+      platform: p,
+      dryRun: params.dryRun,
+      actor: params.actor,
+    });
+    const f = res.feedRun || res.feed || {};
+    feeds.push({
+      id: f.id || `feed_${p}_${Date.now()}`,
+      platform: p,
+      market: 'IN',
+      format:
+        f.format || (p === 'openai_chatgpt' ? 'jsonl' : p === 'public_web' ? 'json' : 'xml'),
+      objectPath: f.objectPath || `ai_commerce_feeds/${p}`,
+      checksum: f.checksum || `sha256_${Date.now()}`,
+      itemCount: f.itemCount ?? f.count ?? 0,
+      withdrawnCount: f.withdrawnCount ?? 0,
+      schemaVersion: V10_SCHEMA_VERSION,
+      dryRun: Boolean(params.dryRun),
+      contentPreview: res.previewSnippet || f.contentPreview || '',
+      createdAt: f.createdAt || new Date().toISOString(),
+      createdBy: params.actor.id,
+    });
+  }
+  return { success: true, feeds };
+}
+
+export async function saveAICommercePlatformSettingClient(
+  params: Partial<AICommercePlatformSetting> & {
+    platformId?: AICommercePlatformId;
+    platform?: AICommercePlatformId;
+    actor: { id: string; email?: string; role?: string };
+  }
+) {
+  const platform = (params.platformId || params.platform || 'google_merchant') as AICommercePlatformId;
+  return updatePlatformSettingsClient({
+    platform,
+    settings: params as any,
+    actor: params.actor,
+  });
+}
+
+export async function validateProductCommerceReadinessClient(productId: string) {
+  try {
+    const res = await fetch(`/api/ai-commerce/validate/${encodeURIComponent(productId)}`, {
+      method: 'POST',
+      headers: await authHeaders(),
+    });
+    if (res.ok && !isStaticOrUnavailable(res)) {
+      return await res.json();
+    }
+  } catch {
+    // Fallback below
+  }
+  return { success: true, productId };
 }

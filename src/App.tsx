@@ -165,9 +165,18 @@ function CRMAppShell() {
   const visibleNavigation = navigationItems.filter(item => hasAccess(item.moduleCheck, 'read'));
 
   const displayedNavs = currentUser?.role === 'Referral Team'
-    ? navigationItems.filter(item => item.id === 'dashboard' || item.id === 'referrals' || item.id === 'sales_orders' || item.id === 'shopping')
+    ? navigationItems.filter(
+        item =>
+          item.id === 'dashboard' ||
+          item.id === 'referrals' ||
+          item.id === 'sales_orders' ||
+          item.id === 'shopping' ||
+          hasAccess(item.moduleCheck, 'read')
+      )
     : currentUser?.role === 'Support'
-      ? navigationItems.filter(item => item.id !== 'security' && item.id !== 'users')
+      ? navigationItems.filter(
+          item => (item.id !== 'security' && item.id !== 'users') || hasAccess(item.moduleCheck, 'read')
+        )
       : navigationItems;
 
   // Automatically switch activeTab to the first permitted menu item when current tab is restricted

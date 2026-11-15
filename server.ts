@@ -24,7 +24,7 @@ import { sendOrderStageWhatsAppNotification } from "./src/services/whatsappServi
 import { registerProductDetailsRoutes, PRODUCT_DETAILS_COLLECTION } from "./src/services/productDetailsRoutes";
 import { registerCustomerReviewRoutes, CUSTOMER_REVIEWS_COLLECTION, CUSTOMER_REVIEW_AGGREGATES_COLLECTION } from "./src/services/customerReviewService";
 import { registerPreorderManagementRoutes, PREORDERS_COLLECTION, PREORDER_IDEMPOTENCY_COLLECTION, PREORDER_EVENTS_COLLECTION, PAYMENT_ALLOCATIONS_COLLECTION } from "./src/services/preorderManagementService";
-import { registerAIProductContentRoutes } from "./src/services/aiProductContentService";
+import { registerAIProductContentRoutes, uploadBufferToFirebaseStorage } from "./src/services/aiProductContentService";
 import { registerAICommerceAndDiscoveryRoutes, syncProductToPublicProjectionAndQueueJobs } from "./src/services/aiCommerceService";
 import { allocateUniqueEightDigitSku, enforceSkuImmutabilityOnUpdate, isValidEightDigitNumericSku } from "./src/services/skuAllocationService";
 
@@ -591,15 +591,17 @@ app.post('/api/uploads', requireAuthenticatedRequest, upload.single('file'), asy
       return res.status(400).json({ error: 'Image file exceeds the 10MB limit' });
     }
 
-    const fileRef = adminStorage.bucket().file(storagePath);
-    await fileRef.save(file.buffer, { metadata: { contentType: file.mimetype } });
-    const expires = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000);
-    const [downloadUrl] = await fileRef.getSignedUrl({ action: 'read', expires });
+    const uploaded = await uploadBufferToFirebaseStorage({
+      storage: adminStorage,
+      buffer: file.buffer,
+      storagePath,
+      contentType: file.mimetype,
+    });
     return res.json({
       success: true,
       file: {
-        downloadUrl,
-        storagePath,
+        downloadUrl: uploaded.downloadUrl,
+        storagePath: uploaded.storagePath,
         fileName: file.originalname,
         contentType: file.mimetype,
         fileSize: file.size,
@@ -667,25 +669,16 @@ app.post('/api/products', requireAuthenticatedRequest, upload.single('image'), a
     }
 
     if (file) {
-        const storagePath = `products/${productId}/main.jpg`;
-      const bucket = adminStorage.bucket();
-      const fileRef = bucket.file(storagePath);
-      const stream = fileRef.createWriteStream({
-        metadata: { contentType: file.mimetype },
+      const storagePath = `products/${productId}/main.jpg`;
+      const uploaded = await uploadBufferToFirebaseStorage({
+        storage: adminStorage,
+        buffer: file.buffer,
+        storagePath,
+        contentType: file.mimetype,
       });
 
-      await new Promise((resolve, reject) => {
-        stream.on('finish', resolve);
-        stream.on('error', reject);
-        stream.end(file.buffer);
-      });
-
-      // Generate a long-lived signed URL for download access
-      const expires = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000); // 10 years
-      const [signedUrl] = await fileRef.getSignedUrl({ action: 'read', expires });
-
-      payload.imageUrl = signedUrl;
-      payload.storagePath = storagePath;
+      payload.imageUrl = uploaded.downloadUrl;
+      payload.storagePath = uploaded.storagePath;
     }
 
     await saveCollectionDoc('products', payload);
@@ -705,21 +698,15 @@ app.put('/api/products/:id/image', requireAuthenticatedRequest, upload.single('i
     if (!file) return res.status(400).json({ error: 'Missing image file' });
 
     const storagePath = `products/${productId}/main.jpg`;
-    const bucket = adminStorage.bucket();
-    const fileRef = bucket.file(storagePath);
-    const stream = fileRef.createWriteStream({ metadata: { contentType: file.mimetype } });
-
-    await new Promise((resolve, reject) => {
-      stream.on('finish', resolve);
-      stream.on('error', reject);
-      stream.end(file.buffer);
+    const uploaded = await uploadBufferToFirebaseStorage({
+      storage: adminStorage,
+      buffer: file.buffer,
+      storagePath,
+      contentType: file.mimetype,
     });
 
-    const expires = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000);
-    const [signedUrl] = await fileRef.getSignedUrl({ action: 'read', expires });
-
     // Update product document with new imageUrl and storagePath
-    const updated = { id: productId, imageUrl: signedUrl, storagePath };
+    const updated = { id: productId, imageUrl: uploaded.downloadUrl, storagePath: uploaded.storagePath };
     await saveCollectionDoc('products', updated);
 
     return res.json({ success: true, product: updated });

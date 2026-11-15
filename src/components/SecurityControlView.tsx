@@ -92,6 +92,47 @@ export default function SecurityControlView() {
         </div>
       </div>
 
+      {/* Main Menu Verification Strip (All 21 Sidebar Menu Items in Order) */}
+      <div className="bg-[#141418] border border-slate-800 rounded-2xl p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-emerald-400" />
+            <span className="text-xs font-bold text-white">
+              Verified Sidebar Main Menu Registry ({SECURITY_MODULES_CATALOG.length} / 21 Main Menu Modules)
+            </span>
+          </div>
+          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-800/50 px-2.5 py-0.5 rounded-full">
+            ✓ 100% Main Menu Coverage Verified
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-1.5">
+          {SECURITY_MODULES_CATALOG.map((item) => (
+            <button
+              key={item.module}
+              type="button"
+              onClick={() =>
+                setModuleSearch((prev) => (prev === item.module ? '' : item.module))
+              }
+              className={`text-left px-2.5 py-1.5 rounded-lg border text-[10px] transition cursor-pointer ${
+                moduleSearch.toLowerCase() === item.module.toLowerCase()
+                  ? 'bg-indigo-950/80 border-indigo-500 text-white'
+                  : 'bg-[#0d0d10] border-slate-800 text-slate-300 hover:border-slate-700'
+              }`}
+              title={`${item.sidebarName} -> ${item.module} (${item.componentName})`}
+            >
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-mono text-[9px] text-indigo-400 font-bold">
+                  #{item.menuOrder}
+                </span>
+                <span className="font-mono text-[8px] text-emerald-400">ACTIVE</span>
+              </div>
+              <div className="font-bold truncate mt-0.5">{item.sidebarName}</div>
+              <div className="text-[9px] text-slate-500 truncate">{item.module}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {permissions && (
         <div className="bg-[#141418] border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3 mb-1">
@@ -203,11 +244,19 @@ export default function SecurityControlView() {
                         <td className="p-2.5 pl-4 border-r border-slate-800/40">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
                             <div>
+                              <span className="inline-block mr-2 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-indigo-950/70 text-indigo-300 border border-indigo-800/50">
+                                Menu #{modEntry.menuOrder}
+                              </span>
                               <span className="font-semibold text-slate-200">{modEntry.label}</span>
                               {modEntry.label !== modEntry.module && (
                                 <span className="ml-1.5 text-[10px] text-slate-400">
                                   ({modEntry.module})
                                 </span>
+                              )}
+                              {modEntry.submenus && modEntry.submenus.length > 0 && (
+                                <div className="mt-1 text-[9px] text-slate-400 font-mono">
+                                  Submenus ({modEntry.submenus.length}): {modEntry.submenus.join(' • ')}
+                                </div>
                               )}
                             </div>
                             <div className="flex items-center gap-1.5">

@@ -2,12 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   assertNoSeoFields,
+  buildFirebaseStorageDownloadUrl,
   buildMasterComparisonDiff,
   buildSelectedMasterUpdatePayload,
   buildStructuredFallbackContent,
   calculateMarketPriceRange,
+  ensureFirebaseStorageImageUrl,
   generatePureWhite1000x1000PngBuffer,
   inspectPngDimensions,
+  isFirebaseStorageDownloadUrl,
+  matchMasterProductByName,
+  mergeMasterProductUpdationOverrides,
   normalizePackSizeString,
   validateAIProductContentPayload,
 } from '../src/services/aiProductContentService';
@@ -360,4 +365,152 @@ test('Section 21.11: Pack size normalization and backend deterministic min/max w
   assert.equal(emptyRange.lowestPrice, null);
   assert.equal(emptyRange.highestPrice, null);
   assert.equal(emptyRange.searchStatus, 'insufficient_verified_web_price_data');
+});
+
+test('Product Master Updation: AI category maps to leafycategory, auto-links by product name, and preserves existing products fields', () => {
+  const payload = buildStructuredFallbackContent('Kadukka');
+  const version: AIProductVersion = {
+    id: 'aiver_kadukka_1',
+    draft_id: 'aidraft_kadukka_1',
+    version_no: 1,
+    generated_payload: payload,
+    edited_payload: payload,
+    model: 'gpt-4o-mini',
+    prompt_version: 'leafyearth-v8.0',
+    usage_metadata: {
+      provider: 'openai',
+      project_name: 'leafyearthprdcnt',
+      model: 'gpt-4o-mini',
+      prompt_version: 'leafyearth-v8.0',
+      input_tokens: 100,
+      output_tokens: 200,
+      total_tokens: 300,
+      estimated_cost_usd: 0,
+      latency_ms: 10,
+      live_api_used: false,
+    },
+    generated_at: new Date().toISOString(),
+    edited_by: null,
+    edited_at: null,
+    approved_by: 'admin_1',
+    approved_at: new Date().toISOString(),
+  };
+
+  const diff = buildMasterComparisonDiff({
+    masterProduct: null,
+    version,
+    approvedImage: null,
+    approvedResearch: null,
+  });
+
+  // Verify AI category is mapped to `leafycategory` (`products.leafycategory`) instead of `products.category`
+  const leafyCategoryRow = diff.find((item) => item.fieldKey === 'leafycategory');
+  assert.ok(leafyCategoryRow, 'Field mapping must contain leafycategory');
+  assert.equal(leafyCategoryRow?.masterField, 'leafycategory');
+  assert.equal(diff.find((item) => item.fieldKey === 'category'), undefined);
+
+  // Verify product name auto-matching in `products` table
+  const existingProducts = [
+    { id: 'prod_existing_1', name: 'Thippili', sku: '10000015', unitsSold: 42, revenue: 8400 },
+    { id: 'prod_existing_2', name: 'Cumin Seeds (Jeera)', sku: '10000016', unitsSold: 18, revenue: 3600 },
+  ];
+
+  const matchedExisting = matchMasterProductByName(existingProducts, ['Thippili']);
+  assert.equal(matchedExisting?.id, 'prod_existing_1');
+
+  const matchedByBaseName = matchMasterProductByName(existingProducts, ['Cumin Seeds']);
+  assert.equal(matchedByBaseName?.id, 'prod_existing_2');
+
+  const unmatchedNew = matchMasterProductByName(existingProducts, ['Kadukka']);
+  assert.equal(unmatchedNew, null, 'Unmatched product name must be treated as a new product');
+
+  // Verify merging the 16 Product Master Updation fields preserves existing `products` fields
+  const beforeSnapshot: Record<string, any> = {};
+  const afterSnapshot: Record<string, any> = {};
+  const { mergedMasterProduct, finalPatch } = mergeMasterProductUpdationOverrides({
+    existingMasterProduct: existingProducts[0],
+    updatePatch: { leafycategory: 'Ayurvedic Raw Herbs & Single Dravyas' },
+    beforeSnapshot,
+    afterSnapshot,
+    allocatedSku: '10000099',
+    overrides: {
+      name: 'Thippili',
+      sku: '99999999', // Existing 8-digit SKU '10000015' must be preserved!
+      packingSize: '100 g',
+      unit: 'PAC',
+      mrp: 220,
+      onlinePrice: 185,
+      shopPrice: 190,
+      gstPercentage: 5,
+      categories: ['Spices', 'Ayurvedic Herbs'],
+      leafycategory: 'Ayurvedic Raw Herbs & Single Dravyas',
+      brand: 'LeafyEarth',
+      brandOwner: 'Vio Nature Science',
+      stockIn: 50,
+      imageUrl: 'data:image/jpeg;base64,/9j/4AAQ',
+      uniqueSpec1: 'Sun-dried whole spikes',
+      uniqueSpec2: 'Rich in piperine',
+      uniqueSpec3: 'Hygienically packed',
+    },
+  });
+
+  assert.equal(finalPatch.sku, '10000015', 'Existing 8-digit SKU must be preserved');
+  assert.equal(finalPatch.leafycategory, 'Ayurvedic Raw Herbs & Single Dravyas');
+  assert.deepEqual(finalPatch.categories, ['Spices', 'Ayurvedic Herbs']);
+  assert.equal(finalPatch.category, 'Spices');
+  assert.equal(finalPatch.mrp, 220);
+  assert.equal(finalPatch.onlinePrice, 185);
+  assert.equal(finalPatch.shopPrice, 190);
+  assert.equal(finalPatch.stockIn, 50);
+  assert.equal(finalPatch.uniqueSpec1, 'Sun-dried whole spikes');
+  // Existing `products` table metrics (`unitsSold`, `revenue`) must be preserved
+  assert.equal(mergedMasterProduct.unitsSold, 42);
+  assert.equal(mergedMasterProduct.revenue, 8400);
+});
+
+test('Firebase Storage Export: AI product images export to https://firebasestorage.googleapis.com/v0/b/...', async () => {
+  const url = buildFirebaseStorageDownloadUrl(
+    'violeafybasket.firebasestorage.app',
+    'products/5r5w8ZL4Lo9jI3GWBnIJ/main.jpg',
+    'token-123'
+  );
+  assert.equal(
+    url,
+    'https://firebasestorage.googleapis.com/v0/b/violeafybasket.firebasestorage.app/o/products%2F5r5w8ZL4Lo9jI3GWBnIJ%2Fmain.jpg?alt=media&token=token-123'
+  );
+  assert.equal(isFirebaseStorageDownloadUrl(url), true);
+  assert.equal(isFirebaseStorageDownloadUrl('data:image/jpeg;base64,/9j/4AAQ'), false);
+  assert.equal(
+    isFirebaseStorageDownloadUrl('https://storage.googleapis.com/violeafybasket/img.jpg'),
+    false
+  );
+
+  // Mock Storage bucket to verify base64 data URL is uploaded and converted to firebasestorage.googleapis.com
+  let savedMetadata: any = null;
+  const mockStorage = {
+    bucket: () => ({
+      name: 'violeafybasket.firebasestorage.app',
+      file: (_path: string) => ({
+        save: async (_buf: Buffer, opts: any) => {
+          savedMetadata = opts?.metadata;
+        },
+      }),
+    }),
+  };
+
+  const exported = await ensureFirebaseStorageImageUrl({
+    storage: mockStorage,
+    sourceUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+    targetStoragePath: 'products/prod_kadukka/main.jpg',
+  });
+
+  assert.equal(isFirebaseStorageDownloadUrl(exported.downloadUrl), true);
+  assert.ok(
+    exported.downloadUrl.startsWith(
+      'https://firebasestorage.googleapis.com/v0/b/violeafybasket.firebasestorage.app/o/products%2Fprod_kadukka%2Fmain.jpg?alt=media&token='
+    )
+  );
+  assert.equal(exported.storagePath, 'products/prod_kadukka/main.jpg');
+  assert.equal(savedMetadata?.contentType, 'image/jpeg');
+  assert.ok(savedMetadata?.metadata?.firebaseStorageDownloadTokens);
 });

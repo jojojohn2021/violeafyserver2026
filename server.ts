@@ -26,6 +26,7 @@ import { registerCustomerReviewRoutes, CUSTOMER_REVIEWS_COLLECTION, CUSTOMER_REV
 import { registerPreorderManagementRoutes, PREORDERS_COLLECTION, PREORDER_IDEMPOTENCY_COLLECTION, PREORDER_EVENTS_COLLECTION, PAYMENT_ALLOCATIONS_COLLECTION } from "./src/services/preorderManagementService";
 import { registerAIProductContentRoutes, uploadBufferToFirebaseStorage } from "./src/services/aiProductContentService";
 import { registerAICommerceAndDiscoveryRoutes, syncProductToPublicProjectionAndQueueJobs } from "./src/services/aiCommerceService";
+import { registerBannerManagementRoutes, BANNERS_COLLECTION, HOME_BANNERS_COLLECTION } from "./src/services/bannerManagementService";
 import { allocateUniqueEightDigitSku, enforceSkuImmutabilityOnUpdate, isValidEightDigitNumericSku } from "./src/services/skuAllocationService";
 
 dotenv.config();
@@ -772,6 +773,12 @@ registerAICommerceAndDiscoveryRoutes(app, {
   db: adminDb,
   auth: adminAuth,
   storage: adminStorage,
+});
+registerBannerManagementRoutes({
+  app,
+  adminDb,
+  adminAuth,
+  adminStorage,
 });
 
 // Section 19: Next Unique 8-Digit Numeric SKU Allocation Endpoint

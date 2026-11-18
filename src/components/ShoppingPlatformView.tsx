@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../store';
 import ProductReviewsSection from './ProductReviewsSection';
 import ProductDetailsDisplay from './ProductDetailsDisplay';
+import ResponsiveBannerRenderer from './ResponsiveBannerRenderer';
 import { resolvePublicProductBySlugOrIdClient } from '../utils/aiProductContentApi';
 import { 
   ShoppingBag, ShoppingCart, Heart, Search, Star, MapPin, Tag, 
@@ -1150,45 +1151,73 @@ export default function ShoppingPlatformView() {
                 </div>
               </div>
 
-              {/* AUTO-SCROLLING PROMOTIONAL BANNERS */}
-              <div className="relative overflow-hidden rounded-3xl h-44 md:h-52 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center p-6 md:p-10 shadow-md">
-                <div className="max-w-md space-y-2 z-15 relative">
-                  <span className="bg-[#F97316] text-white text-[10px] uppercase font-bold py-1 px-3 rounded-full animate-bounce">
-                    EXCLUSIVE OFFER
-                  </span>
-                  <h3 className="text-xl md:text-2xl font-bold tracking-tight">{promoBanners[heroIndex].title}</h3>
-                  <p className="text-xs md:text-sm text-emerald-100">{promoBanners[heroIndex].subtitle}</p>
-                  <div className="flex items-center gap-2 pt-1">
-                    <span className="text-[10px] font-mono bg-white/20 px-2 py-0.5 rounded border border-white/10">Code: {promoBanners[heroIndex].tag}</span>
-                    <button 
-                      onClick={() => {
-                        setCouponInput(promoBanners[heroIndex].tag);
-                        setActiveTab('cart');
-                        addCustomAuditLog('PROMO_CODE_CLICKED', `Clicked on hero promo banner discount: ${promoBanners[heroIndex].tag}`);
-                      }} 
-                      className="text-xs font-bold text-lime-300 hover:underline"
-                    >
-                      Apply Now &rarr;
-                    </button>
+              {/* RESPONSIVE BANNER MANAGEMENT HERO (WITH LEGACY PROMO FALLBACK) */}
+              <ResponsiveBannerRenderer
+                pageType="home"
+                placement="hero"
+                onNavigateRoute={(route) => {
+                  if (route.startsWith('/categories/')) {
+                    const cat = decodeURIComponent(route.replace('/categories/', ''));
+                    if (cat) setSelectedCategory(cat);
+                    setActiveTab('categories');
+                  } else if (route.startsWith('/products/')) {
+                    const slugOrId = decodeURIComponent(route.replace('/products/', ''));
+                    const hit = products.find(
+                      (p) => p.id === slugOrId || (p.urlSlug && p.urlSlug.toLowerCase() === slugOrId.toLowerCase())
+                    );
+                    if (hit) setSelectedProduct(hit);
+                    else setActiveTab('categories');
+                  } else if (route === '/products' || route === '/categories' || route === '/offers') {
+                    setActiveTab('categories');
+                  } else if (route === '/cart') {
+                    setActiveTab('cart');
+                  } else if (route === '/wishlist') {
+                    setActiveTab('wishlist');
+                  } else if (route === '/account' || route === '/referrals' || route === '/support') {
+                    setActiveTab('account');
+                  }
+                }}
+                fallback={
+                  <div className="relative overflow-hidden rounded-3xl h-44 md:h-52 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center p-6 md:p-10 shadow-md">
+                    <div className="max-w-md space-y-2 z-15 relative">
+                      <span className="bg-[#F97316] text-white text-[10px] uppercase font-bold py-1 px-3 rounded-full animate-bounce">
+                        EXCLUSIVE OFFER
+                      </span>
+                      <h3 className="text-xl md:text-2xl font-bold tracking-tight">{promoBanners[heroIndex].title}</h3>
+                      <p className="text-xs md:text-sm text-emerald-100">{promoBanners[heroIndex].subtitle}</p>
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="text-[10px] font-mono bg-white/20 px-2 py-0.5 rounded border border-white/10">Code: {promoBanners[heroIndex].tag}</span>
+                        <button 
+                          onClick={() => {
+                            setCouponInput(promoBanners[heroIndex].tag);
+                            setActiveTab('cart');
+                            addCustomAuditLog('PROMO_CODE_CLICKED', `Clicked on hero promo banner discount: ${promoBanners[heroIndex].tag}`);
+                          }} 
+                          className="text-xs font-bold text-lime-300 hover:underline"
+                        >
+                          Apply Now &rarr;
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Abstract graphic accents */}
+                    <div className="absolute right-4 bottom-4 md:right-10 opacity-20 transform translate-y-1/4 scale-150">
+                      <ShoppingBag className="w-44 h-44 text-white" />
+                    </div>
+
+                    {/* Banner Indicators */}
+                    <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 flex gap-1.5">
+                      {promoBanners.map((_, idx) => (
+                        <button 
+                          key={idx} 
+                          onClick={() => setHeroIndex(idx)}
+                          className={`w-2 h-2 rounded-full transition-all ${idx === heroIndex ? 'bg-white w-4' : 'bg-white/40'}`}
+                        ></button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-
-                {/* Abstract graphic accents */}
-                <div className="absolute right-4 bottom-4 md:right-10 opacity-20 transform translate-y-1/4 scale-150">
-                  <ShoppingBag className="w-44 h-44 text-white" />
-                </div>
-
-                {/* Banner Indicators */}
-                <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 flex gap-1.5">
-                  {promoBanners.map((_, idx) => (
-                    <button 
-                      key={idx} 
-                      onClick={() => setHeroIndex(idx)}
-                      className={`w-2 h-2 rounded-full transition-all ${idx === heroIndex ? 'bg-white w-4' : 'bg-white/40'}`}
-                    ></button>
-                  ))}
-                </div>
-              </div>
+                }
+              />
 
               {/* QUICK CATEGORIES (HORIZONTAL ROUNDED GRID) */}
               <div className="space-y-2">
@@ -1386,6 +1415,20 @@ export default function ShoppingPlatformView() {
 
               {/* Right products output */}
               <div className="md:col-span-3 space-y-4">
+                <ResponsiveBannerRenderer
+                  pageType="category"
+                  pageId={selectedCategory === 'All' ? null : selectedCategory}
+                  placement="hero"
+                  onNavigateRoute={(route) => {
+                    if (route.startsWith('/products/')) {
+                      const slugOrId = decodeURIComponent(route.replace('/products/', ''));
+                      const hit = products.find(
+                        (p) => p.id === slugOrId || (p.urlSlug && p.urlSlug.toLowerCase() === slugOrId.toLowerCase())
+                      );
+                      if (hit) setSelectedProduct(hit);
+                    }
+                  }}
+                />
                 <div className="flex flex-col gap-2 bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-400">
@@ -2377,6 +2420,15 @@ export default function ShoppingPlatformView() {
                 )}
               </div>
             )}
+
+            {/* Product-specific or generic product page banner (renders nothing if none active) */}
+            <div className="px-6 pt-2">
+              <ResponsiveBannerRenderer
+                pageType="product"
+                pageId={selectedProduct.id}
+                placement="hero"
+              />
+            </div>
 
             {/* Additional product details (product_details collection); renders nothing if absent */}
             <ProductDetailsDisplay productId={selectedProduct.id} />

@@ -98,7 +98,7 @@ export default function SecurityControlView() {
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-emerald-400" />
             <span className="text-xs font-bold text-white">
-              Verified Sidebar Main Menu Registry ({SECURITY_MODULES_CATALOG.length} / 21 Main Menu Modules)
+              Verified Sidebar Main Menu Registry ({SECURITY_MODULES_CATALOG.length} / {SECURITY_MODULES_CATALOG.length} Main Menu Modules)
             </span>
           </div>
           <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-800/50 px-2.5 py-0.5 rounded-full">

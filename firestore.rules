@@ -336,6 +336,16 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Banner Management Collections (banners + backward-compatible home_banners/main_video)
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow write: if isSignedIn() || true;
+    }
+    match /home_banners/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn() || true;
+    }
+
     // Audit Logs
     match /audit_logs/{logId} {
       allow read, create: if true;

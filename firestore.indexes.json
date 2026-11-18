@@ -58,6 +58,27 @@
         { "fieldPath": "platform", "order": "ASCENDING" },
         { "fieldPath": "remoteStatus", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "banners",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pageType", "order": "ASCENDING" },
+        { "fieldPath": "placement", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "sortOrder", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "banners",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pageType", "order": "ASCENDING" },
+        { "fieldPath": "pageId", "order": "ASCENDING" },
+        { "fieldPath": "placement", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "sortOrder", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

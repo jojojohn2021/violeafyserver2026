@@ -1501,6 +1501,162 @@ export interface AICommerceValidationRecord extends Partial<AICommerceValidation
   issues: AICommerceValidationIssue[];
 }
 
+// ============================================================================
+// LeafyServer | Banner Management Module Types
+// ============================================================================
+
+export type BannerPageType = 'home' | 'category' | 'product' | 'other';
+
+export type BannerSubmenuId = 'all' | 'home' | 'category' | 'product' | 'other';
+
+export type BannerPlacement =
+  | 'hero'
+  | 'secondary'
+  | 'strip'
+  | 'spotlight'
+  | 'footer_promo'
+  | string;
+
+export type BannerMediaType = 'video' | 'image';
+
+export type BannerAssetVariant = 'mobile' | 'desktop' | 'mobilePoster' | 'desktopPoster';
+
+export interface BannerAssetMetadata {
+  storagePath: string;
+  url: string;
+  mimeType: string;
+  fileName?: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  durationSec?: number;
+}
+
+export interface BannerCTA {
+  label: string;
+  route: string;
+}
+
+export interface BannerPlacementSpec {
+  desktopAspectRatio?: string;
+  mobileAspectRatio?: string;
+  maxVideoSizeMb?: number;
+  maxImageSizeMb?: number;
+}
+
+export interface BannerSlideItem {
+  id: string;
+  mediaType: BannerMediaType;
+  title?: string;
+  subtitle?: string;
+  sortOrder: number;
+  slideDurationSec?: number;
+  desktop: BannerAssetMetadata | null;
+  mobile: BannerAssetMetadata | null;
+  desktopPoster?: BannerAssetMetadata | null;
+  mobilePoster?: BannerAssetMetadata | null;
+  cta?: BannerCTA | null;
+}
+
+export interface BannerRecord {
+  id: string;
+  pageType: BannerPageType;
+  pageId: string | null;
+  placement: BannerPlacement;
+  title: string;
+  subtitle: string;
+  mediaType: BannerMediaType;
+  sortOrder: number;
+  isActive: boolean;
+  carouselEnabled?: boolean;
+  slideDurationSec?: number;
+  slides?: BannerSlideItem[];
+  mobile: BannerAssetMetadata | null;
+  desktop: BannerAssetMetadata | null;
+  mobilePoster: BannerAssetMetadata | null;
+  desktopPoster: BannerAssetMetadata | null;
+  cta: BannerCTA | null;
+  autoplay: boolean;
+  loop: boolean;
+  placementSpec?: BannerPlacementSpec | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  updatedBy: string;
+}
+
+export interface PublicBannerDeliveryItem {
+  id: string;
+  pageType: BannerPageType;
+  pageId: string | null;
+  placement: BannerPlacement;
+  title: string;
+  subtitle: string;
+  mediaType: BannerMediaType;
+  sortOrder: number;
+  carouselEnabled: boolean;
+  slideDurationSec: number;
+  slides?: BannerSlideItem[];
+  mobile: {
+    url: string;
+    mimeType: string;
+    width?: number;
+    height?: number;
+    durationSec?: number;
+  } | null;
+  desktop: {
+    url: string;
+    mimeType: string;
+    width?: number;
+    height?: number;
+    durationSec?: number;
+  } | null;
+  mobilePoster: {
+    url: string;
+    mimeType?: string;
+  } | null;
+  desktopPoster: {
+    url: string;
+    mimeType?: string;
+  } | null;
+  cta: BannerCTA | null;
+  playback: {
+    autoplay: boolean;
+    loop: boolean;
+    muted: true;
+    pauseOffScreen: true;
+    respectReducedMotion: true;
+    slideDurationSec: number;
+  };
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
+export interface LegacyHomeBannerMainVideo {
+  id: 'main_video';
+  bannerId: string | null;
+  title: string;
+  subtitle: string;
+  mediaType: BannerMediaType;
+  videoUrl: string;
+  mobileVideoUrl: string;
+  desktopVideoUrl: string;
+  posterUrl: string;
+  mobilePosterUrl: string;
+  desktopPosterUrl: string;
+  cta: BannerCTA | null;
+  isActive: boolean;
+  autoplay: boolean;
+  loop: boolean;
+  carouselEnabled?: boolean;
+  slideDurationSec?: number;
+  slides?: BannerSlideItem[];
+  updatedAt: string;
+}
+
+
 
 
 

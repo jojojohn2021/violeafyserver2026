@@ -37,9 +37,20 @@ service firebase.storage {
       allow write: if signedIn() && validImage();
     }
 
+    function validBannerMedia() {
+      return (request.resource.contentType.matches('image/(jpeg|png|webp|gif)') && request.resource.size <= 15 * 1024 * 1024)
+        || (request.resource.contentType.matches('video/mp4') && request.resource.size <= 50 * 1024 * 1024);
+    }
+
     match /banners/{bannerId}/{fileName} {
       allow read: if true;
-      allow write: if signedIn() && validImage();
+      allow write: if signedIn() && validBannerMedia();
+    }
+
+    match /banners/{pageType}/{pageIdOrGlobal}/{bannerId}/{variantFolder}/{fileName} {
+      allow read: if true;
+      allow create, update: if signedIn() && validBannerMedia();
+      allow delete: if signedIn();
     }
 
     match /attachments/{entityId}/{fileId} {

@@ -1,0 +1,22 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": [
+          "LEAFYEARTH.com.leafyearth.app"
+        ],
+        "components": [
+          {
+            "/": "/products/*",
+            "comment": "Matches canonical V9/V10 product URL slugs (/products/:slug)"
+          },
+          {
+            "/": "/p/*",
+            "comment": "Matches legacy short product links (/p/:productId)"
+          }
+        ]
+      }
+    ]
+  }
+}

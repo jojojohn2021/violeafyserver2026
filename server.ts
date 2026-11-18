@@ -203,6 +203,33 @@ async function saveCollectionDoc(collection: string, item: any): Promise<void> {
     item.shipid = `ship_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  if (collection === 'products' && adminDb) {
+    delete item.aiContentMetadata;
+    if (item.featuredproducts !== undefined) {
+      item.featuredproducts =
+        item.featuredproducts === true || String(item.featuredproducts).toLowerCase() === 'true';
+    }
+    if (item.featuredprdsortorder !== undefined && item.featuredprdsortorder !== null && item.featuredprdsortorder !== '') {
+      const n = Number(item.featuredprdsortorder);
+      item.featuredprdsortorder = Number.isFinite(n) ? n : 1;
+    }
+    if (item.featuredproducts === undefined || item.featuredprdsortorder === undefined) {
+      try {
+        const existingSnap = await adminDb.collection('products').doc(id).get();
+        const existingData = existingSnap.exists ? existingSnap.data() || {} : {};
+        if (item.featuredproducts === undefined && existingData.featuredproducts === undefined) {
+          item.featuredproducts = false;
+        }
+        if (item.featuredprdsortorder === undefined && existingData.featuredprdsortorder === undefined) {
+          item.featuredprdsortorder = 1;
+        }
+      } catch {
+        if (item.featuredproducts === undefined) item.featuredproducts = false;
+        if (item.featuredprdsortorder === undefined) item.featuredprdsortorder = 1;
+      }
+    }
+  }
+
   if (adminDb) {
     try {
       const payload = sanitizeFirestorePayload({ ...item });
@@ -640,6 +667,15 @@ app.post('/api/products', requireAuthenticatedRequest, upload.single('image'), a
 
     const payload: any = { ...body, id: productId, sku: assignedSku };
     payload.preorderactive = body.preorderactive === true || String(body.preorderactive).toLowerCase() === 'true';
+    payload.featuredproducts = body.featuredproducts === true || String(body.featuredproducts).toLowerCase() === 'true';
+    const parsedFeaturedSort = Number(body.featuredprdsortorder);
+    payload.featuredprdsortorder =
+      body.featuredprdsortorder !== undefined &&
+      body.featuredprdsortorder !== null &&
+      String(body.featuredprdsortorder).trim() !== '' &&
+      Number.isFinite(parsedFeaturedSort)
+        ? parsedFeaturedSort
+        : 1;
     payload.isAyurvedicProduct = body.isAyurvedicProduct === true || String(body.isAyurvedicProduct).toLowerCase() === 'true';
     for (const key of ['uniqueSpec1', 'uniqueSpec2', 'uniqueSpec3', 'uniqueSpec4']) {
       payload[key] = body[key] !== undefined && body[key] !== null ? String(body[key]).trim() : '';

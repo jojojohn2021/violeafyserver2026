@@ -253,6 +253,139 @@ export default function ShoppingPlatformView() {
       cancelled = true;
     };
   }, [products]);
+
+  // V9/V10 Web SEO Head & JSON-LD Structured Data Synchronization
+  useEffect(() => {
+    if (typeof document === 'undefined' || !selectedProduct) return;
+    const prevTitle = document.title;
+    const seoTitle = String(
+      selectedProduct.seoTitle || selectedProduct.title || `${selectedProduct.name} | LeafyEarth`
+    ).trim();
+    const metaDesc = String(
+      selectedProduct.metaDescription ||
+        selectedProduct.description ||
+        selectedProduct.notes ||
+        `Buy ${selectedProduct.name} online from LeafyEarth.`
+    )
+      .slice(0, 320)
+      .trim();
+    const keywords = Array.isArray(selectedProduct.seoKeywords)
+      ? selectedProduct.seoKeywords.join(', ')
+      : '';
+    const slug = String(selectedProduct.urlSlug || selectedProduct.id || '').trim();
+    const origin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://vionaturescience.in';
+    const canonicalHref = `${origin}/products/${encodeURIComponent(slug)}`;
+    const imageUrl = String(selectedProduct.imageUrl || '').trim();
+
+    document.title = seoTitle;
+
+    const upsertMeta = (attr: 'name' | 'property', key: string, content: string) => {
+      if (!content) return;
+      let el = document.head.querySelector(`meta[${attr}="${key}"]`) as HTMLMetaElement | null;
+      if (!el) {
+        el = document.createElement('meta');
+        el.setAttribute(attr, key);
+        document.head.appendChild(el);
+      }
+      el.setAttribute('content', content);
+    };
+
+    upsertMeta('name', 'description', metaDesc);
+    if (keywords) upsertMeta('name', 'keywords', keywords);
+    upsertMeta('property', 'og:type', 'product');
+    upsertMeta('property', 'og:title', seoTitle);
+    upsertMeta('property', 'og:description', metaDesc);
+    upsertMeta('property', 'og:url', canonicalHref);
+    if (imageUrl) upsertMeta('property', 'og:image', imageUrl);
+    upsertMeta('name', 'twitter:card', 'summary_large_image');
+    upsertMeta('name', 'twitter:title', seoTitle);
+    upsertMeta('name', 'twitter:description', metaDesc);
+    if (imageUrl) upsertMeta('name', 'twitter:image', imageUrl);
+
+    let canonicalEl = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!canonicalEl) {
+      canonicalEl = document.createElement('link');
+      canonicalEl.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonicalEl);
+    }
+    canonicalEl.setAttribute('href', canonicalHref);
+
+    const price = getProductPrice(selectedProduct);
+    const inStock =
+      (selectedProduct.stock ?? 0) > 0 &&
+      selectedProduct.stockAvailability !== 'Out of Stock';
+    const graph: any[] = [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'Product',
+        name: selectedProduct.title || selectedProduct.name,
+        description: metaDesc,
+        sku: selectedProduct.sku || selectedProduct.id,
+        image: imageUrl ? [imageUrl] : [],
+        brand: {
+          '@type': 'Brand',
+          name: selectedProduct.brand || 'LeafyEarth',
+        },
+        offers: {
+          '@type': 'Offer',
+          url: canonicalHref,
+          priceCurrency: 'INR',
+          price: Number(price || 0).toFixed(2),
+          availability: inStock
+            ? 'https://schema.org/InStock'
+            : 'https://schema.org/OutOfStock',
+          itemCondition: 'https://schema.org/NewCondition',
+        },
+      },
+      {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: origin },
+          {
+            '@type': 'ListItem',
+            position: 2,
+            name: selectedProduct.category || 'Products',
+            item: `${origin}/products`,
+          },
+          {
+            '@type': 'ListItem',
+            position: 3,
+            name: selectedProduct.name,
+            item: canonicalHref,
+          },
+        ],
+      },
+    ];
+
+    if (Array.isArray(selectedProduct.productFAQs) && selectedProduct.productFAQs.length > 0) {
+      graph.push({
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: selectedProduct.productFAQs.map((f: any) => ({
+          '@type': 'Question',
+          name: f.question,
+          acceptedAnswer: { '@type': 'Answer', text: f.answer },
+        })),
+      });
+    }
+
+    let scriptEl = document.getElementById('leafyearth-product-jsonld') as HTMLScriptElement | null;
+    if (!scriptEl) {
+      scriptEl = document.createElement('script');
+      scriptEl.id = 'leafyearth-product-jsonld';
+      scriptEl.type = 'application/ld+json';
+      document.head.appendChild(scriptEl);
+    }
+    scriptEl.textContent = JSON.stringify(graph);
+
+    return () => {
+      document.title = prevTitle;
+    };
+  }, [selectedProduct]);
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'address' | 'payment' | 'review' | 'confirmed'>('cart');
   const [trackingOrder, setTrackingOrder] = useState<SalesOrder | null>(null);
   

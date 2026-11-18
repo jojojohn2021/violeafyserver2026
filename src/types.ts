@@ -123,6 +123,8 @@ export interface ProductPerformance {
   stockIn?: number;
   stockOut?: number;
   preorderactive?: boolean;
+  featuredproducts?: boolean;
+  featuredprdsortorder?: number;
   vamjoWeblink?: string;
   amazonWeblink?: string;
   flipkartWeblink?: string;
@@ -258,6 +260,8 @@ export interface ProductPerformance {
     validUntil?: string;
   }>;
   fssaiLicenseNumber?: string | null;
+  aiContentLink?: string;
+  aiDraftId?: string;
   aiContentMetadata?: Record<string, AIContentProvenanceEntry>;
   aiCommerceEnabled?: boolean;
   aiCommerceUpdatedAt?: string | null;
@@ -957,6 +961,7 @@ export interface AIProductContentPayload {
   nutritional_benefits: string[];
   safety_precautions: string[];
   ayurveda_applicability: AIAyurvedaApplicability;
+  is_ayurvedic_product?: boolean;
   ayurveda: AIAyurvedaContent | null;
   references: AIContentReference[];
   review_flags: string[];
@@ -1099,6 +1104,7 @@ export interface AIProductDraft {
   master_product_sku?: string | null;
   category_hint?: string | null;
   brand_hint?: string | null;
+  is_ayurvedic_product?: boolean;
   status: AIProductDraftStatus;
   current_version_id: string;
   approved_version_id: string | null;

@@ -116,6 +116,8 @@ export default function PerformanceTrackingView() {
   const [editStockIn, setEditStockIn] = useState<number>(0);
   const [editStockOut, setEditStockOut] = useState<number>(0);
   const [editPreorderActive, setEditPreorderActive] = useState<boolean>(false);
+  const [editFeaturedProducts, setEditFeaturedProducts] = useState<boolean>(false);
+  const [editFeaturedPrdSortOrder, setEditFeaturedPrdSortOrder] = useState<number>(1);
   const [editVamjoWeblink, setEditVamjoWeblink] = useState<string>('');
   const [editAmazonWeblink, setEditAmazonWeblink] = useState<string>('');
   const [editFlipkartWeblink, setEditFlipkartWeblink] = useState<string>('');
@@ -214,6 +216,8 @@ export default function PerformanceTrackingView() {
   const [prodStockIn, setProdStockIn] = useState<number>(0);
   const [prodStockOut, setProdStockOut] = useState<number>(0);
   const [prodPreorderActive, setProdPreorderActive] = useState<boolean>(false);
+  const [prodFeaturedProducts, setProdFeaturedProducts] = useState<boolean>(false);
+  const [prodFeaturedPrdSortOrder, setProdFeaturedPrdSortOrder] = useState<number>(1);
   const [prodVamjoWeblink, setProdVamjoWeblink] = useState('');
   const [prodAmazonWeblink, setProdAmazonWeblink] = useState('');
   const [prodFlipkartWeblink, setProdFlipkartWeblink] = useState('');
@@ -1085,6 +1089,8 @@ export default function PerformanceTrackingView() {
       stockIn: editStockIn,
       stockOut: editStockOut,
       preorderactive: editPreorderActive,
+      featuredproducts: editFeaturedProducts,
+      featuredprdsortorder: editFeaturedPrdSortOrder,
       stock: Math.max(0, editStockIn - editStockOut),
       vamjoWeblink: editVamjoWeblink,
       amazonWeblink: editAmazonWeblink,
@@ -1143,6 +1149,8 @@ export default function PerformanceTrackingView() {
     setEditStockIn(p.stockIn ?? p.stock ?? 0);
     setEditStockOut(p.stockOut ?? getProductVolume(p) ?? 0);
     setEditPreorderActive(p.preorderactive === true);
+    setEditFeaturedProducts(p.featuredproducts === true);
+    setEditFeaturedPrdSortOrder(p.featuredprdsortorder ?? 1);
     setEditVamjoWeblink(p.vamjoWeblink || '');
     setEditAmazonWeblink(p.amazonWeblink || '');
     setEditFlipkartWeblink(p.flipkartWeblink || '');
@@ -1248,6 +1256,8 @@ export default function PerformanceTrackingView() {
       fd.append('stockIn', String(prodStockIn));
       fd.append('stockOut', String(prodStockOut));
       fd.append('preorderactive', String(prodPreorderActive));
+      fd.append('featuredproducts', String(prodFeaturedProducts));
+      fd.append('featuredprdsortorder', String(prodFeaturedPrdSortOrder));
       fd.append('vamjoWeblink', prodVamjoWeblink);
       fd.append('amazonWeblink', prodAmazonWeblink);
       fd.append('flipkartWeblink', prodFlipkartWeblink);
@@ -1306,6 +1316,8 @@ export default function PerformanceTrackingView() {
             stockIn: prodStockIn,
             stockOut: prodStockOut,
             preorderactive: prodPreorderActive,
+            featuredproducts: prodFeaturedProducts,
+            featuredprdsortorder: prodFeaturedPrdSortOrder,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
@@ -1361,6 +1373,8 @@ export default function PerformanceTrackingView() {
             stockIn: prodStockIn,
             stockOut: prodStockOut,
             preorderactive: prodPreorderActive,
+            featuredproducts: prodFeaturedProducts,
+            featuredprdsortorder: prodFeaturedPrdSortOrder,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
@@ -1414,6 +1428,8 @@ export default function PerformanceTrackingView() {
             stockIn: prodStockIn,
             stockOut: prodStockOut,
             preorderactive: prodPreorderActive,
+            featuredproducts: prodFeaturedProducts,
+            featuredprdsortorder: prodFeaturedPrdSortOrder,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
@@ -1466,6 +1482,8 @@ export default function PerformanceTrackingView() {
         stockIn: prodStockIn,
         stockOut: prodStockOut,
             preorderactive: prodPreorderActive,
+            featuredproducts: prodFeaturedProducts,
+            featuredprdsortorder: prodFeaturedPrdSortOrder,
         amazonSales: Math.round(prodOnlinePrice * 40),
         flipkartSales: Math.round(prodOnlinePrice * 30),
         meeshoSales: Math.round(prodOnlinePrice * 20),
@@ -1550,6 +1568,8 @@ export default function PerformanceTrackingView() {
     setProdStockIn(0);
     setProdStockOut(0);
     setProdPreorderActive(false);
+    setProdFeaturedProducts(false);
+    setProdFeaturedPrdSortOrder(1);
     setProdVamjoWeblink('');
     setProdAmazonWeblink('');
     setProdFlipkartWeblink('');
@@ -2783,6 +2803,28 @@ export default function PerformanceTrackingView() {
                     />
                     <span className="font-semibold text-slate-205">{prodPreorderActive ? 'Yes (Pre-order enabled)' : 'No'}</span>
                   </label>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">Featured Product (featuredproducts):</label>
+                  <label className="flex items-center gap-2.5 w-full text-xs p-2.5 bg-[#141418] border border-slate-800 rounded-lg cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={prodFeaturedProducts}
+                      onChange={e => setProdFeaturedProducts(e.target.checked)}
+                      className="w-4 h-4 accent-emerald-500 cursor-pointer"
+                    />
+                    <span className="font-semibold text-slate-205">{prodFeaturedProducts ? 'Yes (Featured)' : 'No'}</span>
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">Featured Sort Order (featuredprdsortorder):</label>
+                  <input
+                    type="number"
+                    value={prodFeaturedPrdSortOrder}
+                    onChange={e => setProdFeaturedPrdSortOrder(Number.isFinite(parseInt(e.target.value, 10)) ? parseInt(e.target.value, 10) : 1)}
+                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-505"
+                    placeholder="1"
+                  />
                 </div>
 
                 <div className="sm:col-span-2 md:col-span-3">
@@ -4377,6 +4419,30 @@ export default function PerformanceTrackingView() {
                           />
                           <span className="font-semibold text-slate-205">{editPreorderActive ? 'Yes (Pre-order enabled)' : 'No'}</span>
                         </label>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider font-mono">Featured Product (featuredproducts):</label>
+                        <label className="flex items-center gap-2.5 w-full text-xs p-2.5 bg-[#141418] border border-slate-800 rounded-lg cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={editFeaturedProducts}
+                            onChange={e => setEditFeaturedProducts(e.target.checked)}
+                            className="w-4 h-4 accent-emerald-500 cursor-pointer"
+                          />
+                          <span className="font-semibold text-slate-205">{editFeaturedProducts ? 'Yes (Featured)' : 'No'}</span>
+                        </label>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider font-mono">Featured Sort Order (featuredprdsortorder):</label>
+                        <input
+                          type="number"
+                          value={editFeaturedPrdSortOrder}
+                          onChange={e => setEditFeaturedPrdSortOrder(Number.isFinite(parseInt(e.target.value, 10)) ? parseInt(e.target.value, 10) : 1)}
+                          className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          placeholder="1"
+                        />
                       </div>
                     </div>
 

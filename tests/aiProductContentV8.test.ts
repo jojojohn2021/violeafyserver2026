@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   assertNoSeoFields,
+  buildAIContentReferenceLink,
   buildFirebaseStorageDownloadUrl,
   buildMasterComparisonDiff,
   buildSelectedMasterUpdatePayload,
@@ -451,6 +452,12 @@ test('Product Master Updation: AI category maps to leafycategory, auto-links by 
       uniqueSpec1: 'Sun-dried whole spikes',
       uniqueSpec2: 'Rich in piperine',
       uniqueSpec3: 'Hygienically packed',
+      aiContentLink: buildAIContentReferenceLink(
+        'aidraft_1794667880146_8fjlx',
+        'aiver_1794667880146_5nkxj',
+        'https://violeafybasket.web.app'
+      ),
+      aiDraftId: 'aidraft_1794667880146_8fjlx',
     },
   });
 
@@ -463,9 +470,24 @@ test('Product Master Updation: AI category maps to leafycategory, auto-links by 
   assert.equal(finalPatch.shopPrice, 190);
   assert.equal(finalPatch.stockIn, 50);
   assert.equal(finalPatch.uniqueSpec1, 'Sun-dried whole spikes');
+  assert.equal(finalPatch.featuredproducts, false, 'Default featuredproducts must be false');
+  assert.equal(finalPatch.featuredprdsortorder, 1, 'Default featuredprdsortorder must be 1');
+  assert.equal(
+    finalPatch.aiContentLink,
+    'https://violeafybasket.web.app/api/admin/ai-products/aidraft_1794667880146_8fjlx?version=aiver_1794667880146_5nkxj'
+  );
+  assert.equal(finalPatch.aiDraftId, 'aidraft_1794667880146_8fjlx');
+  assert.equal('aiContentMetadata' in finalPatch, false, 'aiContentMetadata must not be in products');
+  assert.equal(
+    'aiContentMetadata' in mergedMasterProduct,
+    false,
+    'aiContentMetadata must not be in mergedMasterProduct'
+  );
   // Existing `products` table metrics (`unitsSold`, `revenue`) must be preserved
   assert.equal(mergedMasterProduct.unitsSold, 42);
   assert.equal(mergedMasterProduct.revenue, 8400);
+  assert.equal(mergedMasterProduct.featuredproducts, false);
+  assert.equal(mergedMasterProduct.featuredprdsortorder, 1);
 });
 
 test('Firebase Storage Export: AI product images export to https://firebasestorage.googleapis.com/v0/b/...', async () => {
@@ -513,4 +535,78 @@ test('Firebase Storage Export: AI product images export to https://firebasestora
   assert.equal(exported.storagePath, 'products/prod_kadukka/main.jpg');
   assert.equal(savedMetadata?.contentType, 'image/jpeg');
   assert.ok(savedMetadata?.metadata?.firebaseStorageDownloadTokens);
+});
+
+test('Ayurvedic Product Option (Yes vs No): Excludes 6-Language Names & Section 4 Ayurveda when No, includes when Yes', () => {
+  const nonAyurvedic = buildStructuredFallbackContent(
+    'Banana Chips (Roasted to perfection in coconut oil)',
+    { categoryHint: 'Kerala Roasted Delights', brandHint: 'Bhadram', isAyurvedicProduct: false }
+  );
+  assert.equal(nonAyurvedic.is_ayurvedic_product, false);
+  assert.equal(nonAyurvedic.ayurveda_applicability, 'not_applicable');
+  assert.equal(nonAyurvedic.ayurveda, null);
+  assert.equal(nonAyurvedic.translations.ml.name, '');
+  assert.equal(nonAyurvedic.translations.hi.name, '');
+  assert.ok(nonAyurvedic.seo?.seoTitle, 'Other features (SEO, commerce, health) must still be generated');
+  assert.ok(nonAyurvedic.commerce?.productHighlights.length);
+
+  const nonAyurvedicValidation = validateAIProductContentPayload(nonAyurvedic);
+  assert.equal(
+    nonAyurvedicValidation.valid,
+    true,
+    `Non-Ayurvedic payload must pass validation: ${nonAyurvedicValidation.errors.join('; ')}`
+  );
+
+  const nonAyurvedicDiff = buildMasterComparisonDiff({
+    masterProduct: null,
+    version: {
+      id: 'v1',
+      draft_id: 'd1',
+      version_no: 1,
+      generated_payload: nonAyurvedic,
+      edited_payload: nonAyurvedic,
+      model: 'gpt-4o-mini',
+      prompt_version: 'v8',
+      usage_metadata: {
+        provider: 'openai',
+        project_name: 'leafyearthprdcnt',
+        model: 'gpt-4o-mini',
+        prompt_version: 'v8',
+        input_tokens: 100,
+        output_tokens: 100,
+        total_tokens: 200,
+        estimated_cost_usd: 0,
+        latency_ms: 10,
+        live_api_used: false,
+      },
+      generated_at: new Date().toISOString(),
+      edited_by: null,
+      edited_at: null,
+      approved_by: null,
+      approved_at: null,
+    },
+    approvedImage: null,
+    approvedResearch: null,
+  });
+
+  assert.equal(
+    nonAyurvedicDiff.some((i) => i.group === 'translations'),
+    false,
+    '6-language translations must be excluded from comparison diff when Ayurvedic Product = No'
+  );
+  assert.equal(
+    nonAyurvedicDiff.some((i) => i.group === 'ayurveda'),
+    false,
+    'Ayurvedic fields must be excluded from comparison diff when Ayurvedic Product = No'
+  );
+  assert.equal(
+    nonAyurvedicDiff.some((i) => i.group === 'general'),
+    true,
+    'General e-commerce fields must still be included'
+  );
+  assert.equal(
+    nonAyurvedicDiff.some((i) => i.group === 'seo'),
+    true,
+    'SEO fields must still be included'
+  );
 });

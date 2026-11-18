@@ -1,5 +1,5 @@
 import type express from 'express';
-import type { Firestore } from 'firebase-admin/firestore';
+import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
 import crypto from 'crypto';
 import type {
@@ -843,7 +843,9 @@ export function buildPublicProductOfferProjection(
     : [];
 
   const hasAiMetadata = Boolean(
-    product.aiContentMetadata && Object.keys(product.aiContentMetadata).length > 0
+    product.aiContentLink ||
+      product.aiDraftId ||
+      (product.aiContentMetadata && Object.keys(product.aiContentMetadata).length > 0)
   );
 
   // Only include genuine published ratings when reviewsCount > 0
@@ -1781,13 +1783,10 @@ export async function applyApprovedSEOAndReserveSlugTransaction(
       }
     }
 
-    // 2. Build selected SEO update patch & provenance
+    // 2. Build selected SEO update patch & reference link
     const beforeSnapshot: Record<string, any> = {};
     const afterSnapshot: Record<string, any> = {};
     const updatePatch: Record<string, any> = {};
-    const existingAiMeta: Record<string, AIContentProvenanceEntry> = {
-      ...(existingProduct.aiContentMetadata || {}),
-    };
 
     for (const key of ['seoTitle', 'metaDescription', 'seoKeywords', 'urlSlug'] as const) {
       if (!selectedSet.has(key)) continue;
@@ -1796,15 +1795,6 @@ export async function applyApprovedSEOAndReserveSlugTransaction(
       beforeSnapshot[key] = existingProduct[key] ?? null;
       updatePatch[key] = val;
       afterSnapshot[key] = val;
-      existingAiMeta[key] = {
-        source: params.draftId ? 'ai' : 'manual',
-        draftId: params.draftId || null,
-        versionId: params.versionId || null,
-        model: 'gpt-4o-mini',
-        promptVersion: V10_SCHEMA_VERSION,
-        approvedBy: actor.uid,
-        approvedAt: now,
-      };
     }
 
     if (Object.keys(updatePatch).length === 0) {
@@ -1816,8 +1806,14 @@ export async function applyApprovedSEOAndReserveSlugTransaction(
     if (finalSlug) {
       updatePatch.canonicalUrl = `${getDefaultVerifiedDomain()}/products/${finalSlug}`;
     }
+    if (params.draftId) {
+      updatePatch.aiDraftId = params.draftId;
+      updatePatch.aiContentLink = params.versionId
+        ? `${getDefaultVerifiedDomain()}/api/admin/ai-products/${encodeURIComponent(params.draftId)}?version=${encodeURIComponent(params.versionId)}`
+        : `${getDefaultVerifiedDomain()}/api/admin/ai-products/${encodeURIComponent(params.draftId)}`;
+    }
     updatePatch.seoUpdatedAt = now;
-    updatePatch.aiContentMetadata = existingAiMeta;
+    updatePatch.aiContentMetadata = FieldValue.delete();
     updatePatch.revision = nextRevision;
 
     // 3. Reserve new slug and convert previous slug into a redirect alias if changed
@@ -2892,9 +2888,6 @@ export function registerAICommerceAndDiscoveryRoutes(
         const beforeSnapshot: Record<string, any> = {};
         const afterSnapshot: Record<string, any> = {};
         const updatePatch: Record<string, any> = {};
-        const aiMeta: Record<string, AIContentProvenanceEntry> = {
-          ...(existingProd.aiContentMetadata || {}),
-        };
 
         for (const [k, v] of Object.entries(candidateMap)) {
           if (!selectedSet.has(k)) continue;
@@ -2902,15 +2895,6 @@ export function registerAICommerceAndDiscoveryRoutes(
           beforeSnapshot[k] = existingProd[k] ?? null;
           updatePatch[k] = v;
           afterSnapshot[k] = v;
-          aiMeta[k] = {
-            source: 'ai',
-            draftId: draft.id,
-            versionId: String(draft.version),
-            model: draft.provenance.model,
-            promptVersion: draft.provenance.promptVersion,
-            approvedBy: actor.uid,
-            approvedAt: now,
-          };
         }
 
         if (aiCommerceEnabled !== undefined) {
@@ -2920,7 +2904,9 @@ export function registerAICommerceAndDiscoveryRoutes(
         }
 
         const nextRev = currentRev + 1;
-        updatePatch.aiContentMetadata = aiMeta;
+        updatePatch.aiDraftId = draft.aiDraftId || draft.id;
+        updatePatch.aiContentLink = `${getDefaultVerifiedDomain()}/api/admin/ai-products/${encodeURIComponent(draft.aiDraftId || draft.id)}?version=${encodeURIComponent(String(draft.version))}`;
+        updatePatch.aiContentMetadata = FieldValue.delete();
         updatePatch.aiCommerceUpdatedAt = now;
         updatePatch.revision = nextRev;
 

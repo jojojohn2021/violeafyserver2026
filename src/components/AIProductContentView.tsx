@@ -262,6 +262,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
 
   // 1. Generate form state
   const [genProductName, setGenProductName] = useState<string>('');
+  const [genIsAyurvedicProduct, setGenIsAyurvedicProduct] = useState<boolean>(false);
   const [genMasterProductId, setGenMasterProductId] = useState<string>('');
   const [genCategoryHint, setGenCategoryHint] = useState<string>('');
   const [genBrandHint, setGenBrandHint] = useState<string>('');
@@ -325,6 +326,8 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     uniqueSpec1: string;
     uniqueSpec2: string;
     uniqueSpec3: string;
+    aiContentLink: string;
+    aiDraftId: string;
   }>({
     name: '',
     sku: '10000001',
@@ -344,6 +347,8 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     uniqueSpec1: '',
     uniqueSpec2: '',
     uniqueSpec3: '',
+    aiContentLink: '',
+    aiDraftId: '',
   });
 
   // 9. Config status
@@ -512,6 +517,18 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
         uniqueSpec1: matchedMaster?.uniqueSpec1 || payload?.key_features?.[0] || '',
         uniqueSpec2: matchedMaster?.uniqueSpec2 || payload?.key_features?.[1] || '',
         uniqueSpec3: matchedMaster?.uniqueSpec3 || payload?.key_features?.[2] || '',
+        aiContentLink: (() => {
+          const verId = draft.approved_version_id || draft.current_version_id || '';
+          const baseOrigin =
+            typeof window !== 'undefined' && window.location?.origin
+              ? window.location.origin
+              : 'https://leafyearth.com';
+          return (
+            matchedMaster?.aiContentLink ||
+            `${baseOrigin}/api/admin/ai-products/${encodeURIComponent(draft.id)}${verId ? `?version=${encodeURIComponent(verId)}` : ''}`
+          );
+        })(),
+        aiDraftId: draft.id || matchedMaster?.aiDraftId || '',
       });
 
       if (resolvedImgUrl && !isFirebaseStorageUrlClient(resolvedImgUrl)) {
@@ -731,6 +748,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
         productId: genMasterProductId || null,
         categoryHint: genCategoryHint.trim() || undefined,
         brandHint: genBrandHint.trim() || undefined,
+        isAyurvedicProduct: genIsAyurvedicProduct,
         actor,
       });
       await loadDraftsList();
@@ -1062,7 +1080,14 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
       uniqueSpec1: masterUpdationForm.uniqueSpec1,
       uniqueSpec2: masterUpdationForm.uniqueSpec2,
       uniqueSpec3: masterUpdationForm.uniqueSpec3,
+      featuredproducts:
+        (products.find((p) => p.id === syncTargetMasterId) as any)?.featuredproducts ?? false,
+      featuredprdsortorder:
+        (products.find((p) => p.id === syncTargetMasterId) as any)?.featuredprdsortorder ?? 1,
+      aiContentLink: masterUpdationForm.aiContentLink,
+      aiDraftId: masterUpdationForm.aiDraftId || selectedDraftId || '',
     };
+    delete currentPreviewRecord.aiContentMetadata;
     comparisonItems.forEach((item) => {
       if (selectedSyncFields.has(item.fieldKey) && item.selectable) {
         if (item.masterField === 'imageUrl' && isFirebaseStorageUrlClient(exportedImageUrl)) {
@@ -1073,12 +1098,16 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
       }
     });
 
-    const exportList: Array<Record<string, any>> = products.map((p) =>
+    const rawExportList: Array<Record<string, any>> = products.map((p) =>
       p.id === syncTargetMasterId ? { ...p, ...currentPreviewRecord } : { ...p }
     );
     if (!syncTargetMasterId && masterUpdationForm.name) {
-      exportList.unshift(currentPreviewRecord);
+      rawExportList.unshift(currentPreviewRecord);
     }
+    const exportList: Array<Record<string, any>> = rawExportList.map((row) => {
+      const { aiContentMetadata: _omitAiMetadata, ...cleanRow } = row || {};
+      return cleanRow;
+    });
 
     if (format === 'json') {
       const blob = new Blob([JSON.stringify(exportList, null, 2)], {
@@ -1158,6 +1187,10 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
       'whatsappSales',
       'countersaleSales',
       'preorderactive',
+      'featuredproducts',
+      'featuredprdsortorder',
+      'aiContentLink',
+      'aiDraftId',
       'vamjoWeblink',
       'amazonWeblink',
       'flipkartWeblink',
@@ -1166,7 +1199,11 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     ];
     const dynamicKeys = new Set<string>(standardColumns);
     exportList.forEach((row) => {
-      Object.keys(row || {}).forEach((k) => dynamicKeys.add(k));
+      Object.keys(row || {}).forEach((k) => {
+        if (k !== 'aiContentMetadata') {
+          dynamicKeys.add(k);
+        }
+      });
     });
     const headers = Array.from(dynamicKeys);
     const escapeCsv = (val: any) => {
@@ -1728,6 +1765,51 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Ayurvedic Product <span className="text-rose-500">*</span>
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                      genIsAyurvedicProduct
+                        ? 'border-[#2E7D32] bg-emerald-50 text-[#2E7D32] shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="genIsAyurvedicProduct"
+                      checked={genIsAyurvedicProduct === true}
+                      onChange={() => setGenIsAyurvedicProduct(true)}
+                      className="accent-[#2E7D32]"
+                    />
+                    Yes
+                  </label>
+                  <label
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                      !genIsAyurvedicProduct
+                        ? 'border-[#2E7D32] bg-emerald-50 text-[#2E7D32] shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="genIsAyurvedicProduct"
+                      checked={genIsAyurvedicProduct === false}
+                      onChange={() => setGenIsAyurvedicProduct(false)}
+                      className="accent-[#2E7D32]"
+                    />
+                    No
+                  </label>
+                  <span className="text-[11px] text-slate-500">
+                    {genIsAyurvedicProduct
+                      ? 'Includes 6-Language Product Names, Ayurveda Applicability: applicable & 4. Conditional Ayurvedic Medicinal Content (Sections 16 & 18.2).'
+                      : 'Excludes 6-Language Product Names, Ayurveda Applicability: applicable & 4. Conditional Ayurvedic Medicinal Content; generates all other features.'}
+                  </span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1743,6 +1825,9 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                         if (!genProductName.trim()) setGenProductName(found.name);
                         if (found.category) setGenCategoryHint(found.category);
                         if (found.brand) setGenBrandHint(found.brand);
+                        if (found.isAyurvedicProduct !== undefined) {
+                          setGenIsAyurvedicProduct(Boolean(found.isAyurvedicProduct));
+                        }
                       }
                     }}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold bg-white"
@@ -1797,7 +1882,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                   ) : (
                     <>
                       <Sparkles className="w-4 h-4" />
-                      Generate Structured Draft (V8)
+                      Generate Structured Draft (V8 / V9 / V10)
                     </>
                   )}
                 </button>
@@ -1809,7 +1894,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
           <div className="bg-slate-900 text-white rounded-3xl p-6 space-y-4">
             <div className="flex items-center gap-2 text-emerald-400 text-xs font-black uppercase tracking-widest">
               <ShieldCheck className="w-4 h-4" />
-              V8 Isolation & Safety Guarantees
+              V8–V10 Isolation &amp; Safety Guarantees
             </div>
             <ul className="space-y-2.5 text-xs text-slate-300 leading-relaxed">
               <li className="flex items-start gap-2">
@@ -1829,8 +1914,10 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong>No SEO Clutter:</strong> Strictly excludes SEO title, meta description, SEO
-                  keywords, and URL slug per Section 4.
+                  <strong>SEO &amp; Cross-Platform Deep Links (Flutter Android, Web &amp; iOS):</strong>{' '}
+                  Generates <code>seoTitle</code>, <code>metaDescription</code>,{' '}
+                  <code>seoKeywords</code> (5–12), and globally unique <code>urlSlug</code> (
+                  <code>/products/:slug</code>) with Android App Links &amp; iOS Universal Links.
                 </span>
               </li>
               <li className="flex items-start gap-2">
@@ -2194,37 +2281,40 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="bg-white p-3 rounded-xl border border-slate-200">
-                        <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
-                          6-Language Product Names
-                        </div>
-                        <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-                          <div>
-                            <span className="text-slate-400">EN:</span>{' '}
-                            {originalGeneratedPayload.translations.en.name}
+                      {originalGeneratedPayload.is_ayurvedic_product !== false &&
+                        originalGeneratedPayload.ayurveda_applicability === 'applicable' && (
+                          <div className="bg-white p-3 rounded-xl border border-slate-200">
+                            <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
+                              6-Language Product Names
+                            </div>
+                            <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                              <div>
+                                <span className="text-slate-400">EN:</span>{' '}
+                                {originalGeneratedPayload.translations.en.name}
+                              </div>
+                              <div>
+                                <span className="text-slate-400">ML:</span>{' '}
+                                {originalGeneratedPayload.translations.ml.name}
+                              </div>
+                              <div>
+                                <span className="text-slate-400">HI:</span>{' '}
+                                {originalGeneratedPayload.translations.hi.name}
+                              </div>
+                              <div>
+                                <span className="text-slate-400">TA:</span>{' '}
+                                {originalGeneratedPayload.translations.ta.name}
+                              </div>
+                              <div>
+                                <span className="text-slate-400">KN:</span>{' '}
+                                {originalGeneratedPayload.translations.kn.name}
+                              </div>
+                              <div>
+                                <span className="text-slate-400">TE:</span>{' '}
+                                {originalGeneratedPayload.translations.te.name}
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <span className="text-slate-400">ML:</span>{' '}
-                            {originalGeneratedPayload.translations.ml.name}
-                          </div>
-                          <div>
-                            <span className="text-slate-400">HI:</span>{' '}
-                            {originalGeneratedPayload.translations.hi.name}
-                          </div>
-                          <div>
-                            <span className="text-slate-400">TA:</span>{' '}
-                            {originalGeneratedPayload.translations.ta.name}
-                          </div>
-                          <div>
-                            <span className="text-slate-400">KN:</span>{' '}
-                            {originalGeneratedPayload.translations.kn.name}
-                          </div>
-                          <div>
-                            <span className="text-slate-400">TE:</span>{' '}
-                            {originalGeneratedPayload.translations.te.name}
-                          </div>
-                        </div>
-                      </div>
+                        )}
 
                       <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-1.5">
                         <div className="text-[10px] font-bold text-slate-400 uppercase">
@@ -2244,22 +2334,26 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                         </p>
                       </div>
 
-                      <div className="bg-white p-3 rounded-xl border border-slate-200">
-                        <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
-                          Ayurveda Applicability: {originalGeneratedPayload.ayurveda_applicability}
-                        </div>
-                        {originalGeneratedPayload.ayurveda && (
-                          <div className="text-[11px] text-slate-600 space-y-1">
-                            <div>
-                              <strong>Sanskrit:</strong> {originalGeneratedPayload.ayurveda.sanskrit_name}
+                      {originalGeneratedPayload.is_ayurvedic_product !== false &&
+                        originalGeneratedPayload.ayurveda_applicability === 'applicable' && (
+                          <div className="bg-white p-3 rounded-xl border border-slate-200">
+                            <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
+                              Ayurveda Applicability: {originalGeneratedPayload.ayurveda_applicability}
                             </div>
-                            <div>
-                              <strong>Classical:</strong>{' '}
-                              {originalGeneratedPayload.ayurveda.classical_description}
-                            </div>
+                            {originalGeneratedPayload.ayurveda && (
+                              <div className="text-[11px] text-slate-600 space-y-1">
+                                <div>
+                                  <strong>Sanskrit:</strong>{' '}
+                                  {originalGeneratedPayload.ayurveda.sanskrit_name}
+                                </div>
+                                <div>
+                                  <strong>Classical:</strong>{' '}
+                                  {originalGeneratedPayload.ayurveda.classical_description}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
-                      </div>
                     </div>
                   )}
                 </div>
@@ -2429,44 +2523,49 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Section B: 6-Language Native Script Product Names */}
-                  <div>
-                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2 mb-4">
-                      2. Multilingual Product Names (6 Required Native Scripts — Section 4)
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {(
-                        [
-                          { code: 'en', label: 'English (en)' },
-                          { code: 'ml', label: 'Malayalam (മലയാളം - ml)' },
-                          { code: 'hi', label: 'Hindi (हिन्दी - hi)' },
-                          { code: 'ta', label: 'Tamil (தமிழ் - ta)' },
-                          { code: 'kn', label: 'Kannada (ಕನ್ನಡ - kn)' },
-                          { code: 'te', label: 'Telugu (తెలుగు - te)' },
-                        ] as const
-                      ).map((lang) => (
-                        <div key={lang.code}>
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                            {lang.label} <span className="text-rose-500">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={editedPayload.translations[lang.code]?.name || ''}
-                            onChange={(e) =>
-                              setEditedPayload({
-                                ...editedPayload,
-                                translations: {
-                                  ...editedPayload.translations,
-                                  [lang.code]: { name: e.target.value },
-                                },
-                              })
-                            }
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold"
-                          />
+                  {/* Section B: 6-Language Native Script Product Names (Only when Ayurvedic Product = Yes) */}
+                  {(editedPayload.is_ayurvedic_product !== undefined
+                    ? editedPayload.is_ayurvedic_product
+                    : draftDetail.draft.is_ayurvedic_product) !== false &&
+                    editedPayload.ayurveda_applicability === 'applicable' && (
+                      <div>
+                        <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2 mb-4">
+                          2. Multilingual Product Names (6 Required Native Scripts — Section 4)
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          {(
+                            [
+                              { code: 'en', label: 'English (en)' },
+                              { code: 'ml', label: 'Malayalam (മലയാളം - ml)' },
+                              { code: 'hi', label: 'Hindi (हिन्दी - hi)' },
+                              { code: 'ta', label: 'Tamil (தமிழ் - ta)' },
+                              { code: 'kn', label: 'Kannada (ಕನ್ನಡ - kn)' },
+                              { code: 'te', label: 'Telugu (తెలుగు - te)' },
+                            ] as const
+                          ).map((lang) => (
+                            <div key={lang.code}>
+                              <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                                {lang.label} <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={editedPayload.translations[lang.code]?.name || ''}
+                                onChange={(e) =>
+                                  setEditedPayload({
+                                    ...editedPayload,
+                                    translations: {
+                                      ...editedPayload.translations,
+                                      [lang.code]: { name: e.target.value },
+                                    },
+                                  })
+                                }
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold"
+                              />
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                      </div>
+                    )}
 
                   {/* Section C: Health Benefits, Nutritional Benefits & Safety Precautions */}
                   <div>
@@ -2611,7 +2710,11 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Section D: Conditional Ayurvedic Medicinal Monograph (Section 16.3 & 18.2) */}
+                  {/* Section D: Conditional Ayurvedic Medicinal Monograph (Section 16.3 & 18.2) — Only when Ayurvedic Product = Yes */}
+                  {(editedPayload.is_ayurvedic_product !== undefined
+                    ? editedPayload.is_ayurvedic_product
+                    : draftDetail.draft.is_ayurvedic_product) !== false &&
+                    editedPayload.ayurveda_applicability === 'applicable' && (
                   <div className="p-5 rounded-2xl border border-emerald-200 bg-emerald-50/30 space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
@@ -2990,6 +3093,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* Section E: V9 SEO Metadata, Canonical Public Slug & SERP Preview (Sections 4–7) */}
                   <div className="p-5 rounded-2xl border border-indigo-200 bg-indigo-50/30 space-y-4">
@@ -5147,6 +5251,46 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs text-slate-800"
                       />
                     </div>
+                  </div>
+                </div>
+
+                {/* Row 5: Unique AI Content Reference Link (`products.aiContentLink` & `products.aiDraftId`) */}
+                <div className="p-3.5 rounded-2xl border border-emerald-200 bg-white flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Link2 className="w-3.5 h-3.5 text-emerald-700" />
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700">
+                        AI CONTENT UNIQUE REFERENCE LINK (products.aiContentLink):
+                      </label>
+                      <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                        Draft ID: {masterUpdationForm.aiDraftId || draftDetail.draft.id}
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      readOnly
+                      value={masterUpdationForm.aiContentLink}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-[11px] font-mono text-slate-700 cursor-default"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href={masterUpdationForm.aiContentLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold flex items-center gap-1.5"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Open Reference Link
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => onSubmenuChange('history')}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center gap-1.5"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      View AI Version History
+                    </button>
                   </div>
                 </div>
               </div>

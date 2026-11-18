@@ -1,5 +1,5 @@
 import type express from 'express';
-import type { Firestore } from 'firebase-admin/firestore';
+import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -128,34 +128,62 @@ export function validateAIProductContentPayload(
   if (key_features.length === 0) errors.push('key_features must contain at least one feature.');
   if (!storage_instructions) errors.push('storage_instructions is required.');
 
-  const translationsRaw = raw.translations || {};
-  const translations: AIProductContentPayload['translations'] = {
-    en: { name: cleanStr(translationsRaw?.en?.name, english_product_name) },
-    ml: { name: cleanStr(translationsRaw?.ml?.name) },
-    hi: { name: cleanStr(translationsRaw?.hi?.name) },
-    ta: { name: cleanStr(translationsRaw?.ta?.name) },
-    kn: { name: cleanStr(translationsRaw?.kn?.name) },
-    te: { name: cleanStr(translationsRaw?.te?.name) },
-  };
+  const isExplicitNonAyurvedic = raw.is_ayurvedic_product === false;
 
-  for (const lang of ['en', 'ml', 'hi', 'ta', 'kn', 'te'] as const) {
-    const val = translations[lang].name;
-    if (!val) {
-      errors.push(`translations.${lang}.name is required.`);
-    } else if (!SCRIPT_RANGES[lang].test(val)) {
-      errors.push(`translations.${lang}.name must contain valid ${lang.toUpperCase()} script characters.`);
+  const translationsRaw = raw.translations || {};
+  const translations: AIProductContentPayload['translations'] = isExplicitNonAyurvedic
+    ? {
+        en: { name: cleanStr(translationsRaw?.en?.name, english_product_name) },
+        ml: { name: '' },
+        hi: { name: '' },
+        ta: { name: '' },
+        kn: { name: '' },
+        te: { name: '' },
+      }
+    : {
+        en: { name: cleanStr(translationsRaw?.en?.name, english_product_name) },
+        ml: { name: cleanStr(translationsRaw?.ml?.name) },
+        hi: { name: cleanStr(translationsRaw?.hi?.name) },
+        ta: { name: cleanStr(translationsRaw?.ta?.name) },
+        kn: { name: cleanStr(translationsRaw?.kn?.name) },
+        te: { name: cleanStr(translationsRaw?.te?.name) },
+      };
+
+  if (!isExplicitNonAyurvedic) {
+    for (const lang of ['en', 'ml', 'hi', 'ta', 'kn', 'te'] as const) {
+      const val = translations[lang].name;
+      if (!val) {
+        errors.push(`translations.${lang}.name is required.`);
+      } else if (!SCRIPT_RANGES[lang].test(val)) {
+        errors.push(
+          `translations.${lang}.name must contain valid ${lang.toUpperCase()} script characters.`
+        );
+      }
     }
   }
 
   const ayurveda_applicability: AIProductContentPayload['ayurveda_applicability'] =
-    raw.ayurveda_applicability === 'applicable' ||
-    raw.ayurveda_applicability === 'not_applicable' ||
-    raw.ayurveda_applicability === 'uncertain'
+    isExplicitNonAyurvedic
+      ? 'not_applicable'
+      : raw.ayurveda_applicability === 'applicable' ||
+        raw.ayurveda_applicability === 'not_applicable' ||
+        raw.ayurveda_applicability === 'uncertain'
       ? raw.ayurveda_applicability
       : 'not_applicable';
 
+  const is_ayurvedic_product = isExplicitNonAyurvedic
+    ? false
+    : raw.is_ayurvedic_product === true
+    ? true
+    : ayurveda_applicability === 'applicable';
+
   let ayurveda: AIProductContentPayload['ayurveda'] = null;
-  if (ayurveda_applicability === 'applicable' && raw.ayurveda && typeof raw.ayurveda === 'object') {
+  if (
+    !isExplicitNonAyurvedic &&
+    ayurveda_applicability === 'applicable' &&
+    raw.ayurveda &&
+    typeof raw.ayurveda === 'object'
+  ) {
     const ay = raw.ayurveda;
     ayurveda = {
       sanskrit_name: cleanStr(ay.sanskrit_name),
@@ -287,6 +315,7 @@ export function validateAIProductContentPayload(
       nutritional_benefits,
       safety_precautions,
       ayurveda_applicability,
+      is_ayurvedic_product,
       ayurveda,
       references,
       review_flags,
@@ -549,7 +578,7 @@ export function matchBotanicalKnowledge(productName: string): BotanicalKnowledge
 
 export function buildStructuredFallbackContent(
   productName: string,
-  options?: { categoryHint?: string; brandHint?: string }
+  options?: { categoryHint?: string; brandHint?: string; isAyurvedicProduct?: boolean }
 ): AIProductContentPayload {
   const cleanName = String(productName || 'LeafyEarth Product').trim();
   const matched = matchBotanicalKnowledge(cleanName);
@@ -559,11 +588,26 @@ export function buildStructuredFallbackContent(
     matched?.ayurveda_applicability === 'not_applicable' ||
     /cleaner|detergent|repellent|dishwash|glass|perfume/i.test(cleanName);
 
-  const ayurveda_applicability: AIProductContentPayload['ayurveda_applicability'] = isHousehold
-    ? 'not_applicable'
-    : matched?.ayurveda_applicability || 'applicable';
+  const isAyurvedicSelected =
+    options?.isAyurvedicProduct === false
+      ? false
+      : options?.isAyurvedicProduct === true
+      ? true
+      : !isHousehold && (matched?.ayurveda_applicability || 'applicable') === 'applicable';
 
-  const translations: AIProductContentPayload['translations'] = matched
+  const ayurveda_applicability: AIProductContentPayload['ayurveda_applicability'] =
+    isAyurvedicSelected ? 'applicable' : 'not_applicable';
+
+  const translations: AIProductContentPayload['translations'] = !isAyurvedicSelected
+    ? {
+        en: { name: cleanName },
+        ml: { name: '' },
+        hi: { name: '' },
+        ta: { name: '' },
+        kn: { name: '' },
+        te: { name: '' },
+      }
+    : matched
     ? {
         en: { name: cleanName },
         ml: { name: matched.translations.ml },
@@ -702,6 +746,7 @@ export function buildStructuredFallbackContent(
       'For informational and culinary purposes only; not intended to diagnose, treat, cure, or prevent any disease.',
     ],
     ayurveda_applicability,
+    is_ayurvedic_product: isAyurvedicSelected,
     ayurveda,
     references,
     review_flags: [
@@ -791,15 +836,27 @@ export function getOpenAIProviderConfigStatus(): OpenAIProviderConfigStatus {
 
 export async function generateProductContentViaProvider(
   productName: string,
-  options?: { categoryHint?: string; brandHint?: string }
+  options?: { categoryHint?: string; brandHint?: string; isAyurvedicProduct?: boolean }
 ): Promise<{ payload: AIProductContentPayload; usage: AIUsageMetadata }> {
   const startMs = Date.now();
   const config = getOpenAIProviderConfigStatus();
+  const isAyurvedicOpt = options?.isAyurvedicProduct;
 
   if (config.readyForLiveContent) {
     const apiKey = (process.env.OPENAI_API_KEY || '').trim();
+    const ayurvedicPromptInstruction =
+      isAyurvedicOpt === false
+        ? `- is_ayurvedic_product: false
+- translations: { en: { name: "<English name>" }, ml: { name: "" }, hi: { name: "" }, ta: { name: "" }, kn: { name: "" }, te: { name: "" } } (Exclude 6-language regional translations because Ayurvedic Product is No)
+- ayurveda_applicability: "not_applicable"
+- ayurveda: null (Exclude Conditional Ayurvedic Medicinal Content because Ayurvedic Product is No)`
+        : `- is_ayurvedic_product: true
+- translations: { en: { name }, ml: { name }, hi: { name }, ta: { name }, kn: { name }, te: { name } } using authentic native scripts for Malayalam, Hindi, Tamil, Kannada, and Telugu.
+- ayurveda_applicability: "applicable"
+- ayurveda: object with sanskrit_name, classification, classical_description, rasa[], guna[], virya, vipaka, prabhava, dosha_effects:{vata,pitta,kapha}, parts_used[], medicinal_uses[], classical_formulations[], usage_methods[], anupana[], typical_dosage_note, precautions[], contraindications[], interactions[], references[]`;
+
     const systemPrompt = `You are the LeafyEarth E-Commerce & Botanical Product Content Specialist for OpenAI project "${config.projectName}".
-Return ONLY a valid JSON object matching the exact schema below. Do NOT include any SEO fields (no seo_title, meta_description, seo_keywords, url_slug).
+Return ONLY a valid JSON object matching the exact schema below. Do NOT include any top-level SEO fields (no seo_title, meta_description, seo_keywords, url_slug).
 Required JSON keys:
 - english_product_name (string)
 - botanical_name (string)
@@ -811,18 +868,17 @@ Required JSON keys:
 - key_features (string[])
 - culinary_uses (string[])
 - storage_instructions (string)
-- translations: { en: { name }, ml: { name }, hi: { name }, ta: { name }, kn: { name }, te: { name } } using authentic native scripts for Malayalam, Hindi, Tamil, Kannada, and Telugu.
+${ayurvedicPromptInstruction}
 - health_benefits: Array<{ claim, evidence_level: "traditional_use"|"nutritional"|"preliminary_study"|"human_study"|"insufficient_evidence", reference_ids: string[], review_status: "pending_review" }>
 - nutritional_benefits (string[])
 - safety_precautions (string[])
-- ayurveda_applicability: "applicable" | "not_applicable" | "uncertain"
-- ayurveda: null if not_applicable, otherwise object with sanskrit_name, classification, classical_description, rasa[], guna[], virya, vipaka, prabhava, dosha_effects:{vata,pitta,kapha}, parts_used[], medicinal_uses[], classical_formulations[], usage_methods[], anupana[], typical_dosage_note, precautions[], contraindications[], interactions[], references[]
 - references: Array<{ id, source_type, title, author_or_body, section_or_citation, url, verification_note }>
 - review_flags (string[])
 Never make miraculous or disease-cure claims.`;
 
-    const userPrompt = `Generate structured LeafyEarth V8 product content for:
+    const userPrompt = `Generate structured LeafyEarth product content for:
 Product Name: ${productName}
+Ayurvedic Product: ${isAyurvedicOpt === false ? 'No (Exclude 6-Language Product Names and Conditional Ayurvedic Medicinal Content; generate all other features)' : 'Yes (Include 6-Language Product Names, Ayurveda Applicability: applicable, and Conditional Ayurvedic Medicinal Content)'}
 Category Hint: ${options?.categoryHint || 'Auto-detect'}
 Brand Hint: ${options?.brandHint || 'LeafyEarth'}`;
 
@@ -852,12 +908,43 @@ Brand Hint: ${options?.brandHint || 'LeafyEarth'}`;
         const data: any = await response.json();
         const contentText = data?.choices?.[0]?.message?.content || '{}';
         const parsed = JSON.parse(contentText);
+        if (isAyurvedicOpt === false) {
+          parsed.is_ayurvedic_product = false;
+          parsed.ayurveda_applicability = 'not_applicable';
+          parsed.ayurveda = null;
+          parsed.translations = {
+            en: { name: String(parsed.english_product_name || productName).trim() },
+            ml: { name: '' },
+            hi: { name: '' },
+            ta: { name: '' },
+            kn: { name: '' },
+            te: { name: '' },
+          };
+        } else if (isAyurvedicOpt === true) {
+          parsed.is_ayurvedic_product = true;
+          parsed.ayurveda_applicability = 'applicable';
+        }
         const validated = validateAIProductContentPayload(parsed);
+        const finalPayload: AIProductContentPayload = {
+          ...validated.payload,
+          seo:
+            validated.payload.seo ||
+            buildStructuredFallbackSEO(validated.payload.english_product_name || productName, {
+              categoryHint: validated.payload.category,
+              brandHint: options?.brandHint,
+              formHint: validated.payload.form,
+            }),
+          commerce:
+            validated.payload.commerce ||
+            buildStructuredFallbackCommerce(validated.payload.english_product_name || productName, {
+              categoryHint: validated.payload.category,
+            }),
+        };
         const inputTokens = Number(data?.usage?.prompt_tokens || 450);
         const outputTokens = Number(data?.usage?.completion_tokens || 850);
         const totalTokens = Number(data?.usage?.total_tokens || inputTokens + outputTokens);
         return {
-          payload: validated.payload,
+          payload: finalPayload,
           usage: {
             provider: 'openai',
             project_name: config.projectName,
@@ -1570,12 +1657,28 @@ export function buildMasterComparisonDiff(params: {
     pushItem('culinaryUses', 'Culinary Uses', 'general', 'culinaryUses', payload.culinary_uses);
     pushItem('storageInstructions', 'Storage Instructions', 'general', 'storageInstructions', payload.storage_instructions);
 
-    // 6-Language names
-    pushItem('malayalamName', 'Malayalam Name (മലയാളം)', 'translations', 'malayalamName', payload.translations.ml.name);
-    pushItem('hindiName', 'Hindi Name (हिन्दी)', 'translations', 'hindiName', payload.translations.hi.name);
-    pushItem('tamilName', 'Tamil Name (தமிழ்)', 'translations', 'tamilName', payload.translations.ta.name);
-    pushItem('kannadaName', 'Kannada Name (ಕನ್ನಡ)', 'translations', 'kannadaName', payload.translations.kn.name);
-    pushItem('teluguName', 'Telugu Name (తెలుగు)', 'translations', 'teluguName', payload.translations.te.name);
+    const isAyurvedicEnabled =
+      payload.is_ayurvedic_product !== false &&
+      payload.ayurveda_applicability === 'applicable';
+
+    // 6-Language names (only included when Ayurvedic Product = Yes)
+    if (isAyurvedicEnabled && payload.translations) {
+      if (payload.translations.ml?.name) {
+        pushItem('malayalamName', 'Malayalam Name (മലയാളം)', 'translations', 'malayalamName', payload.translations.ml.name);
+      }
+      if (payload.translations.hi?.name) {
+        pushItem('hindiName', 'Hindi Name (हिन्दी)', 'translations', 'hindiName', payload.translations.hi.name);
+      }
+      if (payload.translations.ta?.name) {
+        pushItem('tamilName', 'Tamil Name (தமிழ்)', 'translations', 'tamilName', payload.translations.ta.name);
+      }
+      if (payload.translations.kn?.name) {
+        pushItem('kannadaName', 'Kannada Name (ಕನ್ನಡ)', 'translations', 'kannadaName', payload.translations.kn.name);
+      }
+      if (payload.translations.te?.name) {
+        pushItem('teluguName', 'Telugu Name (తెలుగు)', 'translations', 'teluguName', payload.translations.te.name);
+      }
+    }
 
     // Health & Safety (only non-rejected claims)
     const approvedClaims = (payload.health_benefits || []).filter((hb) => hb.review_status !== 'rejected');
@@ -1584,8 +1687,10 @@ export function buildMasterComparisonDiff(params: {
     pushItem('generalPrecautions', 'General Safety Precautions', 'health', 'generalPrecautions', payload.safety_precautions);
     pushItem('healthReferences', 'Health & Scientific References', 'health', 'healthReferences', payload.references);
 
-    const isAyurvedic = payload.ayurveda_applicability === 'applicable' && Boolean(payload.ayurveda);
-    pushItem('isAyurvedicProduct', 'Is Ayurvedic Product?', 'ayurveda', 'isAyurvedicProduct', isAyurvedic);
+    const isAyurvedic = isAyurvedicEnabled && Boolean(payload.ayurveda);
+    if (isAyurvedicEnabled) {
+      pushItem('isAyurvedicProduct', 'Is Ayurvedic Product?', 'ayurveda', 'isAyurvedicProduct', isAyurvedic);
+    }
 
     if (isAyurvedic && payload.ayurveda) {
       const ay = payload.ayurveda;
@@ -1767,6 +1872,24 @@ export interface MasterProductUpdationOverrides {
   uniqueSpec2?: string;
   uniqueSpec3?: string;
   leafycategory?: string;
+  featuredproducts?: boolean;
+  featuredprdsortorder?: number;
+  aiContentLink?: string;
+  aiDraftId?: string;
+}
+
+export function buildAIContentReferenceLink(
+  draftId: string,
+  versionId?: string | null,
+  domain = getDefaultVerifiedDomain()
+): string {
+  const cleanDomain = String(domain || 'https://leafyearth.com').replace(/\/+$/, '');
+  const cleanDraft = String(draftId || '').trim();
+  if (!cleanDraft) return '';
+  const cleanVer = String(versionId || '').trim();
+  return cleanVer
+    ? `${cleanDomain}/api/admin/ai-products/${encodeURIComponent(cleanDraft)}?version=${encodeURIComponent(cleanVer)}`
+    : `${cleanDomain}/api/admin/ai-products/${encodeURIComponent(cleanDraft)}`;
 }
 
 /**
@@ -1933,6 +2056,26 @@ export function mergeMasterProductUpdationOverrides(params: {
   if (typeof ov.uniqueSpec3 === 'string') {
     setField('uniqueSpec3', ov.uniqueSpec3.trim());
   }
+  if (ov.featuredproducts !== undefined && ov.featuredproducts !== null) {
+    setField('featuredproducts', Boolean(ov.featuredproducts));
+  } else if (existing.featuredproducts === undefined && patch.featuredproducts === undefined) {
+    setField('featuredproducts', false);
+  }
+  if (
+    ov.featuredprdsortorder !== undefined &&
+    ov.featuredprdsortorder !== null &&
+    Number.isFinite(Number(ov.featuredprdsortorder))
+  ) {
+    setField('featuredprdsortorder', Number(ov.featuredprdsortorder));
+  } else if (existing.featuredprdsortorder === undefined && patch.featuredprdsortorder === undefined) {
+    setField('featuredprdsortorder', 1);
+  }
+  if (typeof ov.aiContentLink === 'string' && ov.aiContentLink.trim()) {
+    setField('aiContentLink', ov.aiContentLink.trim());
+  }
+  if (typeof ov.aiDraftId === 'string' && ov.aiDraftId.trim()) {
+    setField('aiDraftId', ov.aiDraftId.trim());
+  }
 
   // Base defaults for a brand-new `products` record so all `products` table fields exist
   const baseDefaults: Record<string, any> = isNew
@@ -1980,6 +2123,10 @@ export function mergeMasterProductUpdationOverrides(params: {
         whatsappSales: 0,
         countersaleSales: 0,
         preorderactive: false,
+        featuredproducts: patch.featuredproducts ?? false,
+        featuredprdsortorder: patch.featuredprdsortorder ?? 1,
+        aiContentLink: patch.aiContentLink || '',
+        aiDraftId: patch.aiDraftId || '',
         vamjoWeblink: '',
         amazonWeblink: '',
         flipkartWeblink: '',
@@ -1990,7 +2137,9 @@ export function mergeMasterProductUpdationOverrides(params: {
     : {};
 
   const finalPatch = isNew ? { ...baseDefaults, ...patch } : patch;
+  delete finalPatch.aiContentMetadata;
   const mergedMasterProduct = { ...baseDefaults, ...existing, ...finalPatch };
+  delete mergedMasterProduct.aiContentMetadata;
   return { mergedMasterProduct, finalPatch };
 }
 
@@ -2571,11 +2720,15 @@ export function registerAIProductContentRoutes(
     try {
       const db = getDb();
       const actor = await resolveActor(req);
-      const { productName, productId, categoryHint, brandHint } = req.body || {};
+      const { productName, productId, categoryHint, brandHint, isAyurvedicProduct } = req.body || {};
       const cleanName = String(productName || '').trim();
       if (!cleanName || cleanName.length < 2 || cleanName.length > 200) {
         return res.status(400).json({ error: 'productName is required (2–200 characters).' });
       }
+      const resolvedIsAyurvedic =
+        isAyurvedicProduct !== undefined && isAyurvedicProduct !== null
+          ? isAyurvedicProduct === true || String(isAyurvedicProduct).toLowerCase() === 'true'
+          : undefined;
 
       let masterProduct: Record<string, any> | null = null;
       let allProductsCache: Array<Record<string, any>> | null = null;
@@ -2594,6 +2747,7 @@ export function registerAIProductContentRoutes(
       const { payload, usage } = await generateProductContentViaProvider(cleanName, {
         categoryHint: categoryHint || masterProduct?.category,
         brandHint: brandHint || masterProduct?.brand,
+        isAyurvedicProduct: resolvedIsAyurvedic,
       });
 
       if (!masterProduct && allProductsCache) {
@@ -2631,6 +2785,7 @@ export function registerAIProductContentRoutes(
         master_product_sku: masterProduct?.sku || null,
         category_hint: categoryHint || payload.category || null,
         brand_hint: brandHint || masterProduct?.brand || null,
+        is_ayurvedic_product: payload.is_ayurvedic_product ?? (payload.ayurveda_applicability === 'applicable'),
         status: 'DRAFT',
         current_version_id: versionId,
         approved_version_id: null,
@@ -2969,9 +3124,15 @@ export function registerAIProductContentRoutes(
       );
       const nextVersionNo = maxVersionNo + 1;
 
+      const regenIsAyurvedic =
+        req.body?.isAyurvedicProduct !== undefined
+          ? Boolean(req.body.isAyurvedicProduct)
+          : draft.is_ayurvedic_product;
+
       const { payload, usage } = await generateProductContentViaProvider(draft.source_product_name, {
         categoryHint: req.body?.categoryHint || draft.category_hint || undefined,
         brandHint: req.body?.brandHint || draft.brand_hint || undefined,
+        isAyurvedicProduct: regenIsAyurvedic,
       });
 
       const now = new Date().toISOString();
@@ -4049,25 +4210,22 @@ export function registerAIProductContentRoutes(
         }
 
         const nextRevision = currentRevision + 1;
-        const aiMeta = { ...(existingMaster.aiContentMetadata || {}) };
-        for (const k of Object.keys(updatePatch)) {
-          if (['revision', 'aiContentMetadata', 'seoUpdatedAt', 'aiCommerceUpdatedAt'].includes(k)) {
-            continue;
-          }
-          aiMeta[k] = {
-            source: 'ai',
-            draftId,
-            versionId: verId,
-            model: version?.model || 'gpt-4o-mini',
-            promptVersion: version?.prompt_version || V10_SCHEMA_VERSION,
-            approvedBy: actor.uid,
-            approvedAt: now,
-          };
-        }
-        updatePatch.aiContentMetadata = aiMeta;
+        const uniqueAiRefLink =
+          updatePatch.aiContentLink || buildAIContentReferenceLink(draftId, verId);
+        beforeSnapshot.aiContentLink = existingMaster.aiContentLink ?? null;
+        beforeSnapshot.aiDraftId = existingMaster.aiDraftId ?? null;
+        updatePatch.aiContentLink = uniqueAiRefLink;
+        updatePatch.aiDraftId = draftId;
+        afterSnapshot.aiContentLink = uniqueAiRefLink;
+        afterSnapshot.aiDraftId = draftId;
+        delete updatePatch.aiContentMetadata;
         updatePatch.revision = nextRevision;
 
-        tx.set(masterRef, updatePatch, { merge: true });
+        const firestoreWritePatch: Record<string, any> = {
+          ...updatePatch,
+          aiContentMetadata: FieldValue.delete(),
+        };
+        tx.set(masterRef, firestoreWritePatch, { merge: true });
 
         const syncLogDoc: AIProductSyncLog = {
           id: syncLogId,
@@ -4105,9 +4263,16 @@ export function registerAIProductContentRoutes(
           { merge: true }
         );
 
+        const cleanUpdatedMaster: Record<string, any> = {
+          id: targetMasterId,
+          ...existingMaster,
+          ...updatePatch,
+        };
+        delete cleanUpdatedMaster.aiContentMetadata;
+
         return {
           syncLogDoc,
-          updatedMaster: { id: targetMasterId, ...existingMaster, ...updatePatch },
+          updatedMaster: cleanUpdatedMaster,
           createdNewMasterProduct: !masterSnap.exists,
         };
       });

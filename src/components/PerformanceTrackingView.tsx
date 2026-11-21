@@ -5,7 +5,13 @@ import ProductReviewsSection from './ProductReviewsSection';
 import { uploadFileToStorage, uploadProductImage } from '../utils/storageUpload';
 import { auth } from '../firebase';
 import ProductDetailsSection, { ProductDetailsSectionHandle } from './ProductDetailsSection';
-import ProductMasterV8Section, { extractV8FieldsFromProduct, ProductMasterV8Fields } from './ProductMasterV8Section';
+import ProductMasterV8Section, {
+  extractV8FieldsFromProduct,
+  ProductMasterV8Fields,
+  ProductV8AyurvedicConditionalSection,
+  ProductV9SeoMetaDataSection,
+  ProductV10AICommerceSection,
+} from './ProductMasterV8Section';
 import { 
   LineChart, ShoppingBag, Heart, BarChart3, TrendingUp, Grid, 
   Trash2, Plus, Edit, DollarSign, HelpCircle, Check, Award,
@@ -116,12 +122,8 @@ export default function PerformanceTrackingView() {
   const [editStockIn, setEditStockIn] = useState<number>(0);
   const [editStockOut, setEditStockOut] = useState<number>(0);
   const [editPreorderActive, setEditPreorderActive] = useState<boolean>(false);
-  const [editFeaturedProducts, setEditFeaturedProducts] = useState<boolean>(false);
-  const [editFeaturedPrdSortOrder, setEditFeaturedPrdSortOrder] = useState<number>(1);
-  const [editVamjoWeblink, setEditVamjoWeblink] = useState<string>('');
+  const [editCulinaryDetails, setEditCulinaryDetails] = useState<boolean>(false);
   const [editAmazonWeblink, setEditAmazonWeblink] = useState<string>('');
-  const [editFlipkartWeblink, setEditFlipkartWeblink] = useState<string>('');
-  const [editMeeshoWeblink, setEditMeeshoWeblink] = useState<string>('');
   const [editCategory, setEditCategory] = useState<string>('');
   const [editCategories, setEditCategories] = useState<string[]>([]);
   const [editBrand, setEditBrand] = useState<string>('');
@@ -216,12 +218,8 @@ export default function PerformanceTrackingView() {
   const [prodStockIn, setProdStockIn] = useState<number>(0);
   const [prodStockOut, setProdStockOut] = useState<number>(0);
   const [prodPreorderActive, setProdPreorderActive] = useState<boolean>(false);
-  const [prodFeaturedProducts, setProdFeaturedProducts] = useState<boolean>(false);
-  const [prodFeaturedPrdSortOrder, setProdFeaturedPrdSortOrder] = useState<number>(1);
-  const [prodVamjoWeblink, setProdVamjoWeblink] = useState('');
+  const [prodCulinaryDetails, setProdCulinaryDetails] = useState<boolean>(false);
   const [prodAmazonWeblink, setProdAmazonWeblink] = useState('');
-  const [prodFlipkartWeblink, setProdFlipkartWeblink] = useState('');
-  const [prodMeeshoWeblink, setProdMeeshoWeblink] = useState('');
   const [prodCategory, setProdCategory] = useState('');
   const [prodCategories, setProdCategories] = useState<string[]>([]);
   const [prodBrand, setProdBrand] = useState('');
@@ -1089,13 +1087,9 @@ export default function PerformanceTrackingView() {
       stockIn: editStockIn,
       stockOut: editStockOut,
       preorderactive: editPreorderActive,
-      featuredproducts: editFeaturedProducts,
-      featuredprdsortorder: editFeaturedPrdSortOrder,
+      culinarydetails: editCulinaryDetails,
       stock: Math.max(0, editStockIn - editStockOut),
-      vamjoWeblink: editVamjoWeblink,
       amazonWeblink: editAmazonWeblink,
-      flipkartWeblink: editFlipkartWeblink,
-      meeshoWeblink: editMeeshoWeblink,
       category: editCategories[0] || editCategory || '',
       categories: editCategories,
       brand: editBrand,
@@ -1149,12 +1143,8 @@ export default function PerformanceTrackingView() {
     setEditStockIn(p.stockIn ?? p.stock ?? 0);
     setEditStockOut(p.stockOut ?? getProductVolume(p) ?? 0);
     setEditPreorderActive(p.preorderactive === true);
-    setEditFeaturedProducts(p.featuredproducts === true);
-    setEditFeaturedPrdSortOrder(p.featuredprdsortorder ?? 1);
-    setEditVamjoWeblink(p.vamjoWeblink || '');
+    setEditCulinaryDetails(p.culinarydetails === true);
     setEditAmazonWeblink(p.amazonWeblink || '');
-    setEditFlipkartWeblink(p.flipkartWeblink || '');
-    setEditMeeshoWeblink(p.meeshoWeblink || '');
     const initialEditCats = Array.isArray(p.categories) && p.categories.length > 0
       ? p.categories
       : (p.category ? [p.category] : []);
@@ -1256,12 +1246,8 @@ export default function PerformanceTrackingView() {
       fd.append('stockIn', String(prodStockIn));
       fd.append('stockOut', String(prodStockOut));
       fd.append('preorderactive', String(prodPreorderActive));
-      fd.append('featuredproducts', String(prodFeaturedProducts));
-      fd.append('featuredprdsortorder', String(prodFeaturedPrdSortOrder));
-      fd.append('vamjoWeblink', prodVamjoWeblink);
+      fd.append('culinarydetails', String(prodCulinaryDetails));
       fd.append('amazonWeblink', prodAmazonWeblink);
-      fd.append('flipkartWeblink', prodFlipkartWeblink);
-      fd.append('meeshoWeblink', prodMeeshoWeblink);
       fd.append('category', prodCategories[0] || prodCategory || '');
       fd.append('categories', JSON.stringify(prodCategories));
       fd.append('brand', prodBrand);
@@ -1294,7 +1280,7 @@ export default function PerformanceTrackingView() {
         if (res.ok) {
           const data = await res.json();
           if (data && data.product) {
-            createdProduct = await addProduct(data.product);
+            createdProduct = await addProduct({ ...data.product, ...prodV8Fields });
           }
         } else {
           // If server upload fails or 401s, fallback to uploading file via client storage and creating product
@@ -1316,18 +1302,14 @@ export default function PerformanceTrackingView() {
             stockIn: prodStockIn,
             stockOut: prodStockOut,
             preorderactive: prodPreorderActive,
-            featuredproducts: prodFeaturedProducts,
-            featuredprdsortorder: prodFeaturedPrdSortOrder,
+            culinarydetails: prodCulinaryDetails,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
             vamjoSales: Math.round(prodOnlinePrice * 10),
             whatsappSales: Math.round(prodOnlinePrice * 10),
             countersaleSales: Math.round(prodShopPrice * 10),
-            vamjoWeblink: prodVamjoWeblink,
             amazonWeblink: prodAmazonWeblink,
-            flipkartWeblink: prodFlipkartWeblink,
-            meeshoWeblink: prodMeeshoWeblink,
             category: prodCategories[0] || prodCategory || '',
             categories: prodCategories,
             brand: prodBrand,
@@ -1349,7 +1331,8 @@ export default function PerformanceTrackingView() {
             mrp: prodMrp || prodShopPrice,
             discount: prodDiscount || (prodShopPrice && prodOnlinePrice ? Math.max(0, Math.round(((prodShopPrice - prodOnlinePrice) / prodShopPrice) * 100)) : 0),
             rating: prodRating,
-            reviewsCount: prodReviewsCount
+            reviewsCount: prodReviewsCount,
+            ...prodV8Fields
           });
         }
       } catch (err) {
@@ -1373,18 +1356,14 @@ export default function PerformanceTrackingView() {
             stockIn: prodStockIn,
             stockOut: prodStockOut,
             preorderactive: prodPreorderActive,
-            featuredproducts: prodFeaturedProducts,
-            featuredprdsortorder: prodFeaturedPrdSortOrder,
+            culinarydetails: prodCulinaryDetails,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
             vamjoSales: Math.round(prodOnlinePrice * 10),
             whatsappSales: Math.round(prodOnlinePrice * 10),
             countersaleSales: Math.round(prodShopPrice * 10),
-            vamjoWeblink: prodVamjoWeblink,
             amazonWeblink: prodAmazonWeblink,
-            flipkartWeblink: prodFlipkartWeblink,
-            meeshoWeblink: prodMeeshoWeblink,
             category: prodCategories[0] || prodCategory || '',
             categories: prodCategories,
             brand: prodBrand,
@@ -1406,7 +1385,8 @@ export default function PerformanceTrackingView() {
             mrp: prodMrp || prodShopPrice,
             discount: prodDiscount || (prodShopPrice && prodOnlinePrice ? Math.max(0, Math.round(((prodShopPrice - prodOnlinePrice) / prodShopPrice) * 100)) : 0),
             rating: prodRating,
-            reviewsCount: prodReviewsCount
+            reviewsCount: prodReviewsCount,
+            ...prodV8Fields
           });
         } catch (fallbackErr) {
           console.error('Fallback upload failed', fallbackErr);
@@ -1428,18 +1408,14 @@ export default function PerformanceTrackingView() {
             stockIn: prodStockIn,
             stockOut: prodStockOut,
             preorderactive: prodPreorderActive,
-            featuredproducts: prodFeaturedProducts,
-            featuredprdsortorder: prodFeaturedPrdSortOrder,
+            culinarydetails: prodCulinaryDetails,
             amazonSales: Math.round(prodOnlinePrice * 40),
             flipkartSales: Math.round(prodOnlinePrice * 30),
             meeshoSales: Math.round(prodOnlinePrice * 20),
             vamjoSales: Math.round(prodOnlinePrice * 10),
             whatsappSales: Math.round(prodOnlinePrice * 10),
             countersaleSales: Math.round(prodShopPrice * 10),
-            vamjoWeblink: prodVamjoWeblink,
             amazonWeblink: prodAmazonWeblink,
-            flipkartWeblink: prodFlipkartWeblink,
-            meeshoWeblink: prodMeeshoWeblink,
             category: prodCategories[0] || prodCategory || '',
             categories: prodCategories,
             brand: prodBrand,
@@ -1459,7 +1435,8 @@ export default function PerformanceTrackingView() {
             mrp: prodMrp || prodShopPrice,
             discount: prodDiscount || (prodShopPrice && prodOnlinePrice ? Math.max(0, Math.round(((prodShopPrice - prodOnlinePrice) / prodShopPrice) * 100)) : 0),
             rating: prodRating,
-            reviewsCount: prodReviewsCount
+            reviewsCount: prodReviewsCount,
+            ...prodV8Fields
           });
         }
       }
@@ -1481,19 +1458,15 @@ export default function PerformanceTrackingView() {
         stock: Math.max(0, prodStockIn - prodStockOut),
         stockIn: prodStockIn,
         stockOut: prodStockOut,
-            preorderactive: prodPreorderActive,
-            featuredproducts: prodFeaturedProducts,
-            featuredprdsortorder: prodFeaturedPrdSortOrder,
+        preorderactive: prodPreorderActive,
+        culinarydetails: prodCulinaryDetails,
         amazonSales: Math.round(prodOnlinePrice * 40),
         flipkartSales: Math.round(prodOnlinePrice * 30),
         meeshoSales: Math.round(prodOnlinePrice * 20),
         vamjoSales: Math.round(prodOnlinePrice * 10),
         whatsappSales: Math.round(prodOnlinePrice * 10),
         countersaleSales: Math.round(prodShopPrice * 10),
-        vamjoWeblink: prodVamjoWeblink,
         amazonWeblink: prodAmazonWeblink,
-        flipkartWeblink: prodFlipkartWeblink,
-        meeshoWeblink: prodMeeshoWeblink,
         category: prodCategories[0] || prodCategory || '',
         categories: prodCategories,
         brand: prodBrand,
@@ -1568,12 +1541,8 @@ export default function PerformanceTrackingView() {
     setProdStockIn(0);
     setProdStockOut(0);
     setProdPreorderActive(false);
-    setProdFeaturedProducts(false);
-    setProdFeaturedPrdSortOrder(1);
-    setProdVamjoWeblink('');
+    setProdCulinaryDetails(false);
     setProdAmazonWeblink('');
-    setProdFlipkartWeblink('');
-    setProdMeeshoWeblink('');
     setProdCategory('');
     setProdCategories([]);
     setProdBrand('');
@@ -2330,64 +2299,64 @@ export default function PerformanceTrackingView() {
 
           {/* Product add collapsed form */}
           {isAddingProduct && (
-            <form onSubmit={handleCreateProduct} className="bg-[#bdbddb] border border-slate-800 rounded-2xl p-5 max-w-4xl animate-fadeIn space-y-4" id="add-prod-form">
-              <h4 className="text-xs font-bold text-white uppercase tracking-wider">Product Master Details</h4>
+            <form onSubmit={handleCreateProduct} className="bg-gray-100 border border-gray-300 text-slate-900 rounded-2xl p-5 max-w-4xl animate-fadeIn space-y-4 shadow-sm" id="add-prod-form">
+              <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider border-b border-gray-300 pb-2">Product Master Details</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">PROD NAME:</label>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">PROD NAME:</label>
                   <input 
                     type="text" 
                     placeholder="e.g. Lavender Gel Cleaner" 
                     value={prodName}
                     onChange={e => setProdName(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">SKU (8-DIGIT AUTO):</label>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">SKU (8-DIGIT AUTO):</label>
                   <input 
                     type="text" 
                     placeholder="Auto-generated on save" 
                     value={prodSku || 'Auto-generated on save'}
                     readOnly
-                    className="w-full text-xs p-2.5 bg-[#0d0d10] border border-slate-800 text-emerald-400 font-mono rounded-lg cursor-not-allowed opacity-90"
+                    className="w-full text-xs p-2.5 bg-gray-200 border border-gray-300 text-emerald-700 font-mono rounded-lg cursor-not-allowed opacity-90"
                     title="8-digit numeric SKU is automatically allocated by the backend on save (Section 19)"
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">PACKING SIZE:</label>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">PACKING SIZE:</label>
                   <input 
                     type="text" 
                     placeholder="e.g. 500ml Bottle" 
                     value={prodPackingSize}
                     onChange={e => setProdPackingSize(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">UNIT (UQC):</label>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">UNIT (UQC):</label>
                   <select 
                     value={prodUnit}
                     onChange={e => setProdUnit(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-indigo-300 font-mono font-bold rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-indigo-700 font-mono font-bold rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                     required
                   >
                     {units.map(u => (
-                      <option key={u.id} value={u.uqc} className="bg-[#0d0d10] text-slate-200 font-sans">
+                      <option key={u.id} value={u.uqc} className="bg-white text-slate-900 font-sans">
                         {u.uqc} ({u.desc})
                       </option>
                     ))}
                     {prodUnit && !units.some(u => u.uqc.toUpperCase() === prodUnit.toUpperCase()) && (
-                      <option value={prodUnit} className="bg-[#0d0d10] text-slate-200 font-sans">
+                      <option value={prodUnit} className="bg-white text-slate-900 font-sans">
                         {prodUnit}
                       </option>
                     )}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-rose-400 mb-1.5 uppercase tracking-wider">MRP (₹):</label>
+                  <label className="block text-[10px] font-bold text-rose-700 mb-1.5 uppercase tracking-wider">MRP (₹):</label>
                   <input 
                     type="number" 
                     placeholder="Maximum Retail Price"
@@ -2400,24 +2369,24 @@ export default function PerformanceTrackingView() {
                         setProdDiscount(Math.max(0, Math.round(((val - off) / val) * 100)));
                       }
                     }}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     min="1"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">HSN CODE:</label>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">HSN CODE:</label>
                   <input
                     type="text"
                     placeholder="e.g. 330499"
                     value={prodHsnCode}
                     onChange={e => setProdHsnCode(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-indigo-400 mb-1.5 uppercase tracking-wider">ONLINE PRICE (₹):</label>
+                  <label className="block text-[10px] font-bold text-indigo-700 mb-1.5 uppercase tracking-wider">ONLINE PRICE (₹):</label>
                   <input 
                     type="number" 
                     value={prodOnlinePrice}
@@ -2430,26 +2399,26 @@ export default function PerformanceTrackingView() {
                         setProdDiscount(Math.max(0, Math.round(((mrpVal - val) / mrpVal) * 100)));
                       }
                     }}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider">SHOP PRICE (₹):</label>
+                  <label className="block text-[10px] font-bold text-amber-700 mb-1.5 uppercase tracking-wider">SHOP PRICE (₹):</label>
                   <input 
                     type="number" 
                     value={prodShopPrice}
                     onChange={e => setProdShopPrice(parseInt(e.target.value) || 0)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">GST RATE (%):</label>
+                  <label className="block text-[10px] font-bold text-emerald-700 mb-1.5 uppercase tracking-wider">GST RATE (%):</label>
                   <select 
                     value={prodGstPercentage}
                     onChange={e => setProdGstPercentage(parseInt(e.target.value) || 0)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                   >
                     <option value={5}>5% GST (Essential)</option>
                     <option value={12}>12% GST (Standard)</option>
@@ -2460,7 +2429,7 @@ export default function PerformanceTrackingView() {
                 </div>
                 {/* CATEGORIES SEARCHABLE MULTI-SELECT COMBOBOX */}
                 <div className="relative" ref={catDropdownRef}>
-                  <label className="block text-[10px] font-bold text-sky-400 mb-1.5 uppercase tracking-wider">
+                  <label className="block text-[10px] font-bold text-sky-700 mb-1.5 uppercase tracking-wider">
                     CATEGORIES (SELECT MULTIPLE):
                   </label>
                   
@@ -2470,7 +2439,7 @@ export default function PerformanceTrackingView() {
                       {prodCategories.map(cat => (
                         <span 
                           key={cat} 
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-950/80 text-sky-300 border border-sky-800/60 shadow-sm transition hover:bg-sky-900/80"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-800 border border-sky-300 shadow-xs transition hover:bg-sky-200"
                         >
                           <span>{cat}</span>
                           <button
@@ -2480,7 +2449,7 @@ export default function PerformanceTrackingView() {
                               setProdCategories(updated);
                               setProdCategory(updated[0] || '');
                             }}
-                            className="hover:text-rose-400 text-sky-400 transition cursor-pointer p-0.5 rounded-full hover:bg-sky-950"
+                            className="hover:text-rose-600 text-sky-700 transition cursor-pointer p-0.5 rounded-full hover:bg-sky-200"
                             title="Remove category"
                           >
                             <X className="w-3 h-3" />
@@ -2514,7 +2483,7 @@ export default function PerformanceTrackingView() {
                           setCatSearchQuery('');
                         }
                       }}
-                      className="w-full text-xs p-2.5 pr-14 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      className="w-full text-xs p-2.5 pr-14 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       {catSearchQuery && (
@@ -2523,7 +2492,7 @@ export default function PerformanceTrackingView() {
                           onClick={() => {
                             setCatSearchQuery('');
                           }}
-                          className="hover:text-rose-400 text-slate-500 transition cursor-pointer p-0.5"
+                          className="hover:text-rose-600 text-slate-500 transition cursor-pointer p-0.5"
                           title="Clear field"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -2534,7 +2503,7 @@ export default function PerformanceTrackingView() {
                         onClick={() => {
                           setIsCatDropdownOpen(!isCatDropdownOpen);
                         }}
-                        className="hover:text-indigo-400 text-slate-500 transition cursor-pointer p-0.5"
+                        className="hover:text-indigo-600 text-slate-500 transition cursor-pointer p-0.5"
                         title="Toggle dropdown"
                       >
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isCatDropdownOpen ? 'rotate-180' : ''}`} />
@@ -2543,7 +2512,7 @@ export default function PerformanceTrackingView() {
                   </div>
 
                   {isCatDropdownOpen && (
-                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-[#0d0d10] border border-slate-850 rounded-xl max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-850 animate-fadeIn scrollbar-thin">
+                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-white border border-gray-300 rounded-xl max-h-48 overflow-y-auto shadow-lg divide-y divide-gray-200 animate-fadeIn scrollbar-thin">
                       {catSearchQuery.trim() && !dynamicCategories.some(c => c.toLowerCase() === catSearchQuery.trim().toLowerCase()) && (
                         <button
                           type="button"
@@ -2556,7 +2525,7 @@ export default function PerformanceTrackingView() {
                             }
                             setCatSearchQuery('');
                           }}
-                          className="w-full text-left px-3 py-2 text-[11px] text-indigo-400 font-semibold hover:bg-indigo-950/40 transition flex items-center gap-1.5 cursor-pointer"
+                          className="w-full text-left px-3 py-2 text-[11px] text-indigo-700 font-semibold hover:bg-indigo-50 transition flex items-center gap-1.5 cursor-pointer"
                         >
                           <Plus className="w-3.5 h-3.5" />
                           <span>Add custom category "{catSearchQuery.trim()}"</span>
@@ -2583,13 +2552,13 @@ export default function PerformanceTrackingView() {
                                 setProdCategories(updated);
                                 setProdCategory(updated[0] || '');
                               }}
-                              className={`w-full text-left px-3 py-2 text-[11px] hover:bg-slate-900 transition flex items-center justify-between cursor-pointer ${
-                                isSelected ? 'text-sky-300 font-semibold bg-sky-950/30' : 'text-slate-300 hover:text-white'
+                              className={`w-full text-left px-3 py-2 text-[11px] hover:bg-gray-100 transition flex items-center justify-between cursor-pointer ${
+                                isSelected ? 'text-sky-700 font-semibold bg-sky-50' : 'text-slate-700 hover:text-slate-900'
                               }`}
                             >
                               <span>{cat}</span>
                               {isSelected && (
-                                <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                                <Check className="w-3.5 h-3.5 text-sky-600 shrink-0" />
                               )}
                             </button>
                           );
@@ -2601,7 +2570,7 @@ export default function PerformanceTrackingView() {
 
                 {/* BRAND SEARCHABLE COMBOBOX */}
                 <div className="relative" ref={brandDropdownRef}>
-                  <label className="block text-[10px] font-bold text-amber-400 mb-1.5 uppercase tracking-wider">BRAND:</label>
+                  <label className="block text-[10px] font-bold text-amber-700 mb-1.5 uppercase tracking-wider">BRAND:</label>
                   <div className="relative">
                     <input 
                       type="text" 
@@ -2617,7 +2586,7 @@ export default function PerformanceTrackingView() {
                         setIsBrandDropdownOpen(true);
                         setBrandSearchQuery(prodBrand);
                       }}
-                      className="w-full text-xs p-2.5 pr-14 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      className="w-full text-xs p-2.5 pr-14 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       required
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -2628,7 +2597,7 @@ export default function PerformanceTrackingView() {
                             setProdBrand('');
                             setBrandSearchQuery('');
                           }}
-                          className="hover:text-rose-400 text-slate-500 transition cursor-pointer p-0.5"
+                          className="hover:text-rose-600 text-slate-500 transition cursor-pointer p-0.5"
                           title="Clear field"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -2642,7 +2611,7 @@ export default function PerformanceTrackingView() {
                             setBrandSearchQuery(prodBrand);
                           }
                         }}
-                        className="hover:text-indigo-400 text-slate-500 transition cursor-pointer p-0.5"
+                        className="hover:text-indigo-600 text-slate-500 transition cursor-pointer p-0.5"
                         title="Toggle dropdown"
                       >
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isBrandDropdownOpen ? 'rotate-180' : ''}`} />
@@ -2651,7 +2620,7 @@ export default function PerformanceTrackingView() {
                   </div>
 
                   {isBrandDropdownOpen && (
-                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-[#0d0d10] border border-slate-850 rounded-xl max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-850 animate-fadeIn scrollbar-thin">
+                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-white border border-gray-300 rounded-xl max-h-48 overflow-y-auto shadow-lg divide-y divide-gray-200 animate-fadeIn scrollbar-thin">
                       {filteredBrands.length === 0 ? (
                         <div className="px-3 py-2 text-[11px] text-slate-500 italic">
                           No matching brands. Type to use custom brand.
@@ -2671,16 +2640,16 @@ export default function PerformanceTrackingView() {
                               }
                               setIsBrandDropdownOpen(false);
                             }}
-                            className="w-full text-left px-3 py-2 text-[11px] hover:bg-slate-900 text-slate-300 hover:text-white transition flex flex-col cursor-pointer"
+                            className="w-full text-left px-3 py-2 text-[11px] hover:bg-gray-100 text-slate-700 hover:text-slate-900 transition flex flex-col cursor-pointer"
                           >
                             <div className="flex items-center justify-between w-full">
-                              <span className="font-medium text-slate-200">{b.name}</span>
+                              <span className="font-medium text-slate-800">{b.name}</span>
                               {prodBrand.toLowerCase() === b.name.toLowerCase() && (
-                                <Check className="w-3 h-3 text-amber-400 shrink-0" />
+                                <Check className="w-3 h-3 text-amber-600 shrink-0" />
                               )}
                             </div>
                             {b.owner && (
-                              <span className="text-[9px] text-slate-505 mt-0.5">Owner: {b.owner}</span>
+                              <span className="text-[9px] text-slate-500 mt-0.5">Owner: {b.owner}</span>
                             )}
                           </button>
                         ))
@@ -2691,7 +2660,7 @@ export default function PerformanceTrackingView() {
 
                 {/* BRAND OWNER SEARCHABLE COMBOBOX */}
                 <div className="relative" ref={ownerDropdownRef}>
-                  <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">BRAND OWNER:</label>
+                  <label className="block text-[10px] font-bold text-emerald-700 mb-1.5 uppercase tracking-wider">BRAND OWNER:</label>
                   <div className="relative">
                     <input 
                       type="text" 
@@ -2707,7 +2676,7 @@ export default function PerformanceTrackingView() {
                         setIsOwnerDropdownOpen(true);
                         setOwnerSearchQuery(prodBrandOwner);
                       }}
-                      className="w-full text-xs p-2.5 pr-14 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      className="w-full text-xs p-2.5 pr-14 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       required
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -2718,7 +2687,7 @@ export default function PerformanceTrackingView() {
                             setProdBrandOwner('');
                             setOwnerSearchQuery('');
                           }}
-                          className="hover:text-rose-400 text-slate-500 transition cursor-pointer p-0.5"
+                          className="hover:text-rose-600 text-slate-500 transition cursor-pointer p-0.5"
                           title="Clear field"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -2732,7 +2701,7 @@ export default function PerformanceTrackingView() {
                             setOwnerSearchQuery(prodBrandOwner);
                           }
                         }}
-                        className="hover:text-indigo-400 text-slate-500 transition cursor-pointer p-0.5"
+                        className="hover:text-indigo-600 text-slate-500 transition cursor-pointer p-0.5"
                         title="Toggle dropdown"
                       >
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOwnerDropdownOpen ? 'rotate-180' : ''}`} />
@@ -2741,7 +2710,7 @@ export default function PerformanceTrackingView() {
                   </div>
 
                   {isOwnerDropdownOpen && (
-                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-[#0d0d10] border border-slate-850 rounded-xl max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-850 animate-fadeIn scrollbar-thin">
+                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-white border border-gray-300 rounded-xl max-h-48 overflow-y-auto shadow-lg divide-y divide-gray-200 animate-fadeIn scrollbar-thin">
                       {filteredOwners.length === 0 ? (
                         <div className="px-3 py-2 text-[11px] text-slate-500 italic">
                           No matching brand owners. Type to use custom owner.
@@ -2756,11 +2725,11 @@ export default function PerformanceTrackingView() {
                               setOwnerSearchQuery(owner);
                               setIsOwnerDropdownOpen(false);
                             }}
-                            className="w-full text-left px-3 py-2 text-[11px] hover:bg-slate-900 text-slate-300 hover:text-white transition flex items-center justify-between cursor-pointer"
+                            className="w-full text-left px-3 py-2 text-[11px] hover:bg-gray-100 text-slate-700 hover:text-slate-900 transition flex items-center justify-between cursor-pointer"
                           >
                             <span>{owner}</span>
                             {prodBrandOwner.toLowerCase() === owner.toLowerCase() && (
-                              <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <Check className="w-3 h-3 text-emerald-600 shrink-0" />
                             )}
                           </button>
                         ))
@@ -2769,316 +2738,66 @@ export default function PerformanceTrackingView() {
                   )}
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-violet-400 mb-1.5 uppercase tracking-wider">Stock In (Qty Received):</label>
+                  <label className="block text-[10px] font-bold text-violet-700 mb-1.5 uppercase tracking-wider">Stock In (Qty Received):</label>
                   <input 
                     type="number" 
                     value={prodStockIn}
                     onChange={e => setProdStockIn(parseInt(e.target.value) || 0)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     placeholder="e.g. 1000"
                     min="0"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-rose-400 mb-1.5 uppercase tracking-wider">Stock Out (Qty Sold/Out):</label>
+                  <label className="block text-[10px] font-bold text-rose-700 mb-1.5 uppercase tracking-wider">Stock Out (Qty Sold/Out):</label>
                   <input 
                     type="number" 
                     value={prodStockOut}
                     onChange={e => setProdStockOut(parseInt(e.target.value) || 0)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-505"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     placeholder="e.g. 0"
                     min="0"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider">Pre-order Active:</label>
-                  <label className="flex items-center gap-2.5 w-full text-xs p-2.5 bg-[#141418] border border-slate-800 rounded-lg cursor-pointer select-none">
+                  <label className="block text-[10px] font-bold text-amber-700 mb-1.5 uppercase tracking-wider">Pre-order Active:</label>
+                  <label className="flex items-center gap-2.5 w-full text-xs p-2.5 bg-white border border-gray-300 rounded-lg cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={prodPreorderActive}
                       onChange={e => setProdPreorderActive(e.target.checked)}
-                      className="w-4 h-4 accent-amber-500 cursor-pointer"
+                      className="w-4 h-4 accent-amber-600 cursor-pointer"
                     />
-                    <span className="font-semibold text-slate-205">{prodPreorderActive ? 'Yes (Pre-order enabled)' : 'No'}</span>
+                    <span className="font-semibold text-slate-800">{prodPreorderActive ? 'Yes (Pre-order enabled)' : 'No'}</span>
                   </label>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">Featured Product (featuredproducts):</label>
-                  <label className="flex items-center gap-2.5 w-full text-xs p-2.5 bg-[#141418] border border-slate-800 rounded-lg cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={prodFeaturedProducts}
-                      onChange={e => setProdFeaturedProducts(e.target.checked)}
-                      className="w-4 h-4 accent-emerald-500 cursor-pointer"
-                    />
-                    <span className="font-semibold text-slate-205">{prodFeaturedProducts ? 'Yes (Featured)' : 'No'}</span>
-                  </label>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">Featured Sort Order (featuredprdsortorder):</label>
-                  <input
-                    type="number"
-                    value={prodFeaturedPrdSortOrder}
-                    onChange={e => setProdFeaturedPrdSortOrder(Number.isFinite(parseInt(e.target.value, 10)) ? parseInt(e.target.value, 10) : 1)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-505"
-                    placeholder="1"
-                  />
-                </div>
+              </div>
 
-                <div className="sm:col-span-2 md:col-span-3">
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">PRODUCT PHOTO / IMAGE DETAILS:</label>
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch mt-1.5">
-                    {/* Drag-and-Drop Image Area */}
-                    <div className="md:col-span-7">
-                      <div 
-                        onDragEnter={handleDrag}
-                        onDragOver={handleDrag}
-                        onDragLeave={handleDrag}
-                        onDrop={handleDrop}
-                        className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center h-full min-h-[110px] ${
-                          dragActive 
-                            ? 'border-indigo-500 bg-indigo-950/20' 
-                            : 'border-slate-800 hover:border-slate-700 bg-[#141418]'
-                        }`}
-                        onClick={() => document.getElementById('prod-file-input')?.click()}
-                      >
-                        <input 
-                          type="file" 
-                          id="prod-file-input" 
-                          accept="image/*" 
-                          className="hidden" 
-                          onChange={handleFileInputChange}
-                        />
-                        <div className="flex flex-col items-center justify-center space-y-1">
-                          <Plus className="w-5 h-5 text-indigo-400 animate-pulse" />
-                          <p className="text-[11px] font-medium text-slate-200">
-                            Drop photo here or <span className="text-indigo-400 font-bold hover:underline">browse files</span>
-                          </p>
-                          <p className="text-[9px] text-slate-500">
-                            PNG, JPG, WebP up to 10MB (Saved dynamically in-memory)
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Pre-view and URL Paste Fallback */}
-                    <div className="md:col-span-5 flex items-center gap-3 bg-[#111114] p-3 border border-slate-800/60 rounded-xl">
-                      <img 
-                        src={prodPicturePreview || prodPictureUrl || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=80&auto=format&fit=crop&q=60'} 
-                        alt="Product preview" 
-                        referrerPolicy="no-referrer"
-                        className="w-16 h-16 object-cover rounded-lg border border-slate-800 bg-[#0d0d10] shrink-0"
-                      />
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <span className="text-[9px] font-bold text-slate-500 block uppercase tracking-wide">Or Input Image URL:</span>
-                        <input 
-                          type="text" 
-                          placeholder="https://images.unsplash.com/photo-..." 
-                          value={prodPictureUrl}
-                          onChange={e => setProdPictureUrl(e.target.value)}
-                          className="w-full text-[10px] p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="sm:col-span-2 md:col-span-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-[#111114]/40 p-3 rounded-xl border border-slate-800/40">
-                  <div>
-                    <label className="block text-[10px] font-bold text-sky-400 mb-1.5 uppercase tracking-wider">VAMJO WEBLINK:</label>
-                    <input 
-                      type="url" 
-                      placeholder="https://vamjo.com/..." 
-                      value={prodVamjoWeblink}
-                      onChange={e => setProdVamjoWeblink(e.target.value)}
-                      className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider">AMAZON WEBLINK:</label>
-                    <input 
-                      type="url" 
-                      placeholder="https://amazon.in/..." 
-                      value={prodAmazonWeblink}
-                      onChange={e => setProdAmazonWeblink(e.target.value)}
-                      className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-blue-400 mb-1.5 uppercase tracking-wider">FLIPKART WEBLINK:</label>
-                    <input 
-                      type="url" 
-                      placeholder="https://flipkart.com/..." 
-                      value={prodFlipkartWeblink}
-                      onChange={e => setProdFlipkartWeblink(e.target.value)}
-                      className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-pink-400 mb-1.5 uppercase tracking-wider">MEESHO WEBLINK:</label>
-                    <input 
-                      type="url" 
-                      placeholder="https://meesho.com/..." 
-                      value={prodMeeshoWeblink}
-                      onChange={e => setProdMeeshoWeblink(e.target.value)}
-                      className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-pink-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="sm:col-span-2 md:col-span-3 text-[10px] font-bold text-indigo-400 uppercase tracking-wider border-b border-slate-800/60 pb-1 mt-4">
-                  Extended Product Catalog Details (E-Commerce & Master Table)
-                </div>
-
-                <div className="sm:col-span-2 md:col-span-3 space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Multiple Images Upload Option */}
-                    <div className="bg-[#111114] border border-slate-800/60 p-4 rounded-xl space-y-3">
-                      <label className="block text-[10px] font-bold text-sky-400 uppercase tracking-wider">
-                        E-Commerce Multiple Images
-                      </label>
-                      <div className="space-y-2">
-                        <input 
-                          type="text" 
-                          placeholder="Or type comma-separated URLs: https://image1.jpg, https://image2.jpg" 
-                          value={prodImagesText}
-                          onChange={e => {
-                            setProdImagesText(e.target.value);
-                            setProdImages(e.target.value.split(',').map(s => s.trim()).filter(Boolean));
-                          }}
-                          className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Or Drag & Upload Image Files</span>
-                        </div>
-                        <input 
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={e => {
-                            if (e.target.files) {
-                              Array.from(e.target.files).forEach((file: any) => {
-                                handleImageUploadAsync(file, (downloadUrl) => {
-                                  setProdImages(prev => {
-                                    const updated = [...prev, downloadUrl];
-                                    setProdImagesText(updated.join(', '));
-                                    return updated;
-                                  });
-                                });
-                              });
-                            }
-                          }}
-                          className="w-full text-[11px] text-slate-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-indigo-950 file:text-indigo-400 hover:file:bg-indigo-900 transition file:cursor-pointer"
-                        />
-                      </div>
-                      
-                      {/* Thumbnail Gallery */}
-                      {prodImages.length > 0 && (
-                        <div className="flex flex-wrap gap-2 p-2 bg-[#0d0d10] border border-slate-800 rounded-lg">
-                          {prodImages.map((img, idx) => (
-                            <div key={idx} className="relative group w-12 h-12">
-                              <img src={img} alt={`Img ${idx}`} className="w-full h-full object-cover rounded border border-slate-800" />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = prodImages.filter((_, i) => i !== idx);
-                                  setProdImages(updated);
-                                  setProdImagesText(updated.join(', '));
-                                }}
-                                className="absolute -top-1 -right-1 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 opacity-0 group-hover:opacity-100 transition duration-150"
-                              >
-                                <Trash2 className="w-2.5 h-2.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Multiple Videos Upload Option */}
-                    <div className="bg-[#111114] border border-slate-800/60 p-4 rounded-xl space-y-3">
-                      <label className="block text-[10px] font-bold text-amber-500 uppercase tracking-wider">
-                        E-Commerce Product Videos
-                      </label>
-                      <div className="space-y-2">
-                        <input 
-                          type="text" 
-                          placeholder="Or type comma-separated URLs: https://video1.mp4, https://video2.mp4" 
-                          value={prodVideosText}
-                          onChange={e => {
-                            setProdVideosText(e.target.value);
-                            setProdVideos(e.target.value.split(',').map(s => s.trim()).filter(Boolean));
-                          }}
-                          className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
-                        />
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Or Drag & Upload Video Files</span>
-                        </div>
-                        <input 
-                          type="file"
-                          accept="video/*"
-                          multiple
-                          onChange={e => {
-                            if (e.target.files) {
-                              Array.from(e.target.files).forEach((file: any) => {
-                                handleVideoUploadAsync(file, (downloadUrl) => {
-                                  setProdVideos(prev => {
-                                    const updated = [...prev, downloadUrl];
-                                    setProdVideosText(updated.join(', '));
-                                    return updated;
-                                  });
-                                });
-                              });
-                            }
-                          }}
-                          className="w-full text-[11px] text-slate-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-amber-950 file:text-amber-400 hover:file:bg-amber-900 transition file:cursor-pointer"
-                        />
-                      </div>
-                      
-                      {/* Video Preview Gallery */}
-                      {prodVideos.length > 0 && (
-                        <div className="flex flex-wrap gap-2 p-2 bg-[#0d0d10] border border-slate-800 rounded-lg">
-                          {prodVideos.map((vid, idx) => (
-                            <div key={idx} className="relative group w-32 h-20">
-                              <video src={vid} className="w-full h-full object-cover rounded border border-slate-800 bg-black" />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = prodVideos.filter((_, i) => i !== idx);
-                                  setProdVideos(updated);
-                                  setProdVideosText(updated.join(', '));
-                                }}
-                                className="absolute -top-1 -right-1 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 opacity-0 group-hover:opacity-100 transition duration-150 z-10"
-                              >
-                                <Trash2 className="w-2.5 h-2.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+              {/* Section 3: Product Specifications & Descriptions */}
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 border-t border-gray-300 pt-4">
+                <div className="sm:col-span-2 md:col-span-3 text-[10px] font-extrabold text-indigo-800 uppercase tracking-wider border-b border-gray-300 pb-1">
+                  Product Specifications &amp; Descriptions
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider">PRODUCT VARIANTS (e.g. 500ml, 1L, Red, Blue):</label>
+                  <label className="block text-[10px] font-bold text-amber-700 mb-1.5 uppercase tracking-wider">PRODUCT VARIANTS (e.g. 500ml, 1L, Red, Blue):</label>
                   <input 
                     type="text" 
                     placeholder="e.g. Lavender, Lemon, Rose" 
                     value={prodVariants}
                     onChange={e => setProdVariants(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">STOCK AVAILABILITY STATUS:</label>
+                  <label className="block text-[10px] font-bold text-emerald-700 mb-1.5 uppercase tracking-wider">STOCK AVAILABILITY STATUS:</label>
                   <select 
                     value={prodStockAvailability}
                     onChange={e => setProdStockAvailability(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                   >
                     <option value="In Stock">In Stock</option>
                     <option value="Low Stock">Low Stock</option>
@@ -3087,7 +2806,7 @@ export default function PerformanceTrackingView() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-indigo-400 mb-1.5 uppercase tracking-wider">OFFER PRICE (₹):</label>
+                  <label className="block text-[10px] font-bold text-indigo-700 mb-1.5 uppercase tracking-wider">OFFER PRICE (₹):</label>
                   <input 
                     type="number" 
                     placeholder="Discounted Offer Price"
@@ -3101,28 +2820,28 @@ export default function PerformanceTrackingView() {
                         setProdDiscount(Math.max(0, Math.round(((mrpVal - val) / mrpVal) * 100)));
                       }
                     }}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-teal-400 mb-1.5 uppercase tracking-wider">DISCOUNT (%):</label>
+                  <label className="block text-[10px] font-bold text-teal-700 mb-1.5 uppercase tracking-wider">DISCOUNT (%):</label>
                   <input 
                     type="number" 
                     value={prodDiscount}
                     onChange={e => setProdDiscount(parseInt(e.target.value) || 0)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     min="0"
                     max="100"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-yellow-500 mb-1.5 uppercase tracking-wider">CUSTOMER RATINGS (1-5 ⭐):</label>
+                  <label className="block text-[10px] font-bold text-amber-700 mb-1.5 uppercase tracking-wider">CUSTOMER RATINGS (1-5 ⭐):</label>
                   <select 
                     value={prodRating}
                     onChange={e => setProdRating(parseFloat(e.target.value) || 5)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                   >
                     <option value="5">5.0 - Excellent</option>
                     <option value="4.5">4.5 - Very Good</option>
@@ -3135,12 +2854,12 @@ export default function PerformanceTrackingView() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-pink-400 mb-1.5 uppercase tracking-wider">TOTAL REVIEWS COUNT:</label>
+                  <label className="block text-[10px] font-bold text-pink-700 mb-1.5 uppercase tracking-wider">TOTAL REVIEWS COUNT:</label>
                   <input 
                     type="number" 
                     value={prodReviewsCount}
                     onChange={e => setProdReviewsCount(parseInt(e.target.value) || 0)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     min="0"
                   />
                 </div>
@@ -3152,68 +2871,356 @@ export default function PerformanceTrackingView() {
                   ['UNIQUE SPEC 4:', prodUniqueSpec4, setProdUniqueSpec4],
                 ] as [string, string, (v: string) => void][]).map(([label, val, setter], i) => (
                   <div key={`prod-unique-spec-${i + 1}`}>
-                    <label className="block text-[10px] font-bold text-purple-400 mb-1.5 uppercase tracking-wider">{label}</label>
+                    <label className="block text-[10px] font-bold text-purple-700 mb-1.5 uppercase tracking-wider">{label}</label>
                     <input
                       id={`prod-unique-spec-${i + 1}`}
                       type="text"
                       value={val}
                       onChange={e => setter(e.target.value)}
-                      className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     />
                   </div>
                 ))}
 
                 <div>
-                  <label className="block text-[10px] font-bold text-purple-400 mb-1.5 uppercase tracking-wider">INGREDIENTS:</label>
+                  <label className="block text-[10px] font-bold text-purple-700 mb-1.5 uppercase tracking-wider">INGREDIENTS:</label>
                   <input 
                     type="text" 
                     placeholder="e.g. Active Surfactants, Natural Lavender Extract, Purified Water" 
                     value={prodIngredients}
                     onChange={e => setProdIngredients(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
 
+                <div>
+                  <label className="block text-[10px] font-bold text-emerald-700 mb-1.5 uppercase tracking-wider">CULINARY DETAILS:</label>
+                  <div className="flex items-center gap-2" role="radiogroup" aria-label="Culinary Details">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={prodCulinaryDetails}
+                      onClick={() => setProdCulinaryDetails(true)}
+                      id="create-culinary-details-yes"
+                      className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-bold cursor-pointer transition ${
+                        prodCulinaryDetails
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-white text-slate-700 border border-gray-300 hover:bg-gray-200'
+                      }`}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={!prodCulinaryDetails}
+                      onClick={() => setProdCulinaryDetails(false)}
+                      id="create-culinary-details-no"
+                      className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-bold cursor-pointer transition ${
+                        !prodCulinaryDetails
+                          ? 'bg-slate-700 text-white shadow-xs'
+                          : 'bg-white text-slate-700 border border-gray-300 hover:bg-gray-200'
+                      }`}
+                    >
+                      No
+                    </button>
+                  </div>
+                </div>
+
                 <div className="sm:col-span-2 md:col-span-3">
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">TECHNICAL SPECIFICATIONS / FORMULATIONS:</label>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">TECHNICAL SPECIFICATIONS / FORMULATIONS:</label>
                   <textarea 
                     placeholder="e.g. pH Level: 7.5; Soluble in water; Biodegradable surfactants..." 
                     value={prodSpecifications}
                     onChange={e => setProdSpecifications(e.target.value)}
                     rows={2}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
                   />
                 </div>
 
                 <div className="sm:col-span-2 md:col-span-3">
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">E-COMMERCE DESCRIPTION:</label>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">KEY FEATURES (COMMA-SEPARATED):</label>
+                  <textarea
+                    id="create-key-features-input"
+                    rows={3}
+                    placeholder="e.g. 100% Pure, Single-Origin, Cold-Processed"
+                    value={Array.isArray(prodV8Fields.keyFeatures) ? prodV8Fields.keyFeatures.join(', ') : ''}
+                    onChange={e => setProdV8Fields({ ...prodV8Fields, keyFeatures: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                  />
+                </div>
+
+                <div className="sm:col-span-2 md:col-span-3">
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">PRODUCT HIGHLIGHTS (COMMA-SEPARATED, 4–6 BULLETS):</label>
+                  <textarea
+                    id="create-product-highlights-input"
+                    rows={3}
+                    placeholder="e.g. Farm-fresh aroma, Hygienically packed, No preservatives"
+                    value={Array.isArray(prodV8Fields.productHighlights) ? prodV8Fields.productHighlights.join(', ') : ''}
+                    onChange={e => setProdV8Fields({ ...prodV8Fields, productHighlights: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                  />
+                </div>
+
+                <div className="sm:col-span-2 md:col-span-3">
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">E-COMMERCE DESCRIPTION:</label>
                   <textarea 
                     placeholder="Provide a detailed consumer-facing description of the product benefits and usage directions..." 
                     value={prodDescription}
                     onChange={e => setProdDescription(e.target.value)}
                     rows={2}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
                   />
                 </div>
 
                 <div className="sm:col-span-2 md:col-span-3">
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">NOTES / DESCRIPTION:</label>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">NOTES / DESCRIPTION:</label>
                   <textarea 
                     placeholder="Describe specific details about the homecare product formulations here..." 
                     value={prodNotes}
                     onChange={e => setProdNotes(e.target.value)}
                     rows={2}
-                    className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
                     required
                   />
                 </div>
+
+                <div className="sm:col-span-2 md:col-span-3">
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider">DIETARY ATTRIBUTES (COMMA-SEPARATED):</label>
+                  <input
+                    id="create-dietary-attributes-input"
+                    type="text"
+                    placeholder="Vegetarian, Vegan, Gluten-Free"
+                    value={Array.isArray(prodV8Fields.dietaryAttributes) ? prodV8Fields.dietaryAttributes.join(', ') : ''}
+                    onChange={e => setProdV8Fields({ ...prodV8Fields, dietaryAttributes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                    className="w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <ProductDetailsSection
+                  ref={createDetailsRef}
+                  mode="create"
+                  disabled={isSavingProduct}
+                  embedded
+                  lightTheme
+                  storageInstructions={prodV8Fields.storageInstructions || ''}
+                  onStorageInstructionsChange={(val) => setProdV8Fields({ ...prodV8Fields, storageInstructions: val })}
+                />
               </div>
 
-              {/* Product Master V8 Section (Botanical, 6-Language, Ayurvedic Monograph & Taxation/Market Research) */}
-              <ProductMasterV8Section value={prodV8Fields} onChange={setProdV8Fields} idPrefix="create" />
+              {/* Section 4: Separate Product Photo / Image Details Section */}
+              <div className="mt-4 bg-gray-200/70 border border-gray-300 rounded-2xl p-4 space-y-4" id="create-product-photo-section">
+                <div className="text-xs font-extrabold text-slate-800 uppercase tracking-wider border-b border-gray-300 pb-2">
+                  Product Photo / Image Details
+                </div>
 
-              {/* Product Details (separate product_details collection) */}
-              <ProductDetailsSection ref={createDetailsRef} mode="create" disabled={isSavingProduct} />
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
+                  {/* Drag-and-Drop Image Area */}
+                  <div className="md:col-span-7">
+                    <div 
+                      onDragEnter={handleDrag}
+                      onDragOver={handleDrag}
+                      onDragLeave={handleDrag}
+                      onDrop={handleDrop}
+                      className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center h-full min-h-[110px] ${
+                        dragActive 
+                          ? 'border-indigo-500 bg-indigo-50' 
+                          : 'border-gray-300 hover:border-indigo-400 bg-white'
+                      }`}
+                      onClick={() => document.getElementById('prod-file-input')?.click()}
+                    >
+                      <input 
+                        type="file" 
+                        id="prod-file-input" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={handleFileInputChange}
+                      />
+                      <div className="flex flex-col items-center justify-center space-y-1">
+                        <Plus className="w-5 h-5 text-indigo-600 animate-pulse" />
+                        <p className="text-[11px] font-medium text-slate-800">
+                          Drop photo here or <span className="text-indigo-600 font-bold hover:underline">browse files</span>
+                        </p>
+                        <p className="text-[9px] text-slate-600">
+                          PNG, JPG, WebP up to 10MB (Saved dynamically in-memory)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pre-view and URL Paste Fallback */}
+                  <div className="md:col-span-5 flex items-center gap-3 bg-white p-3 border border-gray-300 rounded-xl">
+                    <img 
+                      src={prodPicturePreview || prodPictureUrl || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=80&auto=format&fit=crop&q=60'} 
+                      alt="Product preview" 
+                      referrerPolicy="no-referrer"
+                      className="w-16 h-16 object-cover rounded-lg border border-gray-300 bg-gray-100 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <span className="text-[9px] font-bold text-slate-600 block uppercase tracking-wide">Or Input Image URL:</span>
+                      <input 
+                        type="text" 
+                        placeholder="https://images.unsplash.com/photo-..." 
+                        value={prodPictureUrl}
+                        onChange={e => setProdPictureUrl(e.target.value)}
+                        className="w-full text-[10px] p-2 bg-white border border-gray-300 text-slate-900 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Amazon Weblink (Preserved; Vamjo/Flipkart/Meesho Weblinks Removed) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-amber-700 mb-1.5 uppercase tracking-wider">AMAZON WEBLINK:</label>
+                    <input 
+                      type="url" 
+                      placeholder="https://amazon.in/..." 
+                      value={prodAmazonWeblink}
+                      onChange={e => setProdAmazonWeblink(e.target.value)}
+                      className="w-full text-xs p-2 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {/* E-Commerce Multiple Images & Product Videos */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Multiple Images Upload Option */}
+                  <div className="bg-white border border-gray-300 p-4 rounded-xl space-y-3">
+                    <label className="block text-[10px] font-bold text-sky-700 uppercase tracking-wider">
+                      E-Commerce Multiple Images
+                    </label>
+                    <div className="space-y-2">
+                      <input 
+                        type="text" 
+                        placeholder="Or type comma-separated URLs: https://image1.jpg, https://image2.jpg" 
+                        value={prodImagesText}
+                        onChange={e => {
+                          setProdImagesText(e.target.value);
+                          setProdImages(e.target.value.split(',').map(s => s.trim()).filter(Boolean));
+                        }}
+                        className="w-full text-xs p-2 bg-white border border-gray-300 text-slate-900 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-slate-600 uppercase tracking-wide">Or Drag & Upload Image Files</span>
+                      </div>
+                      <input 
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={e => {
+                          if (e.target.files) {
+                            Array.from(e.target.files).forEach((file: any) => {
+                              handleImageUploadAsync(file, (downloadUrl) => {
+                                setProdImages(prev => {
+                                  const updated = [...prev, downloadUrl];
+                                  setProdImagesText(updated.join(', '));
+                                  return updated;
+                                });
+                              });
+                            });
+                          }
+                        }}
+                        className="w-full text-[11px] text-slate-700 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200 transition file:cursor-pointer"
+                      />
+                    </div>
+                    
+                    {/* Thumbnail Gallery */}
+                    {prodImages.length > 0 && (
+                      <div className="flex flex-wrap gap-2 p-2 bg-gray-100 border border-gray-300 rounded-lg">
+                        {prodImages.map((img, idx) => (
+                          <div key={idx} className="relative group w-12 h-12">
+                            <img src={img} alt={`Img ${idx}`} className="w-full h-full object-cover rounded border border-gray-300" />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = prodImages.filter((_, i) => i !== idx);
+                                setProdImages(updated);
+                                setProdImagesText(updated.join(', '));
+                              }}
+                              className="absolute -top-1 -right-1 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 opacity-0 group-hover:opacity-100 transition duration-150"
+                            >
+                              <Trash2 className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Multiple Videos Upload Option */}
+                  <div className="bg-white border border-gray-300 p-4 rounded-xl space-y-3">
+                    <label className="block text-[10px] font-bold text-amber-700 uppercase tracking-wider">
+                      E-Commerce Product Videos
+                    </label>
+                    <div className="space-y-2">
+                      <input 
+                        type="text" 
+                        placeholder="Or type comma-separated URLs: https://video1.mp4, https://video2.mp4" 
+                        value={prodVideosText}
+                        onChange={e => {
+                          setProdVideosText(e.target.value);
+                          setProdVideos(e.target.value.split(',').map(s => s.trim()).filter(Boolean));
+                        }}
+                        className="w-full text-xs p-2 bg-white border border-gray-300 text-slate-900 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-slate-600 uppercase tracking-wide">Or Drag & Upload Video Files</span>
+                      </div>
+                      <input 
+                        type="file"
+                        accept="video/*"
+                        multiple
+                        onChange={e => {
+                          if (e.target.files) {
+                            Array.from(e.target.files).forEach((file: any) => {
+                              handleVideoUploadAsync(file, (downloadUrl) => {
+                                setProdVideos(prev => {
+                                  const updated = [...prev, downloadUrl];
+                                  setProdVideosText(updated.join(', '));
+                                  return updated;
+                                });
+                              });
+                            });
+                          }
+                        }}
+                        className="w-full text-[11px] text-slate-700 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-amber-100 file:text-amber-700 hover:file:bg-amber-200 transition file:cursor-pointer"
+                      />
+                    </div>
+                    
+                    {/* Video Preview Gallery */}
+                    {prodVideos.length > 0 && (
+                      <div className="flex flex-wrap gap-2 p-2 bg-gray-100 border border-gray-300 rounded-lg">
+                        {prodVideos.map((vid, idx) => (
+                          <div key={idx} className="relative group w-32 h-20">
+                            <video src={vid} className="w-full h-full object-cover rounded border border-gray-300 bg-black" />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = prodVideos.filter((_, i) => i !== idx);
+                                setProdVideos(updated);
+                                setProdVideosText(updated.join(', '));
+                              }}
+                              className="absolute -top-1 -right-1 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 opacity-0 group-hover:opacity-100 transition duration-150 z-10"
+                            >
+                              <Trash2 className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 5: Ayurvedic Product Conditional Details (Yes / No) */}
+              <ProductV8AyurvedicConditionalSection value={prodV8Fields} onChange={setProdV8Fields} idPrefix="create" />
+
+              {/* Section 6: Separate SEO Meta Data Section */}
+              <ProductV9SeoMetaDataSection value={prodV8Fields} onChange={setProdV8Fields} idPrefix="create" />
+
+              {/* Section 7: AI Commerce, GS1 Identifiers & Feed Discoverability */}
+              <ProductV10AICommerceSection value={prodV8Fields} onChange={setProdV8Fields} idPrefix="create" />
 
               {productSaveNotice && (
                 <p role="alert" id="create-product-save-notice" className="mt-3 text-[11px] font-semibold text-rose-700">{productSaveNotice}</p>
@@ -3585,43 +3592,14 @@ export default function PerformanceTrackingView() {
                             <div className="space-y-1.5 min-w-[140px]">
                               <input 
                                 type="url" 
-                                placeholder="Vamjo Link" 
-                                value={editVamjoWeblink}
-                                onChange={e => setEditVamjoWeblink(e.target.value)}
-                                className="w-full text-[9px] px-1.5 py-1 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded focus:outline-none focus:border-sky-500"
-                              />
-                              <input 
-                                type="url" 
                                 placeholder="Amazon Link" 
                                 value={editAmazonWeblink}
                                 onChange={e => setEditAmazonWeblink(e.target.value)}
                                 className="w-full text-[9px] px-1.5 py-1 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded focus:outline-none focus:border-amber-500"
                               />
-                              <input 
-                                type="url" 
-                                placeholder="Flipkart Link" 
-                                value={editFlipkartWeblink}
-                                onChange={e => setEditFlipkartWeblink(e.target.value)}
-                                className="w-full text-[9px] px-1.5 py-1 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded focus:outline-none focus:border-blue-500"
-                              />
-                              <input 
-                                type="url" 
-                                placeholder="Meesho Link" 
-                                value={editMeeshoWeblink}
-                                onChange={e => setEditMeeshoWeblink(e.target.value)}
-                                className="w-full text-[9px] px-1.5 py-1 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded focus:outline-none focus:border-pink-500"
-                              />
                             </div>
                           ) : (
                             <div className="flex flex-col gap-1 min-w-[120px] font-mono">
-                              {p.vamjoWeblink ? (
-                                <a href={p.vamjoWeblink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[10px] text-sky-400 hover:text-sky-300 font-bold hover:underline transition-colors" title={p.vamjoWeblink}>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0"></span>
-                                  <span>Vamjo Link ↗</span>
-                                </a>
-                              ) : (
-                                <span className="text-[10px] text-slate-600">No Vamjo link</span>
-                              )}
                               {p.amazonWeblink ? (
                                 <a href={p.amazonWeblink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[10px] text-amber-500 hover:text-amber-400 font-bold hover:underline transition-colors" title={p.amazonWeblink}>
                                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
@@ -3629,22 +3607,6 @@ export default function PerformanceTrackingView() {
                                 </a>
                               ) : (
                                 <span className="text-[10px] text-slate-600">No Amazon link</span>
-                              )}
-                              {p.flipkartWeblink ? (
-                                <a href={p.flipkartWeblink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 font-bold hover:underline transition-colors" title={p.flipkartWeblink}>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0"></span>
-                                  <span>Flipkart Link ↗</span>
-                                </a>
-                              ) : (
-                                <span className="text-[10px] text-slate-600">No Flipkart link</span>
-                              )}
-                              {p.meeshoWeblink ? (
-                                <a href={p.meeshoWeblink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[10px] text-pink-400 hover:text-pink-300 font-bold hover:underline transition-colors" title={p.meeshoWeblink}>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-pink-405 shrink-0"></span>
-                                  <span>Meesho Link ↗</span>
-                                </a>
-                              ) : (
-                                <span className="text-[10px] text-slate-600">No Meesho link</span>
                               )}
                             </div>
                           )}
@@ -3922,7 +3884,7 @@ export default function PerformanceTrackingView() {
           {/* EDIT PRODUCT MODAL (POPUP NEW WINDOW AS REQUESTED) */}
           {editingProductId && (
             <div className="fixed inset-0 z-[1000] overflow-y-auto bg-black/85 backdrop-blur-md flex items-center justify-center p-4 md:p-6">
-              <div className="bg-[#141418] border border-slate-850 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden animate-fadeIn my-auto flex flex-col max-h-[90vh]">
+              <div id="edit-prod-modal" className="bg-[#E8ECEF] border border-slate-300 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden animate-fadeIn my-auto flex flex-col max-h-[90vh]">
                 {/* Header */}
                 <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-[#0d0d10] shrink-0">
                   <div>
@@ -3947,7 +3909,7 @@ export default function PerformanceTrackingView() {
                     </div>
                   )}
 
-                  <div className="bg-[#141418] border border-slate-800 rounded-2xl p-5 space-y-4">
+                  <div className="edit-prod-section-card bg-[#F1F4F6] border border-slate-300 rounded-2xl p-5 space-y-4">
                     <h4 className="text-xs font-bold text-white uppercase tracking-wider">Product Master Details</h4>
                     
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -4420,287 +4382,14 @@ export default function PerformanceTrackingView() {
                           <span className="font-semibold text-slate-205">{editPreorderActive ? 'Yes (Pre-order enabled)' : 'No'}</span>
                         </label>
                       </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider font-mono">Featured Product (featuredproducts):</label>
-                        <label className="flex items-center gap-2.5 w-full text-xs p-2.5 bg-[#141418] border border-slate-800 rounded-lg cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={editFeaturedProducts}
-                            onChange={e => setEditFeaturedProducts(e.target.checked)}
-                            className="w-4 h-4 accent-emerald-500 cursor-pointer"
-                          />
-                          <span className="font-semibold text-slate-205">{editFeaturedProducts ? 'Yes (Featured)' : 'No'}</span>
-                        </label>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider font-mono">Featured Sort Order (featuredprdsortorder):</label>
-                        <input
-                          type="number"
-                          value={editFeaturedPrdSortOrder}
-                          onChange={e => setEditFeaturedPrdSortOrder(Number.isFinite(parseInt(e.target.value, 10)) ? parseInt(e.target.value, 10) : 1)}
-                          className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-205 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          placeholder="1"
-                        />
-                      </div>
-                    </div>
-
-                    {/* DRAG AND DROP / FILE INPUT IN EDIT MODAL */}
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch border-t border-slate-800/60 pt-4">
-                      <div className="md:col-span-12 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        Product Photo / Image Details
-                      </div>
-                      <div className="md:col-span-7">
-                        <div 
-                          onDragEnter={handleEditDrag}
-                          onDragOver={handleEditDrag}
-                          onDragLeave={handleEditDrag}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                              uploadProductImage(e.dataTransfer.files[0], editingProductId || '').then(({ downloadUrl }) => {
-                                setEditPicture(downloadUrl);
-                                if (editingProductId) updateProduct(editingProductId, { imageUrl: downloadUrl, storagePath: `products/${editingProductId}/main.jpg` });
-                              }).catch(() => alert('Failed to replace product image.'));
-                            }
-                          }}
-                          className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center h-full min-h-[110px] ${
-                            editDragActive 
-                              ? 'border-indigo-500 bg-indigo-950/10' 
-                              : 'border-slate-800 hover:border-slate-700 bg-[#0d0d10]'
-                          }`}
-                          onClick={() => document.getElementById('edit-modal-file-input')?.click()}
-                        >
-                          <input 
-                            type="file" 
-                            id="edit-modal-file-input" 
-                            accept="image/*" 
-                            className="hidden" 
-                            onChange={(e) => {
-                              if (e.target.files && e.target.files[0]) {
-                                uploadProductImage(e.target.files[0], editingProductId || '').then(({ downloadUrl }) => {
-                                  setEditPicture(downloadUrl);
-                                  if (editingProductId) updateProduct(editingProductId, { imageUrl: downloadUrl, storagePath: `products/${editingProductId}/main.jpg` });
-                                }).catch(() => alert('Failed to replace product image.'));
-                              }
-                            }}
-                          />
-                          <div className="flex flex-col items-center justify-center space-y-1">
-                            <Plus className="w-5 h-5 text-indigo-400 animate-pulse" />
-                            <p className="text-[11px] font-medium text-slate-200">
-                              Drop photo here or <span className="text-indigo-400 font-bold hover:underline">browse files</span>
-                            </p>
-                            <p className="text-[9px] text-slate-500">
-                              PNG, JPG, WebP up to 10MB
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="md:col-span-5 flex items-center gap-3 bg-[#0d0d10] p-3 border border-slate-800 rounded-xl">
-                        <img 
-                          src={editPicture || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=80&auto=format&fit=crop&q=60'} 
-                          alt="Product preview" 
-                          referrerPolicy="no-referrer"
-                          className="w-16 h-16 object-cover rounded-lg border border-slate-800 bg-[#0d0d10] shrink-0"
-                        />
-                        <div className="flex-1 min-w-0 space-y-1">
-                          <span className="text-[9px] font-bold text-slate-500 block uppercase tracking-wide">Or Input Image URL:</span>
-                          <input 
-                            type="text" 
-                            placeholder="https://images.unsplash.com/photo-..." 
-                            value={editPicture}
-                            onChange={e => setEditPicture(e.target.value)}
-                            className="w-full text-[10px] p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* WEBLINKS GRID */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-[#0d0d10] p-3 rounded-xl border border-slate-800 mt-4">
-                      <div>
-                        <label className="block text-[10px] font-bold text-sky-400 mb-1.5 uppercase tracking-wider">VAMJO WEBLINK:</label>
-                        <input 
-                          type="url" 
-                          placeholder="https://vamjo.com/..." 
-                          value={editVamjoWeblink}
-                          onChange={e => setEditVamjoWeblink(e.target.value)}
-                          className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider">AMAZON WEBLINK:</label>
-                        <input 
-                          type="url" 
-                          placeholder="https://amazon.in/..." 
-                          value={editAmazonWeblink}
-                          onChange={e => setEditAmazonWeblink(e.target.value)}
-                          className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-blue-400 mb-1.5 uppercase tracking-wider">FLIPKART WEBLINK:</label>
-                        <input 
-                          type="url" 
-                          placeholder="https://flipkart.com/..." 
-                          value={editFlipkartWeblink}
-                          onChange={e => setEditFlipkartWeblink(e.target.value)}
-                          className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-pink-400 mb-1.5 uppercase tracking-wider">MEESHO WEBLINK:</label>
-                        <input 
-                          type="url" 
-                          placeholder="https://meesho.com/..." 
-                          value={editMeeshoWeblink}
-                          onChange={e => setEditMeeshoWeblink(e.target.value)}
-                          className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-pink-500"
-                        />
-                      </div>
                     </div>
                   </div>
 
-                  {/* EXTENDED SPECIFICATIONS */}
-                  <div className="bg-[#141418] border border-slate-800 rounded-2xl p-5 space-y-4">
-                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">E-Commerce & Master Table Catalog Details</h4>
+                  {/* Section 3: Product Specifications & Descriptions */}
+                  <div className="edit-prod-section-card bg-[#F1F4F6] border border-slate-300 rounded-2xl p-5 space-y-4">
+                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Product Specifications &amp; Descriptions</h4>
                     
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                      <div className="sm:col-span-2 md:col-span-3 space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Multiple Images Upload Option */}
-                          <div className="bg-[#111114] border border-slate-800/60 p-4 rounded-xl space-y-3">
-                            <label className="block text-[10px] font-bold text-sky-400 uppercase tracking-wider">
-                              E-Commerce Multiple Images
-                            </label>
-                            <div className="space-y-2">
-                              <input 
-                                type="text" 
-                                placeholder="Or type comma-separated URLs: https://image1.jpg, https://image2.jpg" 
-                                value={editImagesText}
-                                onChange={e => {
-                                  setEditImagesText(e.target.value);
-                                  setEditImages(e.target.value.split(',').map(s => s.trim()).filter(Boolean));
-                                }}
-                                className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                              />
-                              <div className="flex items-center justify-between">
-                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Or Drag & Upload Image Files</span>
-                              </div>
-                              <input 
-                                type="file"
-                                accept="image/*"
-                                multiple
-                                onChange={e => {
-                                  if (e.target.files) {
-                                    Array.from(e.target.files).forEach((file: any) => {
-                                      handleImageUploadAsync(file, (downloadUrl) => {
-                                        setEditImages(prev => {
-                                          const current = Array.isArray(prev) ? prev : [];
-                                          const updated = [...current, downloadUrl];
-                                          setEditImagesText(updated.join(', '));
-                                          return updated;
-                                        });
-                                      });
-                                    });
-                                  }
-                                }}
-                                className="w-full text-[11px] text-slate-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-indigo-950 file:text-indigo-400 hover:file:bg-indigo-900 transition file:cursor-pointer"
-                              />
-                            </div>
-                            
-                            {/* Thumbnail Gallery */}
-                            {Array.isArray(editImages) && editImages.length > 0 && (
-                              <div className="flex flex-wrap gap-2 p-2 bg-[#0d0d10] border border-slate-800 rounded-lg">
-                                {editImages.map((img, idx) => (
-                                  <div key={idx} className="relative group w-12 h-12">
-                                    <img src={img} alt={`Img ${idx}`} className="w-full h-full object-cover rounded border border-slate-800" />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const updated = (Array.isArray(editImages) ? editImages : []).filter((_, i) => i !== idx);
-                                        setEditImages(updated);
-                                        setEditImagesText(updated.join(', '));
-                                      }}
-                                      className="absolute -top-1 -right-1 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 opacity-0 group-hover:opacity-100 transition duration-150"
-                                    >
-                                      <Trash2 className="w-2.5 h-2.5" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Multiple Videos Upload Option */}
-                          <div className="bg-[#111114] border border-slate-800/60 p-4 rounded-xl space-y-3">
-                            <label className="block text-[10px] font-bold text-amber-500 uppercase tracking-wider">
-                              E-Commerce Product Videos
-                            </label>
-                            <div className="space-y-2">
-                              <input 
-                                type="text" 
-                                placeholder="Or type comma-separated URLs: https://video1.mp4, https://video2.mp4" 
-                                value={editVideosText}
-                                onChange={e => {
-                                  setEditVideosText(e.target.value);
-                                  setEditVideos(e.target.value.split(',').map(s => s.trim()).filter(Boolean));
-                                }}
-                                className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
-                              />
-                              <div className="flex items-center justify-between">
-                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Or Drag & Upload Video Files</span>
-                              </div>
-                              <input 
-                                type="file"
-                                accept="video/*"
-                                multiple
-                                onChange={e => {
-                                  if (e.target.files) {
-                                    Array.from(e.target.files).forEach((file: any) => {
-                                      handleVideoUploadAsync(file, (downloadUrl) => {
-                                        setEditVideos(prev => {
-                                          const current = Array.isArray(prev) ? prev : [];
-                                          const updated = [...current, downloadUrl];
-                                          setEditVideosText(updated.join(', '));
-                                          return updated;
-                                        });
-                                      });
-                                    });
-                                  }
-                                }}
-                                className="w-full text-[11px] text-slate-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-amber-950 file:text-amber-400 hover:file:bg-amber-900 transition file:cursor-pointer"
-                              />
-                            </div>
-                            
-                            {/* Video Preview Gallery */}
-                            {Array.isArray(editVideos) && editVideos.length > 0 && (
-                              <div className="flex flex-wrap gap-2 p-2 bg-[#0d0d10] border border-slate-800 rounded-lg">
-                                {editVideos.map((vid, idx) => (
-                                  <div key={idx} className="relative group w-32 h-20">
-                                    <video src={vid} className="w-full h-full object-cover rounded border border-slate-800 bg-black" />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const updated = (Array.isArray(editVideos) ? editVideos : []).filter((_, i) => i !== idx);
-                                        setEditVideos(updated);
-                                        setEditVideosText(updated.join(', '));
-                                      }}
-                                      className="absolute -top-1 -right-1 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 opacity-0 group-hover:opacity-100 transition duration-150 z-10"
-                                    >
-                                      <Trash2 className="w-2.5 h-2.5" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
                       <div>
                         <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider">PRODUCT VARIANTS (e.g. 500ml, 1L):</label>
                         <input 
@@ -4811,13 +4500,71 @@ export default function PerformanceTrackingView() {
                         />
                       </div>
 
+                      <div>
+                        <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">CULINARY DETAILS:</label>
+                        <div className="flex items-center gap-2" role="radiogroup" aria-label="Culinary Details">
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={editCulinaryDetails}
+                            onClick={() => setEditCulinaryDetails(true)}
+                            id="edit-culinary-details-yes"
+                            className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-bold cursor-pointer transition ${
+                              editCulinaryDetails
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-[#141418] text-slate-300 border border-slate-800 hover:bg-slate-800'
+                            }`}
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={!editCulinaryDetails}
+                            onClick={() => setEditCulinaryDetails(false)}
+                            id="edit-culinary-details-no"
+                            className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-bold cursor-pointer transition ${
+                              !editCulinaryDetails
+                                ? 'bg-slate-600 text-white shadow-xs'
+                                : 'bg-[#141418] text-slate-300 border border-slate-800 hover:bg-slate-800'
+                            }`}
+                          >
+                            No
+                          </button>
+                        </div>
+                      </div>
+
                       <div className="sm:col-span-2 md:col-span-3">
-                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">TECHNICAL SPECIFICATIONS:</label>
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">TECHNICAL SPECIFICATIONS / FORMULATIONS:</label>
                         <textarea 
                           value={editSpecifications}
                           onChange={e => setEditSpecifications(e.target.value)}
                           rows={2}
                           className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2 md:col-span-3">
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">KEY FEATURES (COMMA-SEPARATED):</label>
+                        <textarea
+                          id="edit-key-features-input"
+                          rows={3}
+                          placeholder="e.g. 100% Pure, Single-Origin, Cold-Processed"
+                          value={Array.isArray(editV8Fields.keyFeatures) ? editV8Fields.keyFeatures.join(', ') : ''}
+                          onChange={e => setEditV8Fields({ ...editV8Fields, keyFeatures: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                          className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2 md:col-span-3">
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">PRODUCT HIGHLIGHTS (COMMA-SEPARATED, 4–6 BULLETS):</label>
+                        <textarea
+                          id="edit-product-highlights-input"
+                          rows={3}
+                          placeholder="e.g. Farm-fresh aroma, Hygienically packed, No preservatives"
+                          value={Array.isArray(editV8Fields.productHighlights) ? editV8Fields.productHighlights.join(', ') : ''}
+                          onChange={e => setEditV8Fields({ ...editV8Fields, productHighlights: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                          className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
                         />
                       </div>
 
@@ -4841,14 +4588,261 @@ export default function PerformanceTrackingView() {
                           required
                         />
                       </div>
+
+                      <div className="sm:col-span-2 md:col-span-3">
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">DIETARY ATTRIBUTES (COMMA-SEPARATED):</label>
+                        <input
+                          id="edit-dietary-attributes-input"
+                          type="text"
+                          placeholder="Vegetarian, Vegan, Gluten-Free"
+                          value={Array.isArray(editV8Fields.dietaryAttributes) ? editV8Fields.dietaryAttributes.join(', ') : ''}
+                          onChange={e => setEditV8Fields({ ...editV8Fields, dietaryAttributes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                          className="w-full text-xs p-2.5 bg-[#141418] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <ProductDetailsSection
+                        key={editingProductId}
+                        ref={editDetailsRef}
+                        mode="edit"
+                        productId={editingProductId}
+                        disabled={isSavingProduct}
+                        embedded
+                        storageInstructions={editV8Fields.storageInstructions || ''}
+                        onStorageInstructionsChange={(val) => setEditV8Fields({ ...editV8Fields, storageInstructions: val })}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Section 4: Separate Product Photo / Image Details Section */}
+                  <div className="edit-prod-section-card bg-[#F1F4F6] border border-slate-300 rounded-2xl p-5 space-y-4" id="edit-product-photo-section">
+                    <h4 className="text-xs font-extrabold text-slate-200 uppercase tracking-wider border-b border-slate-800/60 pb-2">
+                      Product Photo / Image Details
+                    </h4>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
+                      <div className="md:col-span-7">
+                        <div 
+                          onDragEnter={handleEditDrag}
+                          onDragOver={handleEditDrag}
+                          onDragLeave={handleEditDrag}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                              uploadProductImage(e.dataTransfer.files[0], editingProductId || '').then(({ downloadUrl }) => {
+                                setEditPicture(downloadUrl);
+                                if (editingProductId) updateProduct(editingProductId, { imageUrl: downloadUrl, storagePath: `products/${editingProductId}/main.jpg` });
+                              }).catch(() => alert('Failed to replace product image.'));
+                            }
+                          }}
+                          className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center h-full min-h-[110px] ${
+                            editDragActive 
+                              ? 'border-indigo-500 bg-indigo-950/10' 
+                              : 'border-slate-800 hover:border-slate-700 bg-[#0d0d10]'
+                          }`}
+                          onClick={() => document.getElementById('edit-modal-file-input')?.click()}
+                        >
+                          <input 
+                            type="file" 
+                            id="edit-modal-file-input" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                uploadProductImage(e.target.files[0], editingProductId || '').then(({ downloadUrl }) => {
+                                  setEditPicture(downloadUrl);
+                                  if (editingProductId) updateProduct(editingProductId, { imageUrl: downloadUrl, storagePath: `products/${editingProductId}/main.jpg` });
+                                }).catch(() => alert('Failed to replace product image.'));
+                              }
+                            }}
+                          />
+                          <div className="flex flex-col items-center justify-center space-y-1">
+                            <Plus className="w-5 h-5 text-indigo-400 animate-pulse" />
+                            <p className="text-[11px] font-medium text-slate-200">
+                              Drop photo here or <span className="text-indigo-400 font-bold hover:underline">browse files</span>
+                            </p>
+                            <p className="text-[9px] text-slate-500">
+                              PNG, JPG, WebP up to 10MB
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-5 flex items-center gap-3 bg-[#0d0d10] p-3 border border-slate-800 rounded-xl">
+                        <img 
+                          src={editPicture || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=80&auto=format&fit=crop&q=60'} 
+                          alt="Product preview" 
+                          referrerPolicy="no-referrer"
+                          className="w-16 h-16 object-cover rounded-lg border border-slate-800 bg-[#0d0d10] shrink-0"
+                        />
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <span className="text-[9px] font-bold text-slate-500 block uppercase tracking-wide">Or Input Image URL:</span>
+                          <input 
+                            type="text" 
+                            placeholder="https://images.unsplash.com/photo-..." 
+                            value={editPicture}
+                            onChange={e => setEditPicture(e.target.value)}
+                            className="w-full text-[10px] p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Product Master V8 Section (Botanical, 6-Language, Ayurvedic Monograph & Taxation/Market Research) */}
-                    <ProductMasterV8Section value={editV8Fields} onChange={setEditV8Fields} idPrefix="edit" />
+                    {/* Amazon Weblink */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-500 mb-1.5 uppercase tracking-wider">AMAZON WEBLINK:</label>
+                        <input 
+                          type="url" 
+                          placeholder="https://amazon.in/..." 
+                          value={editAmazonWeblink}
+                          onChange={e => setEditAmazonWeblink(e.target.value)}
+                          className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-202 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        />
+                      </div>
+                    </div>
 
-                    {/* Product Details (separate product_details collection) */}
-                    <ProductDetailsSection key={editingProductId} ref={editDetailsRef} mode="edit" productId={editingProductId} disabled={isSavingProduct} />
+                    {/* E-Commerce Multiple Images & Product Videos */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Multiple Images Upload Option */}
+                      <div className="bg-[#111114] border border-slate-800/60 p-4 rounded-xl space-y-3">
+                        <label className="block text-[10px] font-bold text-sky-400 uppercase tracking-wider">
+                          E-Commerce Multiple Images
+                        </label>
+                        <div className="space-y-2">
+                          <input 
+                            type="text" 
+                            placeholder="Or type comma-separated URLs: https://image1.jpg, https://image2.jpg" 
+                            value={editImagesText}
+                            onChange={e => {
+                              setEditImagesText(e.target.value);
+                              setEditImages(e.target.value.split(',').map(s => s.trim()).filter(Boolean));
+                            }}
+                            className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Or Drag & Upload Image Files</span>
+                          </div>
+                          <input 
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={e => {
+                              if (e.target.files) {
+                                Array.from(e.target.files).forEach((file: any) => {
+                                  handleImageUploadAsync(file, (downloadUrl) => {
+                                    setEditImages(prev => {
+                                      const current = Array.isArray(prev) ? prev : [];
+                                      const updated = [...current, downloadUrl];
+                                      setEditImagesText(updated.join(', '));
+                                      return updated;
+                                    });
+                                  });
+                                });
+                              }
+                            }}
+                            className="w-full text-[11px] text-slate-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-indigo-950 file:text-indigo-400 hover:file:bg-indigo-900 transition file:cursor-pointer"
+                          />
+                        </div>
+                        
+                        {/* Thumbnail Gallery */}
+                        {Array.isArray(editImages) && editImages.length > 0 && (
+                          <div className="flex flex-wrap gap-2 p-2 bg-[#0d0d10] border border-slate-800 rounded-lg">
+                            {editImages.map((img, idx) => (
+                              <div key={idx} className="relative group w-12 h-12">
+                                <img src={img} alt={`Img ${idx}`} className="w-full h-full object-cover rounded border border-slate-800" />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = (Array.isArray(editImages) ? editImages : []).filter((_, i) => i !== idx);
+                                    setEditImages(updated);
+                                    setEditImagesText(updated.join(', '));
+                                  }}
+                                  className="absolute -top-1 -right-1 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 opacity-0 group-hover:opacity-100 transition duration-150"
+                                >
+                                  <Trash2 className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Multiple Videos Upload Option */}
+                      <div className="bg-[#111114] border border-slate-800/60 p-4 rounded-xl space-y-3">
+                        <label className="block text-[10px] font-bold text-amber-500 uppercase tracking-wider">
+                          E-Commerce Product Videos
+                        </label>
+                        <div className="space-y-2">
+                          <input 
+                            type="text" 
+                            placeholder="Or type comma-separated URLs: https://video1.mp4, https://video2.mp4" 
+                            value={editVideosText}
+                            onChange={e => {
+                              setEditVideosText(e.target.value);
+                              setEditVideos(e.target.value.split(',').map(s => s.trim()).filter(Boolean));
+                            }}
+                            className="w-full text-xs p-2 bg-[#141418] border border-slate-800 text-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          />
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Or Drag & Upload Video Files</span>
+                          </div>
+                          <input 
+                            type="file"
+                            accept="video/*"
+                            multiple
+                            onChange={e => {
+                              if (e.target.files) {
+                                Array.from(e.target.files).forEach((file: any) => {
+                                  handleVideoUploadAsync(file, (downloadUrl) => {
+                                    setEditVideos(prev => {
+                                      const current = Array.isArray(prev) ? prev : [];
+                                      const updated = [...current, downloadUrl];
+                                      setEditVideosText(updated.join(', '));
+                                      return updated;
+                                    });
+                                  });
+                                });
+                              }
+                            }}
+                            className="w-full text-[11px] text-slate-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-amber-950 file:text-amber-400 hover:file:bg-amber-900 transition file:cursor-pointer"
+                          />
+                        </div>
+                        
+                        {/* Video Preview Gallery */}
+                        {Array.isArray(editVideos) && editVideos.length > 0 && (
+                          <div className="flex flex-wrap gap-2 p-2 bg-[#0d0d10] border border-slate-800 rounded-lg">
+                            {editVideos.map((vid, idx) => (
+                              <div key={idx} className="relative group w-32 h-20">
+                                <video src={vid} className="w-full h-full object-cover rounded border border-slate-800 bg-black" />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = (Array.isArray(editVideos) ? editVideos : []).filter((_, i) => i !== idx);
+                                    setEditVideos(updated);
+                                    setEditVideosText(updated.join(', '));
+                                  }}
+                                  className="absolute -top-1 -right-1 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 opacity-0 group-hover:opacity-100 transition duration-150 z-10"
+                                >
+                                  <Trash2 className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Section 5: Ayurvedic Product Conditional Details (Yes / No) */}
+                  <ProductV8AyurvedicConditionalSection value={editV8Fields} onChange={setEditV8Fields} idPrefix="edit" />
+
+                  {/* Section 6: Separate SEO Meta Data Section */}
+                  <ProductV9SeoMetaDataSection value={editV8Fields} onChange={setEditV8Fields} idPrefix="edit" />
+
+                  {/* Section 7: AI Commerce, GS1 Identifiers & Feed Discoverability */}
+                  <ProductV10AICommerceSection value={editV8Fields} onChange={setEditV8Fields} idPrefix="edit" />
                 </div>
 
                 {/* Sticky Bottom Actions */}

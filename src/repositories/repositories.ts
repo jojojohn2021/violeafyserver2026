@@ -113,27 +113,18 @@ export class ProductRepository extends BaseRepository<ProductPerformance> {
     const finalSku = EIGHT_DIGIT_SKU_REGEX.test(incomingSku)
       ? incomingSku
       : await allocateClientEightDigitSku();
-    const featuredproducts =
-      typeof data.featuredproducts === 'boolean'
-        ? data.featuredproducts
-        : String((data as any).featuredproducts).toLowerCase() === 'true';
-    const rawSortOrder = Number((data as any).featuredprdsortorder);
-    const featuredprdsortorder =
-      data.featuredprdsortorder !== undefined &&
-      data.featuredprdsortorder !== null &&
-      Number.isFinite(rawSortOrder)
-        ? rawSortOrder
-        : 1;
     return super.create({
       ...data,
       sku: finalSku,
-      featuredproducts,
-      featuredprdsortorder,
+      culinarydetails: data.culinarydetails === true,
     });
   }
 
   override async update(id: string, updates: Partial<ProductPerformance>): Promise<void> {
     const sanitized = { ...updates };
+    if (sanitized.culinarydetails !== undefined) {
+      sanitized.culinarydetails = Boolean(sanitized.culinarydetails);
+    }
     if (sanitized.sku !== undefined) {
       try {
         const existingSnap = await getDoc(doc(db, 'products', id));

@@ -1080,10 +1080,6 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
       uniqueSpec1: masterUpdationForm.uniqueSpec1,
       uniqueSpec2: masterUpdationForm.uniqueSpec2,
       uniqueSpec3: masterUpdationForm.uniqueSpec3,
-      featuredproducts:
-        (products.find((p) => p.id === syncTargetMasterId) as any)?.featuredproducts ?? false,
-      featuredprdsortorder:
-        (products.find((p) => p.id === syncTargetMasterId) as any)?.featuredprdsortorder ?? 1,
       aiContentLink: masterUpdationForm.aiContentLink,
       aiDraftId: masterUpdationForm.aiDraftId || selectedDraftId || '',
     };
@@ -1187,14 +1183,9 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
       'whatsappSales',
       'countersaleSales',
       'preorderactive',
-      'featuredproducts',
-      'featuredprdsortorder',
       'aiContentLink',
       'aiDraftId',
-      'vamjoWeblink',
       'amazonWeblink',
-      'flipkartWeblink',
-      'meeshoWeblink',
       'notes',
     ];
     const dynamicKeys = new Set<string>(standardColumns);

@@ -105,8 +105,6 @@ class PublicProductProjection {
   final String brand;
   final String category;
   final String? leafycategory;
-  final bool featuredproducts;
-  final int featuredprdsortorder;
   final String? aiContentLink;
   final String? aiDraftId;
   final ProductSEOContent seo;
@@ -129,8 +127,6 @@ class PublicProductProjection {
     required this.brand,
     required this.category,
     this.leafycategory,
-    this.featuredproducts = false,
-    this.featuredprdsortorder = 1,
     this.aiContentLink,
     this.aiDraftId,
     required this.seo,
@@ -169,8 +165,6 @@ class PublicProductProjection {
       brand: (map['brand'] ?? 'LeafyEarth').toString(),
       category: (map['category'] ?? 'Uncategorized').toString(),
       leafycategory: map['leafycategory']?.toString(),
-      featuredproducts: map['featuredproducts'] == true,
-      featuredprdsortorder: (map['featuredprdsortorder'] is num) ? (map['featuredprdsortorder'] as num).toInt() : 1,
       aiContentLink: map['aiContentLink']?.toString(),
       aiDraftId: map['aiDraftId']?.toString(),
       seo: ProductSEOContent.fromMap(map),

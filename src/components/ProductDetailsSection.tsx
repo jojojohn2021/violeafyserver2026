@@ -39,6 +39,13 @@ interface Props {
   /** Firestore document ID of the product (edit mode). */
   productId?: string | null;
   disabled?: boolean;
+  /** When provided, binds "Storage Conditions" directly to `products.storageInstructions`. */
+  storageInstructions?: string;
+  onStorageInstructionsChange?: (value: string) => void;
+  /** When true, renders embedded inside Product Specifications & Descriptions without the outer card header. */
+  embedded?: boolean;
+  /** When true, uses light grey / white inputs & dark labels to match the light-grey Create Product section. */
+  lightTheme?: boolean;
 }
 
 interface CertDraft {
@@ -99,7 +106,18 @@ function move<T>(list: T[], index: number, delta: number): T[] {
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ mode, productId, disabled }, ref) => {
+const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ mode, productId, disabled, storageInstructions, onStorageInstructionsChange, embedded, lightTheme }, ref) => {
+  const fieldInputCls = lightTheme
+    ? 'w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-60'
+    : inputCls;
+  const fieldLabelCls = lightTheme
+    ? 'block text-[10px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider'
+    : labelCls;
+  const fieldSmallBtn = lightTheme
+    ? 'px-2 py-1 rounded-md text-[10px] font-bold border border-gray-300 bg-white text-slate-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
+    : smallBtn;
+  const cardBgCls = lightTheme ? 'border-gray-300 bg-white' : 'border-slate-800 bg-[#141418]';
+  const mutedTextCls = lightTheme ? 'text-slate-600' : 'text-slate-500';
   const [text, setText] = useState(emptyText);
   const [certs, setCerts] = useState<CertDraft[]>([]);
   const [images, setImages] = useState<ImageDraft[]>([]);
@@ -341,46 +359,59 @@ const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ 
   return (
     <section
       id={`product-details-section-${mode}`}
-      aria-labelledby={`product-details-heading-${mode}`}
-      className="mt-4 rounded-2xl border border-emerald-500/30 bg-[#0d0d10] p-4 space-y-4"
+      aria-labelledby={embedded ? undefined : `product-details-heading-${mode}`}
+      className={embedded ? `sm:col-span-2 md:col-span-3 pt-4 border-t ${lightTheme ? 'border-gray-300' : 'border-slate-800/60'} space-y-4` : 'mt-4 rounded-2xl border border-emerald-500/30 bg-[#0d0d10] p-4 space-y-4'}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h4 id={`product-details-heading-${mode}`} className="text-sm font-bold text-emerald-400 uppercase tracking-wider">Product Details</h4>
-          <p className="text-[10px] text-slate-500">Optional. Shown on the public product page only when populated.</p>
+      {!embedded ? (
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 id={`product-details-heading-${mode}`} className="text-sm font-bold text-emerald-400 uppercase tracking-wider">Product Details</h4>
+            <p className="text-[10px] text-slate-500">Optional. Shown on the public product page only when populated.</p>
+          </div>
+          {saving && <span className="text-[10px] font-bold text-emerald-300 animate-pulse">Saving details…</span>}
         </div>
-        {saving && <span className="text-[10px] font-bold text-emerald-300 animate-pulse">Saving details…</span>}
-      </div>
+      ) : (
+        saving && <div className="text-[10px] font-bold text-emerald-600 animate-pulse">Saving details…</div>
+      )}
 
-      {loadState === 'loading' && <p className="text-xs text-slate-400">Loading product details…</p>}
+      {loadState === 'loading' && <p className={`text-xs ${mutedTextCls}`}>Loading product details…</p>}
       {loadState === 'error' && (
-        <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-300">
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-700">
           <span>Could not load Product Details: {loadError}. Existing details are preserved and will not be overwritten.</span>
-          <button type="button" id="product-details-retry-load" onClick={load} className={smallBtn}>Retry</button>
+          <button type="button" id="product-details-retry-load" onClick={load} className={fieldSmallBtn}>Retry</button>
         </div>
       )}
       {saveError && (
-        <div role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-300">
+        <div role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-700">
           Product Details were not fully saved: {saveError}
         </div>
       )}
-      {fieldError && <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-300">{fieldError}</div>}
+      {fieldError && <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700">{fieldError}</div>}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {PRODUCT_DETAILS_TEXT_FIELDS.map(field => {
           const cfg = LABELS[field];
           const id = `pd-${mode}-${field}`;
+          const isStorageOverride = field === 'storageConditions' && typeof onStorageInstructionsChange === 'function';
+          const fieldValue = isStorageOverride ? (storageInstructions ?? '') : text[field];
+          const handleFieldChange = (val: string) => {
+            if (isStorageOverride) {
+              onStorageInstructionsChange(val);
+            } else {
+              setText(prev => ({ ...prev, [field]: val }));
+            }
+          };
           return (
             <div key={field} className={cfg.multiline ? 'sm:col-span-2' : ''}>
-              <label htmlFor={id} className={labelCls}>{cfg.label}</label>
+              <label htmlFor={id} className={fieldLabelCls}>{cfg.label}</label>
               {cfg.multiline ? (
                 <textarea id={id} rows={3} maxLength={cfg.max} disabled={locked} placeholder={cfg.placeholder}
-                  value={text[field]} onChange={e => setText(prev => ({ ...prev, [field]: e.target.value }))}
-                  className={`${inputCls} resize-y`} />
+                  value={fieldValue} onChange={e => handleFieldChange(e.target.value)}
+                  className={`${fieldInputCls} resize-y`} />
               ) : (
                 <input id={id} type="text" maxLength={cfg.max} disabled={locked} placeholder={cfg.placeholder}
-                  value={text[field]} onChange={e => setText(prev => ({ ...prev, [field]: e.target.value }))}
-                  className={inputCls} />
+                  value={fieldValue} onChange={e => handleFieldChange(e.target.value)}
+                  className={fieldInputCls} />
               )}
             </div>
           );
@@ -390,57 +421,57 @@ const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ 
       {/* Certifications */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className={labelCls}>Certifications</span>
+          <span className={fieldLabelCls}>Certifications</span>
           <button type="button" id={`pd-${mode}-add-cert`} onClick={addCert} disabled={locked}
             className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40 cursor-pointer">
             + Add certification
           </button>
         </div>
-        {certs.length === 0 && <p className="text-[11px] text-slate-500">No certifications added.</p>}
+        {certs.length === 0 && <p className={`text-[11px] ${mutedTextCls}`}>No certifications added.</p>}
         {certs.map((c, index) => {
           const img = c.previewUrl || c.certificateImageUrl;
           return (
-            <div key={c.certificateId} className="rounded-xl border border-slate-800 bg-[#141418] p-3 space-y-2">
+            <div key={c.certificateId} className={`rounded-xl border ${cardBgCls} p-3 space-y-2`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[10px] font-bold text-slate-400">#{index + 1}</span>
+                <span className={`text-[10px] font-bold ${mutedTextCls}`}>#{index + 1}</span>
                 <div className="flex items-center gap-1">
-                  <button type="button" aria-label="Move certification up" className={smallBtn} disabled={locked || index === 0} onClick={() => setCerts(prev => move(prev, index, -1))}>↑</button>
-                  <button type="button" aria-label="Move certification down" className={smallBtn} disabled={locked || index === certs.length - 1} onClick={() => setCerts(prev => move(prev, index, 1))}>↓</button>
-                  <label className="flex items-center gap-1 text-[10px] text-slate-300 px-2">
+                  <button type="button" aria-label="Move certification up" className={fieldSmallBtn} disabled={locked || index === 0} onClick={() => setCerts(prev => move(prev, index, -1))}>↑</button>
+                  <button type="button" aria-label="Move certification down" className={fieldSmallBtn} disabled={locked || index === certs.length - 1} onClick={() => setCerts(prev => move(prev, index, 1))}>↓</button>
+                  <label className={`flex items-center gap-1 text-[10px] ${lightTheme ? 'text-slate-700' : 'text-slate-300'} px-2`}>
                     <input type="checkbox" checked={c.isActive} disabled={locked} onChange={e => updateCert(c.certificateId, { isActive: e.target.checked })} /> Active
                   </label>
-                  <button type="button" className={`${smallBtn} text-rose-300 border-rose-500/40`} disabled={locked} onClick={() => removeCert(c)}>Remove</button>
+                  <button type="button" className={`${fieldSmallBtn} text-rose-600 border-rose-500/40`} disabled={locked} onClick={() => removeCert(c)}>Remove</button>
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-[96px_1fr] gap-3">
                 <div className="flex flex-col items-center gap-1">
-                  <div className="h-24 w-24 rounded-lg border border-slate-800 bg-black/40 overflow-hidden flex items-center justify-center">
-                    {img ? <img src={img} alt={c.certificateName || 'Certificate'} className="h-full w-full object-contain" /> : <span className="text-[10px] text-slate-600">No image</span>}
+                  <div className={`h-24 w-24 rounded-lg border ${lightTheme ? 'border-gray-300 bg-gray-100' : 'border-slate-800 bg-black/40'} overflow-hidden flex items-center justify-center`}>
+                    {img ? <img src={img} alt={c.certificateName || 'Certificate'} className="h-full w-full object-contain" /> : <span className={`text-[10px] ${mutedTextCls}`}>No image</span>}
                   </div>
-                  <label className={`${smallBtn} text-center w-full`}>
+                  <label className={`${fieldSmallBtn} text-center w-full`}>
                     {img ? 'Replace' : 'Upload'}
                     <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={locked}
                       onChange={e => { pickCertFile(c.certificateId, e.target.files?.[0]); e.target.value = ''; }} />
                   </label>
-                  {c.pendingFile && c.progress === undefined && <span className="text-[9px] text-amber-300">Pending upload</span>}
+                  {c.pendingFile && c.progress === undefined && <span className="text-[9px] text-amber-600">Pending upload</span>}
                   {c.progress !== undefined && <progress max={100} value={c.progress} className="w-full h-1" />}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input aria-label="Certificate name" placeholder="Certificate name *" className={inputCls} disabled={locked} maxLength={200}
+                  <input aria-label="Certificate name" placeholder="Certificate name *" className={fieldInputCls} disabled={locked} maxLength={200}
                     value={c.certificateName} onChange={e => updateCert(c.certificateId, { certificateName: e.target.value })} />
-                  <input aria-label="Certificate number" placeholder="Certificate number (optional)" className={inputCls} disabled={locked} maxLength={100}
+                  <input aria-label="Certificate number" placeholder="Certificate number (optional)" className={fieldInputCls} disabled={locked} maxLength={100}
                     value={c.certificateNumber} onChange={e => updateCert(c.certificateId, { certificateNumber: e.target.value })} />
-                  <input aria-label="Issuing authority" placeholder="Issuing authority (optional)" className={`${inputCls} sm:col-span-2`} disabled={locked} maxLength={200}
+                  <input aria-label="Issuing authority" placeholder="Issuing authority (optional)" className={`${fieldInputCls} sm:col-span-2`} disabled={locked} maxLength={200}
                     value={c.issuingAuthority} onChange={e => updateCert(c.certificateId, { issuingAuthority: e.target.value })} />
-                  <label className="text-[10px] text-slate-400">Valid from
-                    <input type="date" className={inputCls} disabled={locked} value={c.validFrom} onChange={e => updateCert(c.certificateId, { validFrom: e.target.value })} />
+                  <label className={`text-[10px] ${mutedTextCls}`}>Valid from
+                    <input type="date" className={fieldInputCls} disabled={locked} value={c.validFrom} onChange={e => updateCert(c.certificateId, { validFrom: e.target.value })} />
                   </label>
-                  <label className="text-[10px] text-slate-400">Valid until
-                    <input type="date" className={inputCls} disabled={locked} value={c.validUntil} onChange={e => updateCert(c.certificateId, { validUntil: e.target.value })} />
+                  <label className={`text-[10px] ${mutedTextCls}`}>Valid until
+                    <input type="date" className={fieldInputCls} disabled={locked} value={c.validUntil} onChange={e => updateCert(c.certificateId, { validUntil: e.target.value })} />
                   </label>
                 </div>
               </div>
-              {c.error && <p role="alert" className="text-[10px] text-rose-300">{c.error}</p>}
+              {c.error && <p role="alert" className="text-[10px] text-rose-600">{c.error}</p>}
             </div>
           );
         })}
@@ -449,38 +480,38 @@ const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ 
       {/* Additional product pictures */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className={labelCls}>Additional Product Pictures(Pre-order Booking)</span>
+          <span className={fieldLabelCls}>Additional Product Pictures(Pre-order Booking)</span>
           <label className={`px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer ${locked ? 'opacity-40 pointer-events-none' : ''}`}>
             + Add pictures
             <input id={`pd-${mode}-add-images`} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" disabled={locked}
               onChange={e => { addImages(e.target.files); e.target.value = ''; }} />
           </label>
         </div>
-        <p className="text-[10px] text-slate-500">JPEG, PNG or WebP · up to 10MB each.</p>
-        {images.length === 0 && <p className="text-[11px] text-slate-500">No additional pictures.</p>}
+        <p className={`text-[10px] ${mutedTextCls}`}>JPEG, PNG or WebP · up to 10MB each.</p>
+        {images.length === 0 && <p className={`text-[11px] ${mutedTextCls}`}>No additional pictures.</p>}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {images.map((img, index) => (
-            <div key={img.imageId} className={`rounded-xl border bg-[#141418] p-2 space-y-1 ${img.isActive ? 'border-slate-800' : 'border-slate-800 opacity-60'}`}>
-              <div className="aspect-square rounded-lg overflow-hidden bg-black/40">
+            <div key={img.imageId} className={`rounded-xl border ${cardBgCls} p-2 space-y-1 ${img.isActive ? '' : 'opacity-60'}`}>
+              <div className={`aspect-square rounded-lg overflow-hidden ${lightTheme ? 'bg-gray-100' : 'bg-black/40'}`}>
                 <img src={img.previewUrl || img.imageUrl} alt={`Product picture ${index + 1}`} className="h-full w-full object-cover" />
               </div>
-              {img.pendingFile && img.progress === undefined && <span className="text-[9px] text-amber-300">Pending upload</span>}
+              {img.pendingFile && img.progress === undefined && <span className="text-[9px] text-amber-600">Pending upload</span>}
               {img.progress !== undefined && <progress max={100} value={img.progress} className="w-full h-1" />}
               <div className="flex flex-wrap gap-1">
-                <button type="button" aria-label="Move picture left" className={smallBtn} disabled={locked || index === 0} onClick={() => setImages(prev => move(prev, index, -1))}>←</button>
-                <button type="button" aria-label="Move picture right" className={smallBtn} disabled={locked || index === images.length - 1} onClick={() => setImages(prev => move(prev, index, 1))}>→</button>
-                <label className={smallBtn}>
+                <button type="button" aria-label="Move picture left" className={fieldSmallBtn} disabled={locked || index === 0} onClick={() => setImages(prev => move(prev, index, -1))}>←</button>
+                <button type="button" aria-label="Move picture right" className={fieldSmallBtn} disabled={locked || index === images.length - 1} onClick={() => setImages(prev => move(prev, index, 1))}>→</button>
+                <label className={fieldSmallBtn}>
                   Replace
                   <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={locked}
                     onChange={e => { replaceImage(img.imageId, e.target.files?.[0]); e.target.value = ''; }} />
                 </label>
-                <button type="button" className={`${smallBtn} text-rose-300 border-rose-500/40`} disabled={locked} onClick={() => removeImage(img)}>✕</button>
+                <button type="button" className={`${fieldSmallBtn} text-rose-600 border-rose-500/40`} disabled={locked} onClick={() => removeImage(img)}>✕</button>
               </div>
-              <label className="flex items-center gap-1 text-[10px] text-slate-300">
+              <label className={`flex items-center gap-1 text-[10px] ${lightTheme ? 'text-slate-700' : 'text-slate-300'}`}>
                 <input type="checkbox" checked={img.isActive} disabled={locked}
                   onChange={e => setImages(prev => prev.map(i => i.imageId === img.imageId ? { ...i, isActive: e.target.checked } : i))} /> Active
               </label>
-              {img.error && <p role="alert" className="text-[10px] text-rose-300">{img.error}</p>}
+              {img.error && <p role="alert" className="text-[10px] text-rose-600">{img.error}</p>}
             </div>
           ))}
         </div>

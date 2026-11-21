@@ -427,6 +427,33 @@ function normalizeClientTimestamp(val: any): string | null {
   return null;
 }
 
+function stripUndefinedDeep<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (
+    value instanceof Date ||
+    value instanceof Timestamp ||
+    typeof (value as any)?.toDate === 'function' ||
+    typeof (value as any)?.isEqual === 'function'
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefinedDeep(item)) as unknown as T;
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value as Record<string, any>)) {
+      if (v !== undefined) {
+        out[k] = stripUndefinedDeep(v);
+      }
+    }
+    return out as T;
+  }
+  return value;
+}
+
 export function normalizeClientBannerDoc(id: string, data: Record<string, any>): BannerRecord {
   const slideDurationSec =
     Number.isFinite(Number(data.slideDurationSec)) && Number(data.slideDurationSec) >= 2
@@ -436,8 +463,8 @@ export function normalizeClientBannerDoc(id: string, data: Record<string, any>):
     ? data.slides.map((s: any, idx: number) => ({
         id: String(s?.id || `slide_${idx + 1}`),
         mediaType: s?.mediaType === 'image' ? 'image' : 'video',
-        title: s?.title ? String(s.title) : undefined,
-        subtitle: s?.subtitle ? String(s.subtitle) : undefined,
+        title: s?.title ? String(s.title) : '',
+        subtitle: s?.subtitle ? String(s.subtitle) : '',
         sortOrder: Number.isFinite(Number(s?.sortOrder)) ? Number(s.sortOrder) : idx + 1,
         slideDurationSec:
           Number.isFinite(Number(s?.slideDurationSec)) && Number(s?.slideDurationSec) >= 2
@@ -711,10 +738,10 @@ async function syncClientLegacyHomeBannerMainVideo(): Promise<void> {
         };
     await setDoc(
       doc(db, HOME_BANNERS_COLLECTION, LEGACY_MAIN_VIDEO_DOC_ID),
-      {
+      stripUndefinedDeep({
         ...payload,
         updatedAtTimestamp: Timestamp.now(),
-      },
+      }),
       { merge: true }
     );
   } catch (err) {
@@ -882,7 +909,7 @@ export async function createAdminBannerClient(
     updatedBy: actorUid,
   };
 
-  await setDoc(doc(db, BANNERS_COLLECTION, bannerId), docData);
+  await setDoc(doc(db, BANNERS_COLLECTION, bannerId), stripUndefinedDeep(docData));
   if (docData.pageType === 'home') {
     await syncClientLegacyHomeBannerMainVideo();
   }
@@ -981,7 +1008,7 @@ export async function updateAdminBannerClient(
     updatedBy: actorUid,
   };
 
-  await setDoc(docRef, merged, { merge: true });
+  await setDoc(docRef, stripUndefinedDeep(merged), { merge: true });
   if (existing.pageType === 'home' || merged.pageType === 'home') {
     await syncClientLegacyHomeBannerMainVideo();
   }
@@ -1099,13 +1126,21 @@ export async function uploadBannerAssetClient(params: {
     };
 
     const previousPath = banner[variant]?.storagePath;
+
+    let updatedBanner: BannerRecord;
+    try {
+      updatedBanner = await updateAdminBannerClient(banner.id, {
+        [variant]: assetMeta,
+      } as Partial<BannerRecord>);
+    } catch (saveErr) {
+      // Roll back the newly uploaded Storage file so no orphaned file is saved if Firestore fails
+      await safeDeleteClientStoragePath(targetPath);
+      throw saveErr;
+    }
+
     if (previousPath && previousPath !== targetPath) {
       await safeDeleteClientStoragePath(previousPath);
     }
-
-    const updatedBanner = await updateAdminBannerClient(banner.id, {
-      [variant]: assetMeta,
-    } as Partial<BannerRecord>);
 
     if (onProgress) onProgress(100);
     return { asset: assetMeta, banner: updatedBanner };
@@ -1307,13 +1342,15 @@ export async function uploadBannerSlideItemClient(params: {
   const newSlide: BannerSlideItem = {
     id: slideId,
     mediaType: detectedMediaType,
-    title: slideTitle || banner.title,
-    subtitle: banner.subtitle,
+    title: slideTitle || banner.title || '',
+    subtitle: banner.subtitle || '',
     sortOrder: existingSlides.length + 1,
     slideDurationSec: duration,
     desktop: assetMeta,
     mobile: assetMeta,
-    cta: banner.cta,
+    desktopPoster: null,
+    mobilePoster: null,
+    cta: banner.cta || null,
   };
 
   const nextSlides = [...existingSlides, newSlide];
@@ -1331,7 +1368,14 @@ export async function uploadBannerSlideItemClient(params: {
     patch.mobile = assetMeta;
   }
 
-  const updatedBanner = await updateAdminBannerClient(banner.id, patch);
+  let updatedBanner: BannerRecord;
+  try {
+    updatedBanner = await updateAdminBannerClient(banner.id, patch);
+  } catch (saveErr) {
+    // Roll back the newly uploaded Storage file so no orphaned file is saved when an error occurs
+    await safeDeleteClientStoragePath(targetPath);
+    throw saveErr;
+  }
   if (onProgress) onProgress(100);
   return { slide: newSlide, banner: updatedBanner };
 }

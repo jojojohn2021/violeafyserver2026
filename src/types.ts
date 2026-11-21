@@ -123,12 +123,8 @@ export interface ProductPerformance {
   stockIn?: number;
   stockOut?: number;
   preorderactive?: boolean;
-  featuredproducts?: boolean;
-  featuredprdsortorder?: number;
-  vamjoWeblink?: string;
+  culinarydetails?: boolean;
   amazonWeblink?: string;
-  flipkartWeblink?: string;
-  meeshoWeblink?: string;
   category?: string;
   categories?: string[];
   leafycategory?: string;

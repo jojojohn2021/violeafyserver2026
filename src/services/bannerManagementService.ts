@@ -640,8 +640,8 @@ export function sanitizeSlidesInput(rawSlides: unknown, defaultDurationSec: numb
     return {
       id,
       mediaType,
-      title: s.title ? String(s.title).trim().slice(0, 160) : undefined,
-      subtitle: s.subtitle ? String(s.subtitle).trim().slice(0, 320) : undefined,
+      title: s.title ? String(s.title).trim().slice(0, 160) : '',
+      subtitle: s.subtitle ? String(s.subtitle).trim().slice(0, 320) : '',
       sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx + 1,
       slideDurationSec: sanitizeSlideDurationSec(s.slideDurationSec, defaultDurationSec),
       desktop,
@@ -835,8 +835,8 @@ export function normalizeBannerDoc(id: string, data: Record<string, any>): Banne
     ? data.slides.map((s: any, idx: number) => ({
         id: String(s?.id || `slide_${idx + 1}`),
         mediaType: s?.mediaType === 'image' ? 'image' : 'video',
-        title: s?.title ? String(s.title) : undefined,
-        subtitle: s?.subtitle ? String(s.subtitle) : undefined,
+        title: s?.title ? String(s.title) : '',
+        subtitle: s?.subtitle ? String(s.subtitle) : '',
         sortOrder: Number.isFinite(Number(s?.sortOrder)) ? Number(s.sortOrder) : idx + 1,
         slideDurationSec: Number.isFinite(Number(s?.slideDurationSec)) ? Number(s.slideDurationSec) : slideDurationSec,
         desktop: s?.desktop || null,

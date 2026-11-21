@@ -1872,8 +1872,6 @@ export interface MasterProductUpdationOverrides {
   uniqueSpec2?: string;
   uniqueSpec3?: string;
   leafycategory?: string;
-  featuredproducts?: boolean;
-  featuredprdsortorder?: number;
   aiContentLink?: string;
   aiDraftId?: string;
 }
@@ -2056,20 +2054,6 @@ export function mergeMasterProductUpdationOverrides(params: {
   if (typeof ov.uniqueSpec3 === 'string') {
     setField('uniqueSpec3', ov.uniqueSpec3.trim());
   }
-  if (ov.featuredproducts !== undefined && ov.featuredproducts !== null) {
-    setField('featuredproducts', Boolean(ov.featuredproducts));
-  } else if (existing.featuredproducts === undefined && patch.featuredproducts === undefined) {
-    setField('featuredproducts', false);
-  }
-  if (
-    ov.featuredprdsortorder !== undefined &&
-    ov.featuredprdsortorder !== null &&
-    Number.isFinite(Number(ov.featuredprdsortorder))
-  ) {
-    setField('featuredprdsortorder', Number(ov.featuredprdsortorder));
-  } else if (existing.featuredprdsortorder === undefined && patch.featuredprdsortorder === undefined) {
-    setField('featuredprdsortorder', 1);
-  }
   if (typeof ov.aiContentLink === 'string' && ov.aiContentLink.trim()) {
     setField('aiContentLink', ov.aiContentLink.trim());
   }
@@ -2123,14 +2107,10 @@ export function mergeMasterProductUpdationOverrides(params: {
         whatsappSales: 0,
         countersaleSales: 0,
         preorderactive: false,
-        featuredproducts: patch.featuredproducts ?? false,
-        featuredprdsortorder: patch.featuredprdsortorder ?? 1,
+        culinarydetails: false,
         aiContentLink: patch.aiContentLink || '',
         aiDraftId: patch.aiDraftId || '',
-        vamjoWeblink: '',
         amazonWeblink: '',
-        flipkartWeblink: '',
-        meeshoWeblink: '',
         rating: 4.8,
         reviewsCount: 0,
       }

@@ -573,7 +573,13 @@ export function validateAICommercePayload(raw: any): {
     }
   }
 
-  const searchTags = deduplicateAndCleanKeywords(raw.searchTags).keywords.slice(0, 20);
+  const searchTags = deduplicateAndCleanKeywords(
+    Array.isArray(raw.searchTags)
+      ? raw.searchTags.map((t: any) =>
+          typeof t === 'string' ? t.replace(/\bleafyearth\b/gi, 'leafymart') : t
+        )
+      : raw.searchTags
+  ).keywords.slice(0, 20);
   const dietaryAttributes: string[] = Array.isArray(raw.dietaryAttributes)
     ? Array.from(
         new Set(
@@ -663,7 +669,7 @@ export function buildStructuredFallbackCommerce(
       cleanName.toLowerCase(),
       category.toLowerCase(),
       isHousehold ? 'home care' : 'indian spices',
-      'leafyearth',
+      'leafymart',
       pack.toLowerCase(),
     ]).keywords,
     dietaryAttributes: isHousehold ? [] : ['Vegetarian', 'Plant-Based', 'No Artificial Colours'],

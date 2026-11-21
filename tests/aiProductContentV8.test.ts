@@ -470,8 +470,11 @@ test('Product Master Updation: AI category maps to leafycategory, auto-links by 
   assert.equal(finalPatch.shopPrice, 190);
   assert.equal(finalPatch.stockIn, 50);
   assert.equal(finalPatch.uniqueSpec1, 'Sun-dried whole spikes');
-  assert.equal(finalPatch.featuredproducts, false, 'Default featuredproducts must be false');
-  assert.equal(finalPatch.featuredprdsortorder, 1, 'Default featuredprdsortorder must be 1');
+  assert.equal('featuredproducts' in finalPatch, false, 'featuredproducts must be removed');
+  assert.equal('featuredprdsortorder' in finalPatch, false, 'featuredprdsortorder must be removed');
+  assert.equal('vamjoWeblink' in finalPatch, false, 'vamjoWeblink must be removed');
+  assert.equal('flipkartWeblink' in finalPatch, false, 'flipkartWeblink must be removed');
+  assert.equal('meeshoWeblink' in finalPatch, false, 'meeshoWeblink must be removed');
   assert.equal(
     finalPatch.aiContentLink,
     'https://violeafybasket.web.app/api/admin/ai-products/aidraft_1794667880146_8fjlx?version=aiver_1794667880146_5nkxj'
@@ -486,8 +489,6 @@ test('Product Master Updation: AI category maps to leafycategory, auto-links by 
   // Existing `products` table metrics (`unitsSold`, `revenue`) must be preserved
   assert.equal(mergedMasterProduct.unitsSold, 42);
   assert.equal(mergedMasterProduct.revenue, 8400);
-  assert.equal(mergedMasterProduct.featuredproducts, false);
-  assert.equal(mergedMasterProduct.featuredprdsortorder, 1);
 });
 
 test('Firebase Storage Export: AI product images export to https://firebasestorage.googleapis.com/v0/b/...', async () => {

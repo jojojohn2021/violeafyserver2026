@@ -200,6 +200,11 @@ export default function BannerManagementView({
   const [multiUploadBusy, setMultiUploadBusy] = useState<boolean>(false);
   const [multiUploadStatusText, setMultiUploadStatusText] = useState<string | null>(null);
   const [multiUploadProgressPct, setMultiUploadProgressPct] = useState<number>(0);
+  const [sliderGalleryFeedback, setSliderGalleryFeedback] = useState<{
+    type: 'error' | 'success';
+    text: string;
+  } | null>(null);
+  const [confirmSaveModalOpen, setConfirmSaveModalOpen] = useState<boolean>(false);
 
   // Public API Resolution Tester state
   const [testPageType, setTestPageType] = useState<BannerPageType>('home');
@@ -303,6 +308,8 @@ export default function BannerManagementView({
     setFormMaxImageMb(10);
     setFormError(null);
     setVariantMessages({});
+    setSliderGalleryFeedback(null);
+    setConfirmSaveModalOpen(false);
     setIsEditorOpen(true);
   };
 
@@ -331,7 +338,47 @@ export default function BannerManagementView({
     setFormMaxImageMb(banner.placementSpec?.maxImageSizeMb || 10);
     setFormError(null);
     setVariantMessages({});
+    setSliderGalleryFeedback(null);
+    setConfirmSaveModalOpen(false);
     setIsEditorOpen(true);
+  };
+
+  // Validate form fields before asking Yes/No confirmation
+  const validateBannerFormBeforeSave = (): boolean => {
+    setFormError(null);
+    if (!formTitle.trim()) {
+      setFormError('Banner Title is required.');
+      return false;
+    }
+    if (formCtaLabel.trim() || formCtaRoute.trim()) {
+      const routeCheck = validateClientInternalCtaRoute(formCtaRoute, false);
+      if (!routeCheck.valid) {
+        setFormError(routeCheck.error || 'Invalid internal CTA route.');
+        return false;
+      }
+    }
+    if (formPageType === 'other' && formPageId.trim()) {
+      const normalizedOther = formPageId.trim().startsWith('/')
+        ? formPageId.trim()
+        : `/${formPageId.trim()}`;
+      if (!APPROVED_OTHER_PAGE_ROUTES.includes(normalizedOther)) {
+        setFormError(`Other page route must be one of: ${APPROVED_OTHER_PAGE_ROUTES.join(', ')}`);
+        return false;
+      }
+    }
+    const startsIso = fromDatetimeLocalValue(formStartsAt);
+    const endsIso = fromDatetimeLocalValue(formEndsAt);
+    if (startsIso && endsIso && Date.parse(startsIso) > Date.parse(endsIso)) {
+      setFormError('Schedule Start Time cannot be later than End Time.');
+      return false;
+    }
+    return true;
+  };
+
+  const handleRequestSaveConfirmation = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateBannerFormBeforeSave()) return;
+    setConfirmSaveModalOpen(true);
   };
 
   // Save Banner Metadata (Create or Update)
@@ -695,6 +742,7 @@ export default function BannerManagementView({
     setMultiUploadBusy(true);
     setMultiUploadProgressPct(1);
     setMultiUploadStatusText(`Preparing to upload ${files.length} slider media file(s)...`);
+    setSliderGalleryFeedback(null);
     setErrorBanner(null);
 
     try {
@@ -755,6 +803,10 @@ export default function BannerManagementView({
       if (insideModal) {
         setEditingBanner(currentBanner);
         setFormCarouselEnabled(true);
+        setSliderGalleryFeedback({
+          type: 'success',
+          text: `Uploaded ${files.length} video/image slide(s) successfully (${effectiveDuration}s interval).`,
+        });
       }
       setHomeSliderEnabled(true);
       await loadBanners();
@@ -762,10 +814,12 @@ export default function BannerManagementView({
         `Uploaded ${files.length} video/image slide(s) to "${currentBanner.title}" (${effectiveDuration}s slider interval).`
       );
     } catch (err: any) {
+      const errMsg = err?.message || 'Failed to upload slider media files.';
       if (insideModal) {
-        setFormError(err?.message || 'Failed to upload slider media files.');
+        setFormError(errMsg);
+        setSliderGalleryFeedback({ type: 'error', text: errMsg });
       } else {
-        setErrorBanner(err?.message || 'Failed to upload slider media files.');
+        setErrorBanner(errMsg);
       }
     } finally {
       setMultiUploadBusy(false);
@@ -1810,7 +1864,7 @@ export default function BannerManagementView({
               </div>
             )}
 
-            <form onSubmit={(e) => void handleSaveBannerForm(e, false)} className="space-y-6">
+            <form onSubmit={handleRequestSaveConfirmation} className="space-y-6">
               {/* Section 1: Page Targeting & Placement */}
               <div className="bg-[#F7FAF7] border border-[#D9E2DA] rounded-2xl p-4 space-y-4">
                 <h4 className="text-xs font-extrabold uppercase tracking-wider text-[#1F2933]">
@@ -2240,6 +2294,18 @@ export default function BannerManagementView({
                   </div>
                 )}
 
+                {sliderGalleryFeedback && (
+                  <div
+                    className={`text-xs rounded-xl px-3 py-2.5 border font-semibold ${
+                      sliderGalleryFeedback.type === 'error'
+                        ? 'bg-rose-50 border-rose-200 text-rose-700'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    }`}
+                  >
+                    {sliderGalleryFeedback.text}
+                  </div>
+                )}
+
                 {editingBanner?.slides && editingBanner.slides.length > 0 ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-1">
                     {editingBanner.slides.map((slide, idx) => {
@@ -2317,6 +2383,53 @@ export default function BannerManagementView({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* CONFIRM SAVE BANNER (YES / NO) MODAL                                  */}
+      {/* ===================================================================== */}
+      {confirmSaveModalOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/65 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm save banner"
+        >
+          <div className="bg-white border border-[#D9E2DA] rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-2 text-[#173F1B]">
+              <CheckCircle2 className="w-5 h-5 text-[#2E7D32]" />
+              <h4 className="text-base font-extrabold">
+                {editingBanner ? 'Confirm Save Banner Changes?' : 'Confirm Create Banner?'}
+              </h4>
+            </div>
+            <p className="text-xs text-[#5F6B63] leading-relaxed">
+              Do you want to save <strong className="text-[#1F2933]">&ldquo;{formTitle.trim()}&rdquo;</strong>{' '}
+              (Page: <code>{formPageType}</code>, Placement: <code>{formPlacement}</code>, Slider Interval:{' '}
+              <code>{formSlideDurationSec}s</code>)?
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={savingForm}
+                onClick={() => setConfirmSaveModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-[#D9E2DA] bg-white hover:bg-slate-50 text-xs font-bold text-[#1F2933] cursor-pointer"
+              >
+                No, Cancel
+              </button>
+              <button
+                type="button"
+                disabled={savingForm}
+                onClick={async () => {
+                  setConfirmSaveModalOpen(false);
+                  await handleSaveBannerForm(undefined, false);
+                }}
+                className="px-4 py-2 rounded-xl bg-[#2E7D32] hover:bg-[#245B2A] text-white text-xs font-extrabold cursor-pointer"
+              >
+                {savingForm ? 'Saving...' : 'Yes, Save'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -188,7 +188,6 @@ body,
 /* 4.2 Card, Table, Panel & Modal Backgrounds */
 [id="view-renderer-panel"],
 [id="role-selector-card"],
-[id="add-prod-form"],
 [class*="bg-[#141418]"],
 [class*="bg-[#101014]"],
 [class*="bg-[#111114]"],
@@ -200,6 +199,19 @@ body,
 [class*="dark:bg-[#"] {
   background-color: var(--card-hex) !important;
   color: var(--foreground-hex) !important;
+}
+
+/* Product Settings Create / Edit distinct light grey surface (contrasts against white / #F7FAF7 page background) */
+[id="add-prod-form"],
+[id="edit-prod-modal"] {
+  background-color: #E8ECEF !important;
+  border-color: #CBD5E1 !important;
+  color: var(--foreground-hex) !important;
+}
+
+[id="edit-prod-modal"] .edit-prod-section-card {
+  background-color: #F1F4F6 !important;
+  border-color: #CBD5E1 !important;
 }
 
 /* Section Containers, Filter Controls, Sub-tabs */

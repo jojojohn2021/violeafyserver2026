@@ -253,7 +253,7 @@ export function buildClientFallbackCommerce(
     ],
     searchTags: isCumin
       ? ['cumin seeds', 'jeera', 'whole cumin', 'cuminum cyminum', 'jeerakam', 'tadka spice', 'indian spices']
-      : [cleanName.toLowerCase(), 'leafyearth', 'natural indian products', (options?.categoryHint || 'spices').toLowerCase()],
+      : [cleanName.toLowerCase(), 'leafymart', 'natural indian products', (options?.categoryHint || 'spices').toLowerCase()],
     dietaryAttributes: isHousehold ? [] : ['Vegetarian', 'Vegan', 'Gluten-Free', 'Preservative-Free', 'No Artificial Colors'],
     googleProductCategory: isHousehold
       ? 'Home & Garden > Household Supplies > Household Cleaning Supplies'
@@ -2301,20 +2301,6 @@ export async function applyAIDraftToMaster(params: {
     if (typeof ov.uniqueSpec1 === 'string') setOvField('uniqueSpec1', ov.uniqueSpec1.trim());
     if (typeof ov.uniqueSpec2 === 'string') setOvField('uniqueSpec2', ov.uniqueSpec2.trim());
     if (typeof ov.uniqueSpec3 === 'string') setOvField('uniqueSpec3', ov.uniqueSpec3.trim());
-    if (ov.featuredproducts !== undefined && ov.featuredproducts !== null) {
-      setOvField('featuredproducts', Boolean(ov.featuredproducts));
-    } else if (existingMaster.featuredproducts === undefined && updatePatch.featuredproducts === undefined) {
-      setOvField('featuredproducts', false);
-    }
-    if (
-      ov.featuredprdsortorder !== undefined &&
-      ov.featuredprdsortorder !== null &&
-      Number.isFinite(Number(ov.featuredprdsortorder))
-    ) {
-      setOvField('featuredprdsortorder', Number(ov.featuredprdsortorder));
-    } else if (existingMaster.featuredprdsortorder === undefined && updatePatch.featuredprdsortorder === undefined) {
-      setOvField('featuredprdsortorder', 1);
-    }
 
     if (isNew) {
       const baseDefaults: Record<string, any> = {
@@ -2362,12 +2348,8 @@ export async function applyAIDraftToMaster(params: {
         whatsappSales: 0,
         countersaleSales: 0,
         preorderactive: false,
-        featuredproducts: updatePatch.featuredproducts ?? false,
-        featuredprdsortorder: updatePatch.featuredprdsortorder ?? 1,
-        vamjoWeblink: '',
+        culinarydetails: false,
         amazonWeblink: '',
-        flipkartWeblink: '',
-        meeshoWeblink: '',
         rating: 4.8,
         reviewsCount: 0,
       };

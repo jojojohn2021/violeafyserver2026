@@ -216,6 +216,10 @@ async function saveCollectionDoc(collection: string, item: any): Promise<void> {
     } else {
       item.culinarydetails = item.culinarydetails === true || String(item.culinarydetails).toLowerCase() === 'true';
     }
+    const ayurRaw = item.ayurvedicproduct !== undefined ? item.ayurvedicproduct : item.isAyurvedicProduct;
+    const ayurBool = ayurRaw === true || String(ayurRaw).toLowerCase() === 'true';
+    item.ayurvedicproduct = ayurBool;
+    item.isAyurvedicProduct = ayurBool;
   }
 
   if (adminDb) {
@@ -661,7 +665,13 @@ app.post('/api/products', requireAuthenticatedRequest, upload.single('image'), a
     delete payload.vamjoWeblink;
     delete payload.flipkartWeblink;
     delete payload.meeshoWeblink;
-    payload.isAyurvedicProduct = body.isAyurvedicProduct === true || String(body.isAyurvedicProduct).toLowerCase() === 'true';
+    const ayurBool =
+      body.ayurvedicproduct === true ||
+      String(body.ayurvedicproduct).toLowerCase() === 'true' ||
+      body.isAyurvedicProduct === true ||
+      String(body.isAyurvedicProduct).toLowerCase() === 'true';
+    payload.isAyurvedicProduct = ayurBool;
+    payload.ayurvedicproduct = ayurBool;
     for (const key of ['uniqueSpec1', 'uniqueSpec2', 'uniqueSpec3', 'uniqueSpec4']) {
       payload[key] = body[key] !== undefined && body[key] !== null ? String(body[key]).trim() : '';
     }
@@ -2709,6 +2719,53 @@ app.post("/api/v1/operations/returns/:returnId/resolve", handleResolveReturn);
 
 
 // 20. CATEGORY MASTER API ENDPOINTS (GET, POST, PUT, DELETE) -> violeafydb database
+const CATEGORY_ID_REGEX = /^CAT-[0-9]{4,}$/;
+const allocateServerCategoryId = async (): Promise<string> => {
+  const existingCategories = await getCollectionDocs("product_categories");
+  let highest = 1000;
+  const used = new Set<string>();
+  for (const c of existingCategories) {
+    const raw = String(c?.categoryId || '').trim().toUpperCase();
+    if (CATEGORY_ID_REGEX.test(raw)) {
+      used.add(raw);
+      const n = Number.parseInt(raw.slice(4), 10);
+      if (Number.isFinite(n) && n > highest) highest = n;
+    }
+  }
+  if (adminDb) {
+    const seqRef = adminDb.collection("category_id_sequences").doc("global");
+    return adminDb.runTransaction(async (tx) => {
+      const snap = await tx.get(seqRef);
+      const stored = snap.exists ? Number(snap.data()?.currentNumber ?? 0) : 0;
+      let candidate = Math.max(highest, stored, 1000) + 1;
+      while (used.has(`CAT-${String(candidate).padStart(4, '0')}`)) {
+        candidate += 1;
+      }
+      const nextCatId = `CAT-${String(candidate).padStart(4, '0')}`;
+      tx.set(
+        seqRef,
+        {
+          currentNumber: candidate,
+          lastAllocatedCategoryId: nextCatId,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      return nextCatId;
+    });
+  }
+  return `CAT-${String(highest + 1).padStart(4, '0')}`;
+};
+
+app.post("/api/admin/categories/allocate-id", async (_req, res) => {
+  try {
+    const categoryId = await allocateServerCategoryId();
+    return res.json({ success: true, categoryId });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to allocate category ID" });
+  }
+});
+
 const handleGetCategories = async (req: express.Request, res: express.Response) => {
   try {
     const categories = await getCollectionDocs("product_categories");
@@ -2722,13 +2779,22 @@ app.get("/api/v1/categories", handleGetCategories);
 
 const handleCreateOrUpdateCategory = async (req: express.Request, res: express.Response) => {
   try {
-    const { id, name, description, imageUrl, storagePath } = req.body || {};
+    const { id, categoryId, name, description, imageUrl, storagePath } = req.body || {};
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ error: "Category name is required" });
     }
+    const existingCategories = await getCollectionDocs("product_categories");
+    const existing = id ? existingCategories.find((c) => String(c.id) === String(id)) : null;
     const catId = id || `cat_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const resolvedCategoryId =
+      existing?.categoryId ||
+      (categoryId && CATEGORY_ID_REGEX.test(String(categoryId).trim().toUpperCase())
+        ? String(categoryId).trim().toUpperCase()
+        : await allocateServerCategoryId());
     const categoryDoc = {
+      ...(existing || {}),
       id: catId,
+      categoryId: resolvedCategoryId,
       name: name.trim(),
       description: description || '',
       imageUrl: imageUrl || '',
@@ -2748,14 +2814,16 @@ app.post("/api/v1/categories", handleCreateOrUpdateCategory);
 const handleUpdateCategoryById = async (req: express.Request, res: express.Response) => {
   try {
     const catId = req.params.id;
-    const { name, description, imageUrl, storagePath } = req.body || {};
+    const { name } = req.body || {};
     const existingCategories = await getCollectionDocs("product_categories");
     const existing = existingCategories.find((c) => String(c.id) === String(catId));
+    const resolvedCategoryId = existing?.categoryId || (await allocateServerCategoryId());
     
     const categoryDoc = {
       ...(existing || {}),
       ...req.body,
       id: catId,
+      categoryId: resolvedCategoryId,
       name: name ? name.trim() : existing?.name || '',
       updatedAt: new Date().toISOString(),
     };
@@ -2832,6 +2900,53 @@ app.post("/api/v1/categories/:id/picture", upload.single("image"), handleUploadC
 app.post("/api/categories/picture", upload.single("image"), handleUploadCategoryPicture);
 
 // 21. BRAND MASTERS API ENDPOINTS (GET, POST, PUT, DELETE, PICTURE) -> violeafydb product_brands
+const BRAND_ID_REGEX = /^BRD-[0-9]{4,}$/;
+const allocateServerBrandId = async (): Promise<string> => {
+  const existingBrands = await getCollectionDocs("product_brands");
+  let highest = 1000;
+  const used = new Set<string>();
+  for (const b of existingBrands) {
+    const raw = String(b?.brandId || '').trim().toUpperCase();
+    if (BRAND_ID_REGEX.test(raw)) {
+      used.add(raw);
+      const n = Number.parseInt(raw.slice(4), 10);
+      if (Number.isFinite(n) && n > highest) highest = n;
+    }
+  }
+  if (adminDb) {
+    const seqRef = adminDb.collection("brand_id_sequences").doc("global");
+    return adminDb.runTransaction(async (tx) => {
+      const snap = await tx.get(seqRef);
+      const stored = snap.exists ? Number(snap.data()?.currentNumber ?? 0) : 0;
+      let candidate = Math.max(highest, stored, 1000) + 1;
+      while (used.has(`BRD-${String(candidate).padStart(4, '0')}`)) {
+        candidate += 1;
+      }
+      const nextBid = `BRD-${String(candidate).padStart(4, '0')}`;
+      tx.set(
+        seqRef,
+        {
+          currentNumber: candidate,
+          lastAllocatedBrandId: nextBid,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      return nextBid;
+    });
+  }
+  return `BRD-${String(highest + 1).padStart(4, '0')}`;
+};
+
+app.post("/api/admin/brands/allocate-id", async (_req, res) => {
+  try {
+    const brandId = await allocateServerBrandId();
+    return res.json({ success: true, brandId });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to allocate brand ID" });
+  }
+});
+
 const handleGetBrands = async (req: express.Request, res: express.Response) => {
   try {
     const brands = await getCollectionDocs("product_brands");
@@ -2845,13 +2960,22 @@ app.get("/api/v1/brands", handleGetBrands);
 
 const handleCreateOrUpdateBrand = async (req: express.Request, res: express.Response) => {
   try {
-    const { id, name, owner, description, imageUrl, storagePath } = req.body || {};
+    const { id, brandId: incomingBid, name, owner, description, imageUrl, storagePath } = req.body || {};
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ error: "Brand name is required" });
     }
-    const brandId = id || `brand_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const existingBrands = await getCollectionDocs("product_brands");
+    const existing = id ? existingBrands.find((b) => String(b.id) === String(id)) : null;
+    const docId = id || `brand_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const resolvedBrandId =
+      existing?.brandId ||
+      (incomingBid && BRAND_ID_REGEX.test(String(incomingBid).trim().toUpperCase())
+        ? String(incomingBid).trim().toUpperCase()
+        : await allocateServerBrandId());
     const brandDoc = {
-      id: brandId,
+      ...(existing || {}),
+      id: docId,
+      brandId: resolvedBrandId,
       name: name.trim(),
       owner: (owner || 'Generic Owner').trim(),
       description: description || '',
@@ -2871,15 +2995,17 @@ app.post("/api/v1/brands", handleCreateOrUpdateBrand);
 
 const handleUpdateBrandById = async (req: express.Request, res: express.Response) => {
   try {
-    const brandId = req.params.id;
-    const { name, owner, description, imageUrl, storagePath } = req.body || {};
+    const docId = req.params.id;
+    const { name, owner } = req.body || {};
     const existingBrands = await getCollectionDocs("product_brands");
-    const existing = existingBrands.find((b) => String(b.id) === String(brandId));
+    const existing = existingBrands.find((b) => String(b.id) === String(docId));
+    const resolvedBrandId = existing?.brandId || (await allocateServerBrandId());
 
     const brandDoc = {
       ...(existing || {}),
       ...req.body,
-      id: brandId,
+      id: docId,
+      brandId: resolvedBrandId,
       name: name ? name.trim() : existing?.name || '',
       owner: owner ? owner.trim() : existing?.owner || 'Generic Owner',
       updatedAt: new Date().toISOString(),

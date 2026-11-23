@@ -124,11 +124,15 @@ export interface ProductPerformance {
   stockOut?: number;
   preorderactive?: boolean;
   culinarydetails?: boolean;
+  ayurvedicproduct?: boolean;
   amazonWeblink?: string;
   category?: string;
+  categoryId?: string;
   categories?: string[];
+  categoryIds?: string[];
   leafycategory?: string;
   brand?: string;
+  brandId?: string;
   brandOwner?: string;
   // Firebase Storage - main product image
   imageUrl?: string;
@@ -166,6 +170,7 @@ export interface ProductPerformance {
   teluguName?: string;
   keyFeatures?: string[];
   culinaryUses?: string[];
+  practicalUses?: string[];
   storageInstructions?: string;
   healthBenefits?: AIHealthBenefit[] | string[];
   nutritionalBenefits?: string[];
@@ -256,6 +261,7 @@ export interface ProductPerformance {
     validUntil?: string;
   }>;
   fssaiLicenseNumber?: string | null;
+  certificateStoragePaths?: string[];
   aiContentLink?: string;
   aiDraftId?: string;
   aiContentMetadata?: Record<string, AIContentProvenanceEntry>;
@@ -388,7 +394,9 @@ export interface SalesProduct {
   price: number;
   gstPercentage?: number;
   category?: string;
+  categoryId?: string;
   brand?: string;
+  brandId?: string;
   brandOwner?: string;
   unit?: string;
   packingSize?: string;
@@ -402,6 +410,8 @@ export interface SalesOrder {
   customerName: string;
   customerCompany: string;
   products: SalesProduct[];
+  categoryIds?: string[];
+  brandIds?: string[];
   totalValue: number;
   paymentStatus: 'Paid' | 'Pending' | 'Overdue' | 'Refunded';
   deliveryStatus: 'Pending' | 'Shipped' | 'Delivered' | 'Cancelled';
@@ -451,6 +461,7 @@ export interface FormatInvoice {
 
 export interface Category {
   id: string;
+  categoryId?: string; // Auto-generated unique ID (e.g. CAT-1001)
   name: string;
   description?: string;
   imageUrl?: string;
@@ -461,6 +472,7 @@ export interface Category {
 
 export interface Brand {
   id: string;
+  brandId?: string; // Auto-generated unique ID (e.g. BRD-1001)
   name: string;
   owner: string;
   description?: string;
@@ -468,6 +480,13 @@ export interface Brand {
   storagePath?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface BrandOwnerCertification {
+  url: string;
+  storagePath: string;
+  fileName?: string;
+  uploadedAt?: string;
 }
 
 export interface BrandOwner {
@@ -483,6 +502,9 @@ export interface BrandOwner {
   address?: string;           // Brand Owner Address
   gstNo?: string;             // Brand Owner Gstno
   fssaiRegNo?: string;        // Brand Owner fssairegno
+  fssailicensenumber?: string; // FSSAI License Number
+  countryoforigin?: string;    // Country of Origin
+  certifications?: BrandOwnerCertification[]; // Uploaded certification images in Firebase Storage
   otherRegDetails?: string;   // Brand Owner otherRegdetails
   gpsTracking?: string;       // Brand Owner gpstracking
   description?: string;
@@ -951,6 +973,7 @@ export interface AIProductContentPayload {
   description: string;
   key_features: string[];
   culinary_uses: string[];
+  practical_uses?: string[];
   storage_instructions: string;
   translations: AIProductTranslations;
   health_benefits: AIHealthBenefit[];

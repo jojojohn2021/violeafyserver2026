@@ -42,6 +42,12 @@ interface Props {
   /** When provided, binds "Storage Conditions" directly to `products.storageInstructions`. */
   storageInstructions?: string;
   onStorageInstructionsChange?: (value: string) => void;
+  /** When provided, binds "Ideal for making" directly to `products.culinaryUses`. */
+  idealForMaking?: string;
+  onIdealForMakingChange?: (value: string) => void;
+  /** When provided, binds "Allergen Information" directly to `products.allergenInformation`. */
+  allergenInformation?: string;
+  onAllergenInformationChange?: (value: string) => void;
   /** When true, renders embedded inside Product Specifications & Descriptions without the outer card header. */
   embedded?: boolean;
   /** When true, uses light grey / white inputs & dark labels to match the light-grey Create Product section. */
@@ -80,7 +86,7 @@ interface ImageDraft {
 }
 
 const LABELS: Record<ProductDetailsTextField, { label: string; multiline: boolean; placeholder: string; max: number }> = {
-  whyShopFromLeafyearth: { label: 'Why shop from Leafyearth?', multiline: true, placeholder: 'Reasons to buy this product from Leafyearth…', max: 5000 },
+  whyShopFromLeafyearth: { label: 'Why shop from LeafyMart?', multiline: true, placeholder: 'Reasons to buy this product from LeafyMart…', max: 5000 },
   idealForMaking: { label: 'Ideal for making', multiline: true, placeholder: 'Recipes or uses this product is ideal for…', max: 5000 },
   shelfLife: { label: 'Shelf Life', multiline: false, placeholder: 'e.g. 12 months from packaging', max: 200 },
   fssaiNumber: { label: 'FSSAI Number', multiline: false, placeholder: 'e.g. 10012345000123', max: 50 },
@@ -106,7 +112,7 @@ function move<T>(list: T[], index: number, delta: number): T[] {
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ mode, productId, disabled, storageInstructions, onStorageInstructionsChange, embedded, lightTheme }, ref) => {
+const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ mode, productId, disabled, storageInstructions, onStorageInstructionsChange, idealForMaking, onIdealForMakingChange, allergenInformation, onAllergenInformationChange, embedded, lightTheme }, ref) => {
   const fieldInputCls = lightTheme
     ? 'w-full text-xs p-2.5 bg-white border border-gray-300 text-slate-900 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-60'
     : inputCls;
@@ -393,10 +399,22 @@ const ProductDetailsSection = forwardRef<ProductDetailsSectionHandle, Props>(({ 
           const cfg = LABELS[field];
           const id = `pd-${mode}-${field}`;
           const isStorageOverride = field === 'storageConditions' && typeof onStorageInstructionsChange === 'function';
-          const fieldValue = isStorageOverride ? (storageInstructions ?? '') : text[field];
+          const isIdealOverride = field === 'idealForMaking' && typeof onIdealForMakingChange === 'function';
+          const isAllergenOverride = field === 'allergenInformation' && typeof onAllergenInformationChange === 'function';
+          const fieldValue = isStorageOverride
+            ? (storageInstructions ?? '')
+            : isIdealOverride
+            ? (idealForMaking ?? '')
+            : isAllergenOverride
+            ? (allergenInformation ?? '')
+            : text[field];
           const handleFieldChange = (val: string) => {
             if (isStorageOverride) {
               onStorageInstructionsChange(val);
+            } else if (isIdealOverride) {
+              onIdealForMakingChange(val);
+            } else if (isAllergenOverride) {
+              onAllergenInformationChange(val);
             } else {
               setText(prev => ({ ...prev, [field]: val }));
             }

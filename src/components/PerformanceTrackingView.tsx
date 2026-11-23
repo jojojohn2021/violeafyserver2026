@@ -168,6 +168,10 @@ export default function PerformanceTrackingView() {
   const [newMasterOwnerAddress, setNewMasterOwnerAddress] = useState<string>('');
   const [newMasterOwnerGstNo, setNewMasterOwnerGstNo] = useState<string>('');
   const [newMasterOwnerFssaiRegNo, setNewMasterOwnerFssaiRegNo] = useState<string>('');
+  const [newMasterOwnerFssaiLicenseNumber, setNewMasterOwnerFssaiLicenseNumber] = useState<string>('');
+  const [newMasterOwnerCountryOfOrigin, setNewMasterOwnerCountryOfOrigin] = useState<string>('India');
+  const [newMasterOwnerCertifications, setNewMasterOwnerCertifications] = useState<Array<{ url: string; storagePath: string; fileName?: string; uploadedAt?: string }>>([]);
+  const [uploadingOwnerCerts, setUploadingOwnerCerts] = useState<boolean>(false);
   const [newMasterOwnerOtherRegDetails, setNewMasterOwnerOtherRegDetails] = useState<string>('');
   const [newMasterOwnerGpsTracking, setNewMasterOwnerGpsTracking] = useState<string>('');
 
@@ -181,6 +185,10 @@ export default function PerformanceTrackingView() {
   const [editOwnerAddress, setEditOwnerAddress] = useState<string>('');
   const [editOwnerGstNo, setEditOwnerGstNo] = useState<string>('');
   const [editOwnerFssaiRegNo, setEditOwnerFssaiRegNo] = useState<string>('');
+  const [editOwnerFssaiLicenseNumber, setEditOwnerFssaiLicenseNumber] = useState<string>('');
+  const [editOwnerCountryOfOrigin, setEditOwnerCountryOfOrigin] = useState<string>('India');
+  const [editOwnerCertifications, setEditOwnerCertifications] = useState<Array<{ url: string; storagePath: string; fileName?: string; uploadedAt?: string }>>([]);
+  const [uploadingEditOwnerCerts, setUploadingEditOwnerCerts] = useState<boolean>(false);
   const [editOwnerOtherRegDetails, setEditOwnerOtherRegDetails] = useState<string>('');
   const [editOwnerGpsTracking, setEditOwnerGpsTracking] = useState<string>('');
   const [editOwnerDescription, setEditOwnerDescription] = useState<string>('');
@@ -871,7 +879,10 @@ export default function PerformanceTrackingView() {
         email: extraFields?.email || extraFields?.contactEmail || '',
         address: extraFields?.address || '',
         gstNo: extraFields?.gstNo || '',
-        fssaiRegNo: extraFields?.fssaiRegNo || '',
+        fssaiRegNo: extraFields?.fssailicensenumber || extraFields?.fssaiRegNo || '',
+        fssailicensenumber: extraFields?.fssailicensenumber || extraFields?.fssaiRegNo || '',
+        countryoforigin: extraFields?.countryoforigin || 'India',
+        certifications: Array.isArray(extraFields?.certifications) ? extraFields!.certifications : [],
         otherRegDetails: extraFields?.otherRegDetails || '',
         gpsTracking: extraFields?.gpsTracking || '',
       };
@@ -885,6 +896,45 @@ export default function PerformanceTrackingView() {
     } catch (err) {
       console.error('Failed to create brand owner doc in DB:', err);
       return false;
+    }
+  };
+
+  const handleBrandOwnerCertImagesUpload = async (
+    files: FileList | null,
+    ownerNameHint: string,
+    mode: 'create' | 'edit'
+  ) => {
+    if (!files || files.length === 0) return;
+    const setBusy = mode === 'create' ? setUploadingOwnerCerts : setUploadingEditOwnerCerts;
+    const setList = mode === 'create' ? setNewMasterOwnerCertifications : setEditOwnerCertifications;
+    setBusy(true);
+    try {
+      const safeOwnerSlug =
+        (ownerNameHint || 'brand_owner')
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '') || 'brand_owner';
+      const uploadedItems: Array<{ url: string; storagePath: string; fileName?: string; uploadedAt?: string }> = [];
+      const fileArr = Array.from(files);
+      for (let i = 0; i < fileArr.length; i++) {
+        const file = fileArr[i];
+        const safeName = (file.name || `cert_${i}.jpg`).replace(/[^a-zA-Z0-9._-]+/g, '_');
+        const storagePath = `brand_owners/${safeOwnerSlug}/certifications/${Date.now()}_${i}_${safeName}`;
+        const res = await uploadFileToStorage(file, storagePath);
+        uploadedItems.push({
+          url: res.downloadUrl,
+          storagePath: res.storagePath,
+          fileName: file.name,
+          uploadedAt: new Date().toISOString(),
+        });
+      }
+      setList(prev => [...prev, ...uploadedItems]);
+    } catch (err) {
+      console.error('Failed to upload brand owner certification image(s):', err);
+      alert('Failed to upload one or more certification images.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -934,14 +984,40 @@ export default function PerformanceTrackingView() {
       email: editOwnerEmail,
       address: editOwnerAddress,
       gstNo: editOwnerGstNo,
-      fssaiRegNo: editOwnerFssaiRegNo,
+      fssaiRegNo: editOwnerFssaiLicenseNumber.trim(),
+      fssailicensenumber: editOwnerFssaiLicenseNumber.trim(),
+      countryoforigin: editOwnerCountryOfOrigin.trim(),
+      certifications: editOwnerCertifications,
       otherRegDetails: editOwnerOtherRegDetails,
       gpsTracking: editOwnerGpsTracking,
       description: editOwnerDescription,
     };
 
     try {
-      await updateBrandOwner(editingOwnerDoc.id, updates);
+      const existsInDb = brandOwners.some(o => o.id === editingOwnerDoc.id);
+      if (existsInDb) {
+        await updateBrandOwner(editingOwnerDoc.id, updates);
+      } else {
+        await createBrandOwner({
+          name: trimmedNew,
+          contactPerson: editOwnerContactName,
+          contactName: editOwnerContactName,
+          contactMobile: formattedMobile,
+          contactPhone: formattedMobile,
+          whatsappNo: formattedWhatsapp,
+          contactEmail: editOwnerEmail,
+          email: editOwnerEmail,
+          address: editOwnerAddress,
+          gstNo: editOwnerGstNo,
+          fssaiRegNo: editOwnerFssaiLicenseNumber.trim(),
+          fssailicensenumber: editOwnerFssaiLicenseNumber.trim(),
+          countryoforigin: editOwnerCountryOfOrigin.trim(),
+          certifications: editOwnerCertifications,
+          otherRegDetails: editOwnerOtherRegDetails,
+          gpsTracking: editOwnerGpsTracking,
+          description: editOwnerDescription,
+        });
+      }
     } catch (err) {
       console.error('Failed to update brand owner in DB:', err);
     } finally {
@@ -3005,6 +3081,10 @@ export default function PerformanceTrackingView() {
                   lightTheme
                   storageInstructions={prodV8Fields.storageInstructions || ''}
                   onStorageInstructionsChange={(val) => setProdV8Fields({ ...prodV8Fields, storageInstructions: val })}
+                  idealForMaking={Array.isArray(prodV8Fields.culinaryUses) ? prodV8Fields.culinaryUses.join(', ') : ''}
+                  onIdealForMakingChange={(val) => setProdV8Fields({ ...prodV8Fields, culinaryUses: val.split(',').map(s => s.trim()).filter(Boolean) })}
+                  allergenInformation={Array.isArray(prodV8Fields.allergenInformation) ? prodV8Fields.allergenInformation.join(', ') : ''}
+                  onAllergenInformationChange={(val) => setProdV8Fields({ ...prodV8Fields, allergenInformation: val.split(',').map(s => s.trim()).filter(Boolean) })}
                 />
               </div>
 
@@ -4610,6 +4690,10 @@ export default function PerformanceTrackingView() {
                         embedded
                         storageInstructions={editV8Fields.storageInstructions || ''}
                         onStorageInstructionsChange={(val) => setEditV8Fields({ ...editV8Fields, storageInstructions: val })}
+                        idealForMaking={Array.isArray(editV8Fields.culinaryUses) ? editV8Fields.culinaryUses.join(', ') : ''}
+                        onIdealForMakingChange={(val) => setEditV8Fields({ ...editV8Fields, culinaryUses: val.split(',').map(s => s.trim()).filter(Boolean) })}
+                        allergenInformation={Array.isArray(editV8Fields.allergenInformation) ? editV8Fields.allergenInformation.join(', ') : ''}
+                        onAllergenInformationChange={(val) => setEditV8Fields({ ...editV8Fields, allergenInformation: val.split(',').map(s => s.trim()).filter(Boolean) })}
                       />
                     </div>
                   </div>
@@ -4989,7 +5073,17 @@ export default function PerformanceTrackingView() {
                               autoFocus
                             />
                           ) : (
-                            <h4 className="text-sm font-bold text-white group-hover:text-sky-400 transition-colors">{cat}</h4>
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-bold text-white group-hover:text-sky-400 transition-colors truncate">{cat}</h4>
+                              {(() => {
+                                const catDoc = categories.find(c => c.name.toLowerCase() === cat.toLowerCase());
+                                return catDoc?.categoryId ? (
+                                  <span className="inline-block mt-0.5 px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-700 font-mono text-[10px] font-bold">
+                                    ID: {catDoc.categoryId}
+                                  </span>
+                                ) : null;
+                              })()}
+                            </div>
                           )}
                         </div>
                         {deletingMasterId === `category-${cat}` ? (
@@ -5012,20 +5106,22 @@ export default function PerformanceTrackingView() {
                             </button>
                           </div>
                         ) : !isEditing && hasAccess('Products & Clients', 'edit') && (
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1.5 shrink-0">
                             <button
+                              type="button"
                               onClick={() => {
                                 setEditingMasterId(`category-${cat}`);
                                 setEditMasterNameVal(cat);
                               }}
-                              className="p-1 hover:bg-slate-800 text-slate-404 hover:text-white rounded transition cursor-pointer"
+                              className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition cursor-pointer"
                               title="Edit category name"
                             >
                               <Edit className="w-3.5 h-3.5" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => setDeletingMasterId(`category-${cat}`)}
-                              className="p-1 hover:bg-rose-955/40 text-slate-404 hover:text-rose-400 rounded transition cursor-pointer"
+                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg transition cursor-pointer"
                               title="Delete category"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -5213,12 +5309,22 @@ export default function PerformanceTrackingView() {
                               </select>
                             </div>
                           ) : (
-                            <div>
-                              <h4 className="text-sm font-bold text-white group-hover:text-amber-400 transition-colors">{brand.name}</h4>
-                              <span className="text-[10px] text-slate-550 flex items-center gap-1 mt-0.5">
-                                <Building2 className="w-3 h-3 text-slate-500" />
-                                {brand.owner}
-                              </span>
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-bold text-white group-hover:text-amber-400 transition-colors truncate">{brand.name}</h4>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                {(() => {
+                                  const brandDoc = brands.find(b => b.name.toLowerCase() === brand.name.toLowerCase());
+                                  return brandDoc?.brandId ? (
+                                    <span className="inline-block px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 font-mono text-[10px] font-bold">
+                                      ID: {brandDoc.brandId}
+                                    </span>
+                                  ) : null;
+                                })()}
+                                <span className="text-[10px] text-slate-550 flex items-center gap-1">
+                                  <Building2 className="w-3 h-3 text-slate-500" />
+                                  {brand.owner}
+                                </span>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -5243,21 +5349,23 @@ export default function PerformanceTrackingView() {
                             </button>
                           </div>
                         ) : !isEditing && hasAccess('Products & Clients', 'edit') && (
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1.5 shrink-0">
                             <button
+                              type="button"
                               onClick={() => {
                                 setEditingMasterId(`brand-${brand.name}`);
                                 setEditMasterNameVal(brand.name);
                                 setEditMasterOwnerVal(brand.owner);
                               }}
-                              className="p-1 hover:bg-slate-800 text-slate-404 hover:text-white rounded transition cursor-pointer"
+                              className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition cursor-pointer"
                               title="Edit Brand"
                             >
                               <Edit className="w-3.5 h-3.5" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => setDeletingMasterId(`brand-${brand.name}`)}
-                              className="p-1 hover:bg-rose-955/40 text-slate-404 hover:text-rose-400 rounded transition cursor-pointer"
+                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg transition cursor-pointer"
                               title="Delete Brand"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -5467,8 +5575,9 @@ export default function PerformanceTrackingView() {
                             </button>
                           </div>
                         ) : !isEditing && hasAccess('Products & Clients', 'edit') && (
-                          <div className="flex items-center gap-1 opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1.5 shrink-0">
                             <button
+                              type="button"
                               onClick={() => {
                                 const doc = brandOwners.find(b => b.name.toLowerCase() === owner.toLowerCase()) || {
                                   id: `owner_${Date.now()}`,
@@ -5482,19 +5591,24 @@ export default function PerformanceTrackingView() {
                                 setEditOwnerEmail(doc.contactEmail || doc.email || '');
                                 setEditOwnerAddress(doc.address || '');
                                 setEditOwnerGstNo(doc.gstNo || '');
-                                setEditOwnerFssaiRegNo(doc.fssaiRegNo || '');
+                                setEditOwnerFssaiRegNo(doc.fssailicensenumber || doc.fssaiRegNo || '');
+                                setEditOwnerFssaiLicenseNumber(doc.fssailicensenumber || doc.fssaiRegNo || '');
+                                setEditOwnerCountryOfOrigin(doc.countryoforigin || 'India');
+                                setEditOwnerCertifications(Array.isArray(doc.certifications) ? doc.certifications : []);
                                 setEditOwnerOtherRegDetails(doc.otherRegDetails || '');
                                 setEditOwnerGpsTracking(doc.gpsTracking || '');
                                 setEditOwnerDescription(doc.description || '');
                               }}
-                              className="p-1 hover:bg-slate-800 text-slate-404 hover:text-white rounded transition cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold transition cursor-pointer shadow-xs"
                               title="Edit Brand Owner"
                             >
-                              <Edit className="w-3.5 h-3.5" />
+                              <Edit className="w-3 h-3" />
+                              <span>Edit</span>
                             </button>
                             <button
+                              type="button"
                               onClick={() => setDeletingMasterId(`owner-${owner}`)}
-                              className="p-1 hover:bg-rose-955/40 text-slate-404 hover:text-rose-400 rounded transition cursor-pointer"
+                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg transition cursor-pointer"
                               title="Delete Brand Owner"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -5553,8 +5667,9 @@ export default function PerformanceTrackingView() {
                           ownerDoc.contactName || ownerDoc.contactPerson ||
                           ownerDoc.contactMobile || ownerDoc.contactPhone ||
                           ownerDoc.whatsappNo || ownerDoc.contactEmail || ownerDoc.email ||
-                          ownerDoc.gstNo || ownerDoc.fssaiRegNo || ownerDoc.otherRegDetails ||
-                          ownerDoc.gpsTracking || ownerDoc.address
+                          ownerDoc.gstNo || ownerDoc.fssaiRegNo || ownerDoc.fssailicensenumber ||
+                          ownerDoc.countryoforigin || (Array.isArray(ownerDoc.certifications) && ownerDoc.certifications.length > 0) ||
+                          ownerDoc.otherRegDetails || ownerDoc.gpsTracking || ownerDoc.address
                         );
                         if (!hasOwnerDetails || !ownerDoc) return null;
                         return (
@@ -5576,8 +5691,23 @@ export default function PerformanceTrackingView() {
                               {(ownerDoc.contactEmail || ownerDoc.email) && (
                                 <div className="truncate"><span className="text-slate-500 font-medium">Email:</span> <span className="font-semibold text-slate-200">{ownerDoc.contactEmail || ownerDoc.email}</span></div>
                               )}
-                              {ownerDoc.fssaiRegNo && (
-                                <div className="truncate"><span className="text-slate-500 font-medium">FSSAI:</span> <span className="font-semibold text-amber-300 font-mono">{ownerDoc.fssaiRegNo}</span></div>
+                              {(ownerDoc.fssailicensenumber || ownerDoc.fssaiRegNo) && (
+                                <div className="truncate"><span className="text-slate-500 font-medium">FSSAI:</span> <span className="font-semibold text-amber-300 font-mono">{ownerDoc.fssailicensenumber || ownerDoc.fssaiRegNo}</span></div>
+                              )}
+                              {ownerDoc.countryoforigin && (
+                                <div className="truncate"><span className="text-slate-500 font-medium">Origin:</span> <span className="font-semibold text-slate-200">{ownerDoc.countryoforigin}</span></div>
+                              )}
+                              {Array.isArray(ownerDoc.certifications) && ownerDoc.certifications.length > 0 && (
+                                <div className="col-span-1 sm:col-span-2 pt-1">
+                                  <span className="text-slate-500 font-medium block mb-1">Certifications ({ownerDoc.certifications.length}):</span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {ownerDoc.certifications.map((cert, idx) => (
+                                      <a key={idx} href={cert.url} target="_blank" rel="noopener noreferrer" title={cert.fileName || `Certification ${idx + 1}`}>
+                                        <img src={cert.url} alt={cert.fileName || `Cert ${idx + 1}`} className="w-9 h-9 object-cover rounded border border-slate-700 hover:border-emerald-400 transition" />
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
                               )}
                               {ownerDoc.gpsTracking && (
                                 <div className="truncate flex items-center gap-1">
@@ -5907,6 +6037,34 @@ export default function PerformanceTrackingView() {
             </div>
 
             <div className="space-y-4">
+              {showAddMasterModal === 'category' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-404 mb-1.5 uppercase tracking-wider">
+                    Category Unique ID (Auto-Generated)
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    value="Auto-generated on save (e.g. CAT-1001)"
+                    className="w-full text-xs p-2.5 bg-slate-100 border border-slate-300 text-emerald-700 font-mono rounded-lg cursor-not-allowed opacity-90"
+                  />
+                </div>
+              )}
+
+              {showAddMasterModal === 'brand' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-404 mb-1.5 uppercase tracking-wider">
+                    Brand Unique ID (Auto-Generated)
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    value="Auto-generated on save (e.g. BRD-1001)"
+                    className="w-full text-xs p-2.5 bg-slate-100 border border-slate-300 text-amber-700 font-mono rounded-lg cursor-not-allowed opacity-90"
+                  />
+                </div>
+              )}
+
               {showAddMasterModal !== 'unit' && (
                 <div>
                   <label className="block text-[10px] font-bold text-slate-404 mb-1.5 uppercase tracking-wider">
@@ -6096,13 +6254,31 @@ export default function PerformanceTrackingView() {
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Brand Owner fssairegno</label>
+                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">FSSAI License Number</label>
                       <input
+                        id="add-owner-fssai-license"
                         type="text"
-                        placeholder="FSSAI Registration No"
-                        value={newMasterOwnerFssaiRegNo}
-                        onChange={e => setNewMasterOwnerFssaiRegNo(e.target.value)}
+                        maxLength={14}
+                        placeholder="14-digit FSSAI License Number"
+                        value={newMasterOwnerFssaiLicenseNumber}
+                        onChange={e => {
+                          const val = e.target.value.replace(/[^\d]/g, '');
+                          setNewMasterOwnerFssaiLicenseNumber(val);
+                          setNewMasterOwnerFssaiRegNo(val);
+                        }}
                         className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-404 mb-1 uppercase tracking-wider">Country of Origin</label>
+                      <input
+                        id="add-owner-country-origin"
+                        type="text"
+                        placeholder="e.g. India"
+                        value={newMasterOwnerCountryOfOrigin}
+                        onChange={e => setNewMasterOwnerCountryOfOrigin(e.target.value)}
+                        className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
                   </div>
@@ -6176,6 +6352,52 @@ export default function PerformanceTrackingView() {
                         />
                         <span className="text-[9px] text-slate-500 block">Brand Owner logo stored directly in Firestore product_brand_owners table</span>
                       </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">
+                      Certifications (Upload Multiple Images to Firebase Storage)
+                    </label>
+                    <div className="bg-[#0d0d10] p-3 border border-slate-800 rounded-xl space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <input
+                          id="add-owner-certifications-input"
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          disabled={uploadingOwnerCerts}
+                          onChange={e => {
+                            handleBrandOwnerCertImagesUpload(e.target.files, newMasterName, 'create');
+                            e.target.value = '';
+                          }}
+                          className="w-full text-[11px] text-slate-400 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-emerald-950 file:text-emerald-300 hover:file:bg-emerald-900 transition file:cursor-pointer"
+                        />
+                        {uploadingOwnerCerts && (
+                          <span className="text-[10px] font-bold text-emerald-400 shrink-0 animate-pulse">Uploading…</span>
+                        )}
+                      </div>
+                      {newMasterOwnerCertifications.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {newMasterOwnerCertifications.map((cert, idx) => (
+                            <div key={idx} className="relative group w-16 h-16">
+                              <img
+                                src={cert.url}
+                                alt={cert.fileName || `Certification ${idx + 1}`}
+                                className="w-full h-full object-cover rounded-lg border border-slate-700"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setNewMasterOwnerCertifications(prev => prev.filter((_, i) => i !== idx))}
+                                className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 cursor-pointer"
+                                title="Remove certification image"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -6259,6 +6481,9 @@ export default function PerformanceTrackingView() {
                           address: newMasterOwnerAddress,
                           gstNo: newMasterOwnerGstNo,
                           fssaiRegNo: newMasterOwnerFssaiRegNo,
+                          fssailicensenumber: newMasterOwnerFssaiLicenseNumber.trim(),
+                          countryoforigin: newMasterOwnerCountryOfOrigin.trim(),
+                          certifications: newMasterOwnerCertifications,
                           otherRegDetails: newMasterOwnerOtherRegDetails,
                           gpsTracking: newMasterOwnerGpsTracking,
                         }
@@ -6273,6 +6498,9 @@ export default function PerformanceTrackingView() {
                       setNewMasterOwnerAddress('');
                       setNewMasterOwnerGstNo('');
                       setNewMasterOwnerFssaiRegNo('');
+                      setNewMasterOwnerFssaiLicenseNumber('');
+                      setNewMasterOwnerCountryOfOrigin('India');
+                      setNewMasterOwnerCertifications([]);
                       setNewMasterOwnerOtherRegDetails('');
                       setNewMasterOwnerGpsTracking('');
                       setShowAddMasterModal(null);
@@ -6391,13 +6619,30 @@ export default function PerformanceTrackingView() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Brand Owner fssairegno</label>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">FSSAI License Number</label>
                   <input
+                    id="edit-owner-fssai-license"
                     type="text"
-                    placeholder="FSSAI registration number"
-                    value={editOwnerFssaiRegNo}
-                    onChange={e => setEditOwnerFssaiRegNo(e.target.value)}
+                    maxLength={14}
+                    placeholder="14-digit FSSAI License Number"
+                    value={editOwnerFssaiLicenseNumber}
+                    onChange={e => {
+                      const val = e.target.value.replace(/[^\d]/g, '');
+                      setEditOwnerFssaiLicenseNumber(val);
+                      setEditOwnerFssaiRegNo(val);
+                    }}
                     className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Country of Origin</label>
+                  <input
+                    id="edit-owner-country-origin"
+                    type="text"
+                    placeholder="e.g. India"
+                    value={editOwnerCountryOfOrigin}
+                    onChange={e => setEditOwnerCountryOfOrigin(e.target.value)}
+                    className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
               </div>
@@ -6444,6 +6689,54 @@ export default function PerformanceTrackingView() {
                   onChange={e => setEditOwnerDescription(e.target.value)}
                   className="w-full text-xs p-2 bg-[#0d0d10] border border-slate-800 text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-emerald-400 mb-1.5 uppercase tracking-wider">
+                  Certifications (Upload Multiple Images to Firebase Storage)
+                </label>
+                <div className="bg-[#0d0d10] p-3 border border-slate-800 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <input
+                      id="edit-owner-certifications-input"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      disabled={uploadingEditOwnerCerts}
+                      onChange={e => {
+                        handleBrandOwnerCertImagesUpload(e.target.files, editOwnerName || editingOwnerDoc.name, 'edit');
+                        e.target.value = '';
+                      }}
+                      className="w-full text-[11px] text-slate-400 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-emerald-950 file:text-emerald-300 hover:file:bg-emerald-900 transition file:cursor-pointer"
+                    />
+                    {uploadingEditOwnerCerts && (
+                      <span className="text-[10px] font-bold text-emerald-400 shrink-0 animate-pulse">Uploading…</span>
+                    )}
+                  </div>
+                  {editOwnerCertifications.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {editOwnerCertifications.map((cert, idx) => (
+                        <div key={idx} className="relative group w-16 h-16">
+                          <a href={cert.url} target="_blank" rel="noopener noreferrer" title={cert.fileName || `Certification ${idx + 1}`}>
+                            <img
+                              src={cert.url}
+                              alt={cert.fileName || `Certification ${idx + 1}`}
+                              className="w-full h-full object-cover rounded-lg border border-slate-700"
+                            />
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => setEditOwnerCertifications(prev => prev.filter((_, i) => i !== idx))}
+                            className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white p-0.5 rounded-full hover:bg-rose-500 cursor-pointer"
+                            title="Remove certification image"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800/40">

@@ -103,10 +103,10 @@ function createMockFirestore(initialCollections: Record<string, Record<string, a
   return db;
 }
 
-describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', () => {
+describe('LeafyMart V9 SEO & V10 AI Commerce & Product Discoverability Suite', () => {
   it('1. V9 Section 4.1: Generates canonical Cumin Seeds (Jeera) SEO metadata & URL slug', () => {
     const seo = buildStructuredFallbackSEO('Cumin Seeds (Jeera)');
-    assert.equal(seo.seoTitle, 'Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth');
+    assert.equal(seo.seoTitle, 'Cumin Seeds (Jeera) | Whole Cumin | LeafyMart');
     assert.equal(seo.urlSlug, 'cumin-seeds-jeera-whole');
     assert.ok(seo.metaDescription.length >= 120 && seo.metaDescription.length <= 160);
     assert.ok(seo.seoKeywords.includes('cumin seeds'));
@@ -191,7 +191,7 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
       versionId: 'ver_1',
       productId: 'prod_1',
       seo: {
-        seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth',
+        seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyMart',
         metaDescription:
           'Discover aromatic whole cumin seeds (Jeera) for curries, dals, rice and spice blends. Add warm, earthy flavour to your everyday cooking.',
         seoKeywords: ['cumin seeds', 'jeera', 'whole cumin', 'jeerakam', 'Indian spices'],
@@ -200,7 +200,7 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
       selectedFields: ['seoTitle', 'metaDescription', 'seoKeywords', 'urlSlug'],
       expectedMasterRevision: 1,
       idempotencyKey: 'idem_seo_1',
-      actor: { uid: 'admin_1', email: 'admin@leafyearth.com', role: 'Administrator' },
+      actor: { uid: 'admin_1', email: 'admin@leafymart.com', role: 'Administrator' },
     });
 
     assert.equal(res1.updatedProduct.urlSlug, 'cumin-seeds-jeera-whole');
@@ -220,7 +220,7 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
           db,
           productId: 'prod_2',
           seo: {
-            seoTitle: 'Cumin Seeds Premium | LeafyEarth',
+            seoTitle: 'Cumin Seeds Premium | LeafyMart',
             metaDescription:
               'Discover premium whole cumin seeds (Jeera) for curries, dals, rice and spice blends. Add warm, earthy flavour to your everyday cooking.',
             seoKeywords: ['cumin seeds', 'jeera', 'whole cumin', 'jeerakam', 'Indian spices'],
@@ -238,7 +238,7 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
       db,
       productId: 'prod_1',
       seo: {
-        seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth',
+        seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyMart',
         metaDescription:
           'Discover aromatic whole cumin seeds (Jeera) for curries, dals, rice and spice blends. Add warm, earthy flavour to your everyday cooking.',
         seoKeywords: ['cumin seeds', 'jeera', 'whole cumin', 'jeerakam', 'Indian spices'],
@@ -322,11 +322,11 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
       title: 'Cumin Seeds (Jeera) – Whole Culinary Spice',
       description: 'Whole aromatic Cumin Seeds (Jeera) hygienically packed for everyday Indian cooking.',
       urlSlug: 'cumin-seeds-jeera-whole',
-      seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth',
+      seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyMart',
       metaDescription:
         'Discover aromatic whole cumin seeds (Jeera) for curries, dals, rice and spice blends.',
       seoKeywords: ['cumin seeds', 'jeera', 'whole cumin', 'jeerakam', 'Indian spices'],
-      brand: 'LeafyEarth',
+      brand: 'LeafyMart',
       category: 'Spices & Botanicals',
       mrp: 160,
       onlinePrice: 140,
@@ -351,7 +351,7 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
     };
 
     const projection = buildPublicProductOfferProjection(masterProduct, {
-      verifiedDomain: 'https://leafyearth.com',
+      verifiedDomain: 'https://www.leafymart.com',
     });
 
     assert.equal(projection.price, 160); // base MRP
@@ -363,12 +363,12 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
     assert.equal((projection as any).lowestWebPrice, undefined);
     assert.equal((projection as any).highestWebPrice, undefined);
     assert.equal((projection as any).webPriceSources, undefined);
-    assert.equal(projection.canonicalUrl, 'https://leafyearth.com/products/cumin-seeds-jeera-whole');
+    assert.equal(projection.canonicalUrl, 'https://www.leafymart.com/products/cumin-seeds-jeera-whole');
     assert.equal(projection.aiGeneratedContentDisclosure, true);
   });
 
   it('7. V9 & V10 Sections 8, 9, 17, 18: Generates Google Merchant XML (with structured AI title/description), Bing XML, OpenAI JSONL, Sitemap, Robots & SSR HTML with JSON-LD', () => {
-    const settingsCatalog = getDefaultPlatformSettingsCatalog('https://leafyearth.com');
+    const settingsCatalog = getDefaultPlatformSettingsCatalog('https://www.leafymart.com');
     const googleSettings = settingsCatalog.find((s) => s.id === 'google_merchant')!;
     const openaiSettings = settingsCatalog.find((s) => s.id === 'openai_chatgpt')!;
 
@@ -386,17 +386,17 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
         description:
           'Whole aromatic Cumin Seeds (Jeera) hygienically packed for everyday Indian cooking.',
         urlSlug: 'cumin-seeds-jeera-whole',
-        seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth',
+        seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyMart',
         metaDescription:
           'Discover aromatic whole cumin seeds (Jeera) for curries, dals, rice and spice blends.',
         seoKeywords: ['cumin seeds', 'jeera', 'whole cumin', 'jeerakam', 'Indian spices'],
-        brand: 'LeafyEarth',
+        brand: 'LeafyMart',
         category: 'Spices',
         mrp: 150,
         onlinePrice: 135,
         offerPrice: 120,
         stock: 15,
-        imageUrl: 'https://leafyearth.com/images/cumin.png',
+        imageUrl: 'https://www.leafymart.com/images/cumin.png',
         packingSize: '100 g',
         productHighlights: ['Whole cumin seeds', 'No artificial colors'],
         productFAQs: [{ question: 'How to store?', answer: 'Airtight container.' }],
@@ -405,7 +405,7 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
         },
         aiCommerceEnabled: true,
       },
-      { verifiedDomain: 'https://leafyearth.com' }
+      { verifiedDomain: 'https://www.leafymart.com' }
     );
 
     // Google Merchant XML Feed
@@ -418,7 +418,7 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
 
     // Bing XML Feed
     const bingXml = generateBingMerchantXmlFeed([projection], googleSettings);
-    assert.ok(bingXml.includes('LeafyEarth Microsoft Merchant Catalog'));
+    assert.ok(bingXml.includes('LeafyMart Microsoft Merchant Catalog'));
 
     // OpenAI JSONL Feed
     const jsonl = generateOpenAIProductsJsonlFeed([projection], openaiSettings);
@@ -428,17 +428,17 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
     assert.equal(parsedJsonl.submission_enabled, false);
 
     // Sitemap, Robots & llms.txt
-    const sitemap = generateSitemapXml([projection], 'https://leafyearth.com');
-    assert.ok(sitemap.includes('<loc>https://leafyearth.com/products/cumin-seeds-jeera-whole</loc>'));
+    const sitemap = generateSitemapXml([projection], 'https://www.leafymart.com');
+    assert.ok(sitemap.includes('<loc>https://www.leafymart.com/products/cumin-seeds-jeera-whole</loc>'));
 
-    const robots = generateRobotsTxt('https://leafyearth.com');
+    const robots = generateRobotsTxt('https://www.leafymart.com');
     assert.ok(robots.includes('User-agent: OAI-SearchBot'));
     assert.ok(robots.includes('User-agent: PerplexityBot'));
     assert.ok(robots.includes('Disallow: /api/admin/'));
-    assert.ok(robots.includes('Sitemap: https://leafyearth.com/sitemap.xml'));
+    assert.ok(robots.includes('Sitemap: https://www.leafymart.com/sitemap.xml'));
 
-    const llms = generateLlmsTxt([projection], 'https://leafyearth.com');
-    assert.ok(llms.includes('https://leafyearth.com/products/cumin-seeds-jeera-whole'));
+    const llms = generateLlmsTxt([projection], 'https://www.leafymart.com');
+    assert.ok(llms.includes('https://www.leafymart.com/products/cumin-seeds-jeera-whole'));
 
     // SSR Product Landing HTML + JSON-LD (no fabricated AggregateRating when reviewsCount === 0)
     const jsonLd = buildProductJsonLdObject(projection);
@@ -448,9 +448,9 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
     assert.equal(jsonLd.aggregateRating, undefined);
 
     const ssrHtml = renderServerProductLandingHtml(projection);
-    assert.ok(ssrHtml.includes('<title>Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth</title>'));
+    assert.ok(ssrHtml.includes('<title>Cumin Seeds (Jeera) | Whole Cumin | LeafyMart</title>'));
     assert.ok(
-      ssrHtml.includes('<link rel="canonical" href="https://leafyearth.com/products/cumin-seeds-jeera-whole" />')
+      ssrHtml.includes('<link rel="canonical" href="https://www.leafymart.com/products/cumin-seeds-jeera-whole" />')
     );
     assert.ok(ssrHtml.includes('application/ld+json'));
 
@@ -479,11 +479,11 @@ describe('LeafyEarth V9 SEO & V10 AI Commerce & Product Discoverability Suite', 
         description:
           'Whole aromatic Cumin Seeds (Jeera) hygienically packed for everyday Indian cooking.',
         urlSlug: 'cumin-seeds-jeera-whole',
-        seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth',
+        seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyMart',
         metaDescription:
           'Discover aromatic whole cumin seeds (Jeera) for curries, dals, rice and spice blends.',
         onlinePrice: 135,
-        imageUrl: 'https://leafyearth.com/images/cumin.png',
+        imageUrl: 'https://www.leafymart.com/images/cumin.png',
         aiCommerceEnabled: true,
       },
       'google_merchant',

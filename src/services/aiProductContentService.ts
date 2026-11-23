@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
+import { resolveRegionalProductNames } from '../utils/botanicalRegionalNames';
 import type {
   AIProductContentPayload,
   AIProductDraft,
@@ -79,7 +80,7 @@ export function assertNoSeoFields(payload: unknown): void {
   if (!payload || typeof payload !== 'object') return;
   for (const key of Object.keys(payload as Record<string, unknown>)) {
     if (FORBIDDEN_SEO_KEYS.has(key)) {
-      throw new Error(`SEO field '${key}' is prohibited by LeafyEarth V8 specification.`);
+      throw new Error(`SEO field '${key}' is prohibited by LeafyMart V8 specification.`);
     }
   }
 }
@@ -116,6 +117,7 @@ export function validateAIProductContentPayload(
   const description = cleanStr(raw.description);
   const key_features = cleanArr(raw.key_features);
   const culinary_uses = cleanArr(raw.culinary_uses);
+  const practical_uses = cleanArr(raw.practical_uses);
   const storage_instructions = cleanStr(raw.storage_instructions);
 
   if (!english_product_name) errors.push('english_product_name is required.');
@@ -309,6 +311,7 @@ export function validateAIProductContentPayload(
       description,
       key_features,
       culinary_uses,
+      practical_uses,
       storage_instructions,
       translations,
       health_benefits,
@@ -580,7 +583,7 @@ export function buildStructuredFallbackContent(
   productName: string,
   options?: { categoryHint?: string; brandHint?: string; isAyurvedicProduct?: boolean }
 ): AIProductContentPayload {
-  const cleanName = String(productName || 'LeafyEarth Product').trim();
+  const cleanName = String(productName || 'LeafyMart Product').trim();
   const matched = matchBotanicalKnowledge(cleanName);
   const category = options?.categoryHint?.trim() || matched?.category || 'Spices & Natural Foods';
   const form = matched?.form || (cleanName.toLowerCase().includes('oil') ? 'Oil' : cleanName.toLowerCase().includes('powder') ? 'Powder' : 'Whole / Natural');
@@ -598,6 +601,7 @@ export function buildStructuredFallbackContent(
   const ayurveda_applicability: AIProductContentPayload['ayurveda_applicability'] =
     isAyurvedicSelected ? 'applicable' : 'not_applicable';
 
+  const regional = resolveRegionalProductNames(cleanName);
   const translations: AIProductContentPayload['translations'] = !isAyurvedicSelected
     ? {
         en: { name: cleanName },
@@ -618,11 +622,11 @@ export function buildStructuredFallbackContent(
       }
     : {
         en: { name: cleanName },
-        ml: { name: `${cleanName} (മലയാളം)` },
-        hi: { name: `${cleanName} (हिन्दी)` },
-        ta: { name: `${cleanName} (தமிழ்)` },
-        kn: { name: `${cleanName} (ಕನ್ನಡ)` },
-        te: { name: `${cleanName} (తెలుగు)` },
+        ml: { name: regional.ml },
+        hi: { name: regional.hi },
+        ta: { name: regional.ta },
+        kn: { name: regional.kn },
+        te: { name: regional.te },
       };
 
   const references = [
@@ -649,7 +653,7 @@ export function buildStructuredFallbackContent(
   const ayurveda: AIProductContentPayload['ayurveda'] =
     ayurveda_applicability === 'applicable'
       ? {
-          sanskrit_name: matched?.sanskrit_name || `${cleanName} (Classical Dravya)`,
+          sanskrit_name: matched?.sanskrit_name || regional.profile?.sanskrit_name || `${cleanName} (Classical Dravya)`,
           classification: 'Dravyaguna Vijnana – Culinary & Traditional Wellness Herb/Spice',
           classical_description: `Traditionally valued in classical Ayurvedic texts for supporting balanced digestion (Agni), daily vitality, and seasonal wellness when used in culinary or classical preparations.`,
           rasa: matched?.rasa || ['Katu (Pungent)', 'Tikta (Bitter)'],
@@ -664,12 +668,16 @@ export function buildStructuredFallbackContent(
           },
           parts_used: matched?.parts_used || ['Edible botanical part (Phala / Kanda / Bija)'],
           medicinal_uses: [
-            'Supports healthy digestion and culinary bioavailability in traditional diets',
-            'Traditionally used for seasonal respiratory and metabolic comfort',
+            'Supports healthy digestion (Deepana-Pachana) and nutrient assimilation in traditional diets',
+            'Traditionally valued for seasonal respiratory comfort and throat soothing',
+            'Promotes balanced gut regularity and gentle metabolic cleansing',
+            'Used in classical wellness routines to support natural vitality and immune resilience',
           ],
           classical_formulations: matched?.formulations || ['Classical Churna & Kwatha preparations'],
           usage_methods: [
-            'Use in daily culinary tempering, decoctions, or warm herbal infusions',
+            'Prepare as a warm herbal decoction (Kashayam) by simmering gently in water',
+            'Take as fine churna (powder) blended with warm water, honey, or ghee as advised by a Vaidya',
+            'Incorporate in daily culinary tempering, herbal infusions, or classical spice blends',
           ],
           anupana: ['Warm water (Ushnodaka)', 'Clarified butter (Ghrita)', 'Raw honey (Madhu)'],
           typical_dosage_note:
@@ -710,12 +718,21 @@ export function buildStructuredFallbackContent(
       'Packed in food-grade moisture-barrier packaging for lasting freshness',
     ],
     culinary_uses: isHousehold
-      ? ['Use as directed on household surfaces or personal care routines']
+      ? []
       : [
           'Everyday curries, dals, gravies, and traditional tempering',
-          'Herbal teas, wellness infusions, and spice blends (masalas)',
-          'Marinades, pickles, and artisanal culinary preparations',
+          'Herbal teas, bakery recipes, and spice blends (masalas)',
+          'Marinades, pickles, and artisanal kitchen preparations',
         ],
+    practical_uses: isHousehold
+      ? ['Use as directed on household surfaces or personal care routines']
+      : options?.isAyurvedicProduct !== false
+      ? [
+          'Prepared as a traditional decoction (Kashayam) or warm water infusion',
+          'Used as fine churna (powder) with warm water or honey as guided by an Ayurvedic practitioner',
+          'Combined in classical household herbal blends and wellness routines',
+        ]
+      : [],
     storage_instructions:
       'Store in a cool, dry, and hygienic place away from direct sunlight and moisture. Transfer to an airtight container after opening.',
     translations,
@@ -739,7 +756,8 @@ export function buildStructuredFallbackContent(
       ? ['Formulated for effective household hygiene']
       : [
           'Naturally rich in botanical polyphenols and essential volatile oils',
-          'Zero trans fat, zero cholesterol, and no added refined sugars',
+          'Source of plant-based dietary fiber and trace phytonutrients',
+          'Zero trans fat, zero cholesterol, and free from refined sugars or synthetic additives',
         ],
     safety_precautions: [
       'Check ingredient label for potential allergens before use.',
@@ -853,9 +871,9 @@ export async function generateProductContentViaProvider(
         : `- is_ayurvedic_product: true
 - translations: { en: { name }, ml: { name }, hi: { name }, ta: { name }, kn: { name }, te: { name } } using authentic native scripts for Malayalam, Hindi, Tamil, Kannada, and Telugu.
 - ayurveda_applicability: "applicable"
-- ayurveda: object with sanskrit_name, classification, classical_description, rasa[], guna[], virya, vipaka, prabhava, dosha_effects:{vata,pitta,kapha}, parts_used[], medicinal_uses[], classical_formulations[], usage_methods[], anupana[], typical_dosage_note, precautions[], contraindications[], interactions[], references[]`;
+- ayurveda: object with sanskrit_name, classification, classical_description, rasa[], guna[], virya, vipaka, prabhava, dosha_effects:{vata,pitta,kapha}, parts_used[], medicinal_uses[] (MINIMUM 4 distinct points), classical_formulations[], usage_methods[] (MINIMUM 3 distinct points), anupana[], typical_dosage_note, precautions[], contraindications[], interactions[], references[]`;
 
-    const systemPrompt = `You are the LeafyEarth E-Commerce & Botanical Product Content Specialist for OpenAI project "${config.projectName}".
+    const systemPrompt = `You are the LeafyMart E-Commerce & Botanical Product Content Specialist for OpenAI project "${config.projectName}".
 Return ONLY a valid JSON object matching the exact schema below. Do NOT include any top-level SEO fields (no seo_title, meta_description, seo_keywords, url_slug).
 Required JSON keys:
 - english_product_name (string)
@@ -866,21 +884,22 @@ Required JSON keys:
 - title (string)
 - description (string)
 - key_features (string[])
-- culinary_uses (string[])
+- culinary_uses (string[] — kitchen, cooking, or bakery uses ONLY; use [] if not used in kitchen/bakery; some products may have both culinary_uses and practical_uses)
+- practical_uses (string[] — Ayurvedic / traditional practical uses and how to use; some products may have both culinary_uses and practical_uses)
 - storage_instructions (string)
 ${ayurvedicPromptInstruction}
 - health_benefits: Array<{ claim, evidence_level: "traditional_use"|"nutritional"|"preliminary_study"|"human_study"|"insufficient_evidence", reference_ids: string[], review_status: "pending_review" }>
-- nutritional_benefits (string[])
+- nutritional_benefits (string[] — MINIMUM 3 distinct points)
 - safety_precautions (string[])
 - references: Array<{ id, source_type, title, author_or_body, section_or_citation, url, verification_note }>
 - review_flags (string[])
 Never make miraculous or disease-cure claims.`;
 
-    const userPrompt = `Generate structured LeafyEarth product content for:
+    const userPrompt = `Generate structured LeafyMart product content for:
 Product Name: ${productName}
 Ayurvedic Product: ${isAyurvedicOpt === false ? 'No (Exclude 6-Language Product Names and Conditional Ayurvedic Medicinal Content; generate all other features)' : 'Yes (Include 6-Language Product Names, Ayurveda Applicability: applicable, and Conditional Ayurvedic Medicinal Content)'}
 Category Hint: ${options?.categoryHint || 'Auto-detect'}
-Brand Hint: ${options?.brandHint || 'LeafyEarth'}`;
+Brand Hint: ${options?.brandHint || 'LeafyMart'}`;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30000);
@@ -1013,7 +1032,7 @@ function makePngChunk(type: string, data: Buffer): Buffer {
  * background and a centered studio product silhouette card so every generated
  * candidate image strictly satisfies the 1000x1000 #FFFFFF specification.
  */
-export function generatePureWhite1000x1000PngBuffer(seedText = 'LeafyEarth'): Buffer {
+export function generatePureWhite1000x1000PngBuffer(seedText = 'LeafyMart'): Buffer {
   const width = 1000;
   const height = 1000;
   const hash = crypto.createHash('sha256').update(seedText).digest();
@@ -1272,7 +1291,7 @@ export function buildStandardKraftPouchPrompt(params: {
   const meta = resolveStandardKraftPouchLabelMetadata(params);
   const customExtra = params.customPrompt ? ` ${params.customPrompt.trim()}` : '';
   return [
-    `High-resolution 1000x1000 square commercial e-commerce studio product photograph following the exact standardized LeafyEarth brown kraft stand-up pouch cover design on a 100% pure solid white (#FFFFFF) background:`,
+    `High-resolution 1000x1000 square commercial e-commerce studio product photograph following the exact standardized LeafyMart brown kraft stand-up pouch cover design on a 100% pure solid white (#FFFFFF) background:`,
     `1. POUCH STRUCTURE: One centered upright natural matte brown kraft paper stand-up zipper pouch (Doypack) with side tear notches near the top and a horizontal resealable zip-lock heat-seal strip across the upper part.`,
     `2. STANDARD CREAM FRONT LABEL (UPPER HALF): A rounded-rectangle warm cream textured paper label sticker (#F4EFE3) centered on the upper front of the kraft pouch containing this exact centered vertical layout:`,
     `   - Top Title (large bold dark-brown serif font): "${meta.primaryTitle}"`,
@@ -1653,9 +1672,44 @@ export function buildMasterComparisonDiff(params: {
     pushItem('leafycategory', 'Product Category (leafycategory)', 'general', 'leafycategory', payload.category);
     pushItem('productForm', 'Product Form', 'general', 'productForm', payload.form);
     pushItem('description', 'E-Commerce Description', 'general', 'description', payload.description);
+    pushItem('notes', 'Notes / Description', 'general', 'notes', payload.description);
+    const derivedIngredients = [
+      payload.english_product_name ? `100% Pure ${payload.english_product_name}` : '',
+      payload.botanical_name ? `(${payload.botanical_name})` : '',
+      payload.form ? `— ${payload.form}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (derivedIngredients) {
+      pushItem('ingredients', 'Ingredients', 'general', 'ingredients', derivedIngredients);
+    }
+    const derivedSpecs = [
+      payload.botanical_name ? `Botanical Name: ${payload.botanical_name}` : '',
+      payload.family ? `Family: ${payload.family}` : '',
+      payload.form ? `Form: ${payload.form}` : '',
+      payload.ayurveda?.classical_formulations?.length
+        ? `Classical Formulations: ${payload.ayurveda.classical_formulations.join(', ')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('; ');
+    if (derivedSpecs) {
+      pushItem('specifications', 'Technical Specifications / Formulations', 'general', 'specifications', derivedSpecs);
+    }
     pushItem('keyFeatures', 'Key Features', 'general', 'keyFeatures', payload.key_features);
-    pushItem('culinaryUses', 'Culinary Uses', 'general', 'culinaryUses', payload.culinary_uses);
+    if (!payload.commerce && Array.isArray(payload.key_features) && payload.key_features.length > 0) {
+      pushItem('productHighlights', 'Product Highlights (4–6 bullets)', 'general', 'productHighlights', payload.key_features.slice(0, 6));
+    }
+    pushItem('culinaryUses', 'Culinary Uses (Ideal for Making)', 'general', 'culinaryUses', payload.culinary_uses);
+    if (Array.isArray(payload.practical_uses) && payload.practical_uses.length > 0) {
+      pushItem('practicalUses', 'Practical Uses (Ayurvedic / How to Use)', 'general', 'practicalUses', payload.practical_uses);
+    }
     pushItem('storageInstructions', 'Storage Instructions', 'general', 'storageInstructions', payload.storage_instructions);
+    const derivedAllergens: string[] = Array.isArray((payload.commerce as any)?.allergenInformation) &&
+      (payload.commerce as any).allergenInformation.length > 0
+      ? (payload.commerce as any).allergenInformation
+      : ['Packed in a facility handling natural botanicals and spices.'];
+    pushItem('allergenInformation', 'Allergen Information', 'general', 'allergenInformation', derivedAllergens);
 
     const isAyurvedicEnabled =
       payload.is_ayurvedic_product !== false &&
@@ -1852,6 +1906,45 @@ export function buildSelectedMasterUpdatePayload(params: {
   return { updatePatch, beforeSnapshot, afterSnapshot };
 }
 
+export const ALWAYS_EXCLUDED_MASTER_EXPORT_FIELDS = [
+  'meeshoSales',
+  'webPriceCheckedAt',
+  'webPriceCurrency',
+  'webPriceSources',
+  'gstVerifiedAt',
+  'gtin',
+  'availablePackingSizes',
+] as const;
+
+export const NON_AYURVEDIC_EXCLUDED_MASTER_FIELDS = [
+  'anupana',
+  'availablePackingSizes',
+  'ayurvedicClassification',
+  'ayurvedicDescription',
+  'ayurvedicDosage',
+  'ayurvedicFormulations',
+  'ayurvedicMedicinalUses',
+  'ayurvedicPrecautions',
+  'ayurvedicReferences',
+  'ayurvedicUsageMethods',
+  'hindiName',
+  'kannadaName',
+  'kaphaEffect',
+  'malayalamName',
+  'manufacturerName',
+  'medicinalPartsUsed',
+  'mpn',
+  'prabhava',
+  'rasa',
+  'sanskritName',
+  'tamilName',
+  'teluguName',
+  'variants',
+  'vataEffect',
+  'vipaka',
+  'virya',
+] as const;
+
 export interface MasterProductUpdationOverrides {
   name?: string;
   sku?: string;
@@ -1871,6 +1964,11 @@ export interface MasterProductUpdationOverrides {
   uniqueSpec1?: string;
   uniqueSpec2?: string;
   uniqueSpec3?: string;
+  isAyurvedicProduct?: boolean;
+  culinarydetails?: boolean;
+  fssaiLicenseNumber?: string;
+  certificateStoragePaths?: string[];
+  certifications?: Array<{ url: string; storagePath: string; fileName?: string; uploadedAt?: string }>;
   leafycategory?: string;
   aiContentLink?: string;
   aiDraftId?: string;
@@ -1881,7 +1979,7 @@ export function buildAIContentReferenceLink(
   versionId?: string | null,
   domain = getDefaultVerifiedDomain()
 ): string {
-  const cleanDomain = String(domain || 'https://leafyearth.com').replace(/\/+$/, '');
+  const cleanDomain = String(domain || 'https://www.leafymart.com').replace(/\/+$/, '');
   const cleanDraft = String(draftId || '').trim();
   if (!cleanDraft) return '';
   const cleanVer = String(versionId || '').trim();
@@ -2054,6 +2152,25 @@ export function mergeMasterProductUpdationOverrides(params: {
   if (typeof ov.uniqueSpec3 === 'string') {
     setField('uniqueSpec3', ov.uniqueSpec3.trim());
   }
+  if (typeof ov.isAyurvedicProduct === 'boolean') {
+    setField('isAyurvedicProduct', ov.isAyurvedicProduct);
+    setField('ayurvedicproduct', ov.isAyurvedicProduct);
+  }
+  if (typeof ov.culinarydetails === 'boolean') {
+    setField('culinarydetails', ov.culinarydetails);
+  }
+  if (typeof ov.fssaiLicenseNumber === 'string' && ov.fssaiLicenseNumber.trim()) {
+    setField('fssaiLicenseNumber', ov.fssaiLicenseNumber.trim());
+  }
+  if (Array.isArray(ov.certificateStoragePaths) && ov.certificateStoragePaths.length > 0) {
+    setField(
+      'certificateStoragePaths',
+      Array.from(new Set(ov.certificateStoragePaths.map((p) => String(p || '').trim()).filter(Boolean)))
+    );
+  }
+  if (Array.isArray(ov.certifications) && ov.certifications.length > 0) {
+    setField('certifications', ov.certifications);
+  }
   if (typeof ov.aiContentLink === 'string' && ov.aiContentLink.trim()) {
     setField('aiContentLink', ov.aiContentLink.trim());
   }
@@ -2102,12 +2219,12 @@ export function mergeMasterProductUpdationOverrides(params: {
         growthRate: 0,
         amazonSales: 0,
         flipkartSales: 0,
-        meeshoSales: 0,
         vamjoSales: 0,
         whatsappSales: 0,
         countersaleSales: 0,
         preorderactive: false,
         culinarydetails: false,
+        ayurvedicproduct: false,
         aiContentLink: patch.aiContentLink || '',
         aiDraftId: patch.aiDraftId || '',
         amazonWeblink: '',
@@ -2118,8 +2235,41 @@ export function mergeMasterProductUpdationOverrides(params: {
 
   const finalPatch = isNew ? { ...baseDefaults, ...patch } : patch;
   delete finalPatch.aiContentMetadata;
+
+  // Always avoid exporting excluded fields to `products` during Update Product Master execution
+  for (const excludedKey of ALWAYS_EXCLUDED_MASTER_EXPORT_FIELDS) {
+    delete finalPatch[excludedKey];
+    delete params.afterSnapshot[excludedKey];
+    delete params.beforeSnapshot[excludedKey];
+  }
+
+  // When ayurvedicproduct is false, do NOT write/update the 26 excluded fields to `products`
+  const resolvedAyurvedic =
+    ov.isAyurvedicProduct !== undefined
+      ? Boolean(ov.isAyurvedicProduct)
+      : finalPatch.ayurvedicproduct !== undefined
+      ? Boolean(finalPatch.ayurvedicproduct)
+      : finalPatch.isAyurvedicProduct !== undefined
+      ? Boolean(finalPatch.isAyurvedicProduct)
+      : Boolean(existing.ayurvedicproduct ?? existing.isAyurvedicProduct ?? false);
+
+  if (!resolvedAyurvedic) {
+    for (const excludedKey of NON_AYURVEDIC_EXCLUDED_MASTER_FIELDS) {
+      delete finalPatch[excludedKey];
+      delete params.afterSnapshot[excludedKey];
+      delete params.beforeSnapshot[excludedKey];
+    }
+  }
+
   const mergedMasterProduct = { ...baseDefaults, ...existing, ...finalPatch };
   delete mergedMasterProduct.aiContentMetadata;
+  if (!resolvedAyurvedic) {
+    for (const excludedKey of NON_AYURVEDIC_EXCLUDED_MASTER_FIELDS) {
+      if (!(excludedKey in existing)) {
+        delete mergedMasterProduct[excludedKey];
+      }
+    }
+  }
   return { mergedMasterProduct, finalPatch };
 }
 
@@ -2290,7 +2440,7 @@ export function registerAIProductContentRoutes(
         const decoded = await deps.auth.verifyIdToken(authHeader.slice(7));
         return {
           uid: decoded.uid,
-          email: decoded.email || 'admin@leafyearth.com',
+          email: decoded.email || 'admin@leafymart.com',
           role: 'Admin',
         };
       } catch {
@@ -2299,7 +2449,7 @@ export function registerAIProductContentRoutes(
     }
     return {
       uid: String(req.body?.actorId || req.headers['x-actor-id'] || 'admin-user'),
-      email: String(req.body?.actorEmail || req.headers['x-actor-email'] || 'admin@leafyearth.com'),
+      email: String(req.body?.actorEmail || req.headers['x-actor-email'] || 'admin@leafymart.com'),
       role: String(req.body?.actorRole || 'Admin'),
     };
   };
@@ -2943,7 +3093,7 @@ export function registerAIProductContentRoutes(
               'Natural Botanical',
             actor: {
               uid: draft.created_by || 'admin-user',
-              email: draft.created_by_email || 'admin@leafyearth.com',
+              email: draft.created_by_email || 'admin@leafymart.com',
               role: 'Admin',
             },
           });

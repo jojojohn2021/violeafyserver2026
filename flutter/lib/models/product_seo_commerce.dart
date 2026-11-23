@@ -1,4 +1,4 @@
-// LeafyEarth V9/V10 Flutter Cross-Platform (Android, Web, iOS) SEO & AI Commerce Models
+// LeafyMart V9/V10 Flutter Cross-Platform (Android, Web, iOS) SEO & AI Commerce Models
 // Maps Firestore `products`, `productSlugs`, and `public_products` documents.
 
 class ProductFAQItem {
@@ -162,7 +162,7 @@ class PublicProductProjection {
       mrp: (map['mrp'] ?? map['shopPrice'] ?? 0 as num).toDouble(),
       currency: (map['currency'] ?? 'INR').toString(),
       availability: (map['availability'] ?? map['stockAvailability'] ?? 'in_stock').toString(),
-      brand: (map['brand'] ?? 'LeafyEarth').toString(),
+      brand: (map['brand'] ?? 'LeafyMart').toString(),
       category: (map['category'] ?? 'Uncategorized').toString(),
       leafycategory: map['leafycategory']?.toString(),
       aiContentLink: map['aiContentLink']?.toString(),

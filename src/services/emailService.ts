@@ -73,7 +73,7 @@ export function getStageMessageAndSubject(stage: string, orderNumber: string): {
     return {
       normalizedStage: 'Order Placed',
       subject: `Order Confirmed — Order ${orderNumber}`,
-      stageMessage: `Thank you for shopping with  Leafyearth. Your order has been confirmed successfully.\n\nWe are preparing your order for the next stage of processing. Please review the order and product details below.`,
+      stageMessage: `Thank you for shopping with  LeafyMart. Your order has been confirmed successfully.\n\nWe are preparing your order for the next stage of processing. Please review the order and product details below.`,
     };
   }
 
@@ -105,7 +105,7 @@ export function getStageMessageAndSubject(stage: string, orderNumber: string): {
     return {
       normalizedStage: 'Delivered',
       subject: `Your Order Has Been Delivered — ${orderNumber}`,
-      stageMessage: `Your order has been marked as delivered.\n\nThank you for choosing VioLeafy / Leafyearth. We appreciate your business.`,
+      stageMessage: `Your order has been marked as delivered.\n\nThank you for choosing VioLeafy / LeafyMart. We appreciate your business.`,
     };
   }
 
@@ -167,7 +167,7 @@ export function renderHtmlEmailTemplate(stage: string, data: EmailTemplateData):
           <!-- BRAND HEADER -->
           <tr>
             <td style="background: linear-gradient(135deg, #064e3b 0%, #047857 100%); padding:28px 32px; text-align:left;">
-              <h1 style="margin:0; font-size:24px; font-weight:700; color:#ffffff; letter-spacing:-0.5px;">VioLeafy / Leafyearth</h1>
+              <h1 style="margin:0; font-size:24px; font-weight:700; color:#ffffff; letter-spacing:-0.5px;">VioLeafy / LeafyMart</h1>
               <p style="margin:4px 0 0 0; font-size:13px; color:#a7f3d0; text-transform:uppercase; letter-spacing:1px;">Order Notification System</p>
             </td>
           </tr>
@@ -229,7 +229,7 @@ export function renderHtmlEmailTemplate(stage: string, data: EmailTemplateData):
 
               <!-- FOOTER -->
               <div style="border-top:1px solid #e2e8f0; padding-top:20px; font-size:13px; color:#64748b; line-height:1.6;">
-                <p style="margin:0 0 8px 0; font-weight:600; color:#334155;">Thank you for shopping with VioLeafy / Leafyearth.</p>
+                <p style="margin:0 0 8px 0; font-weight:600; color:#334155;">Thank you for shopping with VioLeafy / LeafyMart.</p>
                 <p style="margin:0 0 8px 0;">For assistance with your order, please contact the support channel configured by the existing application.</p>
                 <p style="margin:0; font-size:12px; color:#94a3b8; font-style:italic;">This is an automated notification. Please do not reply if the configured sender address does not accept incoming messages.</p>
               </div>
@@ -283,7 +283,7 @@ CUSTOMER DETAILS
 PRODUCT DETAILS
 ${productLines || '- No product items detailed'}
 
-Thank you for shopping with  Leafyearth.
+Thank you for shopping with  LeafyMart.
 For assistance with your order, please contact the support channel configured by the existing application.
 This is an automated notification. Please do not reply if the configured sender address does not accept incoming messages.`;
 }

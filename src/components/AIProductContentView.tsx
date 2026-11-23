@@ -149,27 +149,31 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     reloadFirestoreData,
   } = useCRM();
 
-  const allCategoryOptions = useMemo(() => {
-    const base = Array.isArray(categories) ? categories : [];
-    const custom = Array.isArray(customCategories) ? customCategories : [];
-    return Array.from(new Set([...base, ...custom].map((c) => String(c || '').trim()).filter(Boolean)));
-  }, [categories, customCategories]);
+  const allCategoryRecords = useMemo(() => {
+    const list = Array.isArray(categories) ? categories : [];
+    const seen = new Set<string>();
+    return list
+      .filter((c: any) => {
+        const nm = String(c?.name || '').trim();
+        if (!nm || seen.has(nm.toLowerCase())) return false;
+        seen.add(nm.toLowerCase());
+        return true;
+      })
+      .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')));
+  }, [categories]);
 
-  const allBrandOptions = useMemo(() => {
-    const base = Array.isArray(brands) ? brands.map((b: any) => String(b?.name || '').trim()) : [];
-    const custom = Array.isArray(customBrands) ? customBrands.map((b) => String(b || '').trim()) : [];
-    return Array.from(new Set(['LeafyEarth', ...base, ...custom].filter(Boolean)));
-  }, [brands, customBrands]);
-
-  const allBrandOwnerOptions = useMemo(() => {
-    const base = Array.isArray(brandOwners)
-      ? brandOwners.map((bo: any) => String(bo?.name || '').trim())
-      : [];
-    const custom = Array.isArray(customBrandOwners)
-      ? customBrandOwners.map((bo) => String(bo || '').trim())
-      : [];
-    return Array.from(new Set(['Vio Nature Science', ...base, ...custom].filter(Boolean)));
-  }, [brandOwners, customBrandOwners]);
+  const allBrandRecords = useMemo(() => {
+    const list = Array.isArray(brands) ? brands : [];
+    const seen = new Set<string>();
+    return list
+      .filter((b: any) => {
+        const nm = String(b?.name || '').trim();
+        if (!nm || seen.has(nm.toLowerCase())) return false;
+        seen.add(nm.toLowerCase());
+        return true;
+      })
+      .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')));
+  }, [brands]);
 
   const computeNextEightDigitSku = useCallback(() => {
     let highest = 10000000;
@@ -220,7 +224,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
   const actor = useMemo(
     () => ({
       id: currentUser?.id || 'admin_user',
-      email: currentUser?.email || 'admin@leafyearth.com',
+      email: currentUser?.email || 'admin@leafymart.com',
       role: currentUser?.role || 'Administrator',
     }),
     [currentUser]
@@ -326,6 +330,8 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     uniqueSpec1: string;
     uniqueSpec2: string;
     uniqueSpec3: string;
+    isAyurvedicProduct: boolean;
+    culinarydetails: boolean;
     aiContentLink: string;
     aiDraftId: string;
   }>({
@@ -339,7 +345,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     gstPercentage: 5,
     categories: [],
     leafycategory: '',
-    brand: 'LeafyEarth',
+    brand: 'LeafyMart',
     brandOwner: 'Vio Nature Science',
     stockIn: 0,
     imageUrl: '',
@@ -347,6 +353,8 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     uniqueSpec1: '',
     uniqueSpec2: '',
     uniqueSpec3: '',
+    isAyurvedicProduct: false,
+    culinarydetails: false,
     aiContentLink: '',
     aiDraftId: '',
   });
@@ -464,7 +472,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
           ? [String(payload.category)]
           : [];
 
-      const brandVal = matchedMaster?.brand || draft.brand_hint || 'LeafyEarth';
+      const brandVal = matchedMaster?.brand || draft.brand_hint || 'LeafyMart';
       const knownBrandObj = (brands || []).find(
         (b: any) => String(b?.name || '').toLowerCase() === String(brandVal).toLowerCase()
       );
@@ -517,12 +525,21 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
         uniqueSpec1: matchedMaster?.uniqueSpec1 || payload?.key_features?.[0] || '',
         uniqueSpec2: matchedMaster?.uniqueSpec2 || payload?.key_features?.[1] || '',
         uniqueSpec3: matchedMaster?.uniqueSpec3 || payload?.key_features?.[2] || '',
+        isAyurvedicProduct:
+          matchedMaster?.ayurvedicproduct !== undefined
+            ? Boolean(matchedMaster.ayurvedicproduct)
+            : matchedMaster?.isAyurvedicProduct !== undefined
+            ? Boolean(matchedMaster.isAyurvedicProduct)
+            : draft.is_ayurvedic_product !== undefined
+            ? Boolean(draft.is_ayurvedic_product)
+            : payload?.ayurveda_applicability === 'applicable',
+        culinarydetails: matchedMaster?.culinarydetails === true,
         aiContentLink: (() => {
           const verId = draft.approved_version_id || draft.current_version_id || '';
           const baseOrigin =
             typeof window !== 'undefined' && window.location?.origin
               ? window.location.origin
-              : 'https://leafyearth.com';
+              : 'https://www.leafymart.com';
           return (
             matchedMaster?.aiContentLink ||
             `${baseOrigin}/api/admin/ai-products/${encodeURIComponent(draft.id)}${verId ? `?version=${encodeURIComponent(verId)}` : ''}`
@@ -611,12 +628,12 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
             res.currentVersion?.seo_edited ||
             res.currentVersion?.seo_generated ||
             payload.seo || {
-              seoTitle: `${payload.english_product_name} | LeafyEarth`,
+              seoTitle: `${payload.english_product_name} | LeafyMart`,
               metaDescription: (payload.description || '').slice(0, 155),
               seoKeywords: [
                 payload.english_product_name.toLowerCase(),
                 (payload.category || 'natural products').toLowerCase(),
-                'leafyearth',
+                'leafymart',
                 'pure quality',
                 'buy online india',
               ],
@@ -973,14 +990,93 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     setApplyingSync(true);
     setBanner(null);
     try {
+      const ALWAYS_EXCLUDED_SET = new Set([
+        'meeshoSales',
+        'webPriceCheckedAt',
+        'webPriceCurrency',
+        'webPriceSources',
+        'gstVerifiedAt',
+        'gtin',
+        'availablePackingSizes',
+      ]);
+      const NON_AYURVEDIC_EXCLUDED_SET = new Set([
+        'anupana',
+        'availablePackingSizes',
+        'ayurvedicClassification',
+        'ayurvedicDescription',
+        'ayurvedicDosage',
+        'ayurvedicFormulations',
+        'ayurvedicMedicinalUses',
+        'ayurvedicPrecautions',
+        'ayurvedicReferences',
+        'ayurvedicUsageMethods',
+        'hindiName',
+        'kannadaName',
+        'kaphaEffect',
+        'malayalamName',
+        'manufacturerName',
+        'medicinalPartsUsed',
+        'mpn',
+        'prabhava',
+        'rasa',
+        'sanskritName',
+        'tamilName',
+        'teluguName',
+        'variants',
+        'vataEffect',
+        'vipaka',
+        'virya',
+      ]);
+      const effectiveSelectedFields = Array.from(selectedSyncFields).filter((key) => {
+        const compItem = comparisonItems.find((it) => it.fieldKey === key);
+        const masterField = compItem?.masterField || '';
+        if (ALWAYS_EXCLUDED_SET.has(key) || (masterField && ALWAYS_EXCLUDED_SET.has(masterField))) {
+          return false;
+        }
+        if (!masterUpdationForm.isAyurvedicProduct) {
+          if (NON_AYURVEDIC_EXCLUDED_SET.has(key)) return false;
+          if (masterField && NON_AYURVEDIC_EXCLUDED_SET.has(masterField)) return false;
+        }
+        return true;
+      });
+
+      // Link selected Brand Owner from product_brand_owners -> export fssailicensenumber & certificate storage paths
+      const matchedBrandOwnerDoc = (brandOwners || []).find(
+        (bo: any) =>
+          String(bo?.name || '').trim().toLowerCase() ===
+          String(masterUpdationForm.brandOwner || '').trim().toLowerCase()
+      );
+      const linkedFssaiLicenseNumber = String(
+        (matchedBrandOwnerDoc as any)?.fssailicensenumber ||
+          (matchedBrandOwnerDoc as any)?.fssaiRegNo ||
+          ''
+      ).trim();
+      const linkedCertifications = Array.isArray((matchedBrandOwnerDoc as any)?.certifications)
+        ? (matchedBrandOwnerDoc as any).certifications
+        : [];
+      const linkedCertificateStoragePaths: string[] = Array.from(
+        new Set(
+          linkedCertifications
+            .map((c: any) => String(c?.storagePath || '').trim())
+            .filter(Boolean)
+        )
+      );
+
       const res = await applyAIDraftToMaster({
         draftId: selectedDraftId,
         masterProductId: syncTargetMasterId || null,
-        selectedFields: Array.from(selectedSyncFields),
+        selectedFields: effectiveSelectedFields,
         imageAction: syncImageAction,
         idempotencyKey: `sync_${selectedDraftId}_${Date.now()}`,
         masterProductOverrides: {
           ...masterUpdationForm,
+          ...(linkedFssaiLicenseNumber ? { fssaiLicenseNumber: linkedFssaiLicenseNumber } : {}),
+          ...(linkedCertificateStoragePaths.length > 0
+            ? {
+                certificateStoragePaths: linkedCertificateStoragePaths,
+                certifications: linkedCertifications,
+              }
+            : {}),
           leafycategory:
             editedPayload?.category ||
             masterUpdationForm.leafycategory ||
@@ -1080,6 +1176,8 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
       uniqueSpec1: masterUpdationForm.uniqueSpec1,
       uniqueSpec2: masterUpdationForm.uniqueSpec2,
       uniqueSpec3: masterUpdationForm.uniqueSpec3,
+      isAyurvedicProduct: masterUpdationForm.isAyurvedicProduct,
+      culinarydetails: masterUpdationForm.culinarydetails,
       aiContentLink: masterUpdationForm.aiContentLink,
       aiDraftId: masterUpdationForm.aiDraftId || selectedDraftId || '',
     };
@@ -1410,14 +1508,14 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
       setCommerceForm(JSON.parse(JSON.stringify(sourcePayload)));
     } else if (prod) {
       setCommerceForm({
-        seoTitle: prod.seoTitle || `${prod.name} | LeafyEarth`,
+        seoTitle: prod.seoTitle || `${prod.name} | LeafyMart`,
         metaDescription:
           prod.metaDescription ||
-          (prod.description || `${prod.name} by ${prod.brand || 'LeafyEarth'}.`).slice(0, 155),
+          (prod.description || `${prod.name} by ${prod.brand || 'LeafyMart'}.`).slice(0, 155),
         seoKeywords:
           Array.isArray(prod.seoKeywords) && prod.seoKeywords.length >= 5
             ? prod.seoKeywords
-            : [prod.name.toLowerCase(), (prod.category || 'spices').toLowerCase(), 'leafyearth', 'india', 'natural'],
+            : [prod.name.toLowerCase(), (prod.category || 'spices').toLowerCase(), 'leafymart', 'india', 'natural'],
         urlSlug: prod.urlSlug || normalizeUrlSlugClient(prod.name),
         productHighlights: Array.isArray(prod.productHighlights)
           ? prod.productHighlights
@@ -1608,7 +1706,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
     draftDetail?.currentVersion?.generated_payload || null;
 
   return (
-    <div className="space-y-6">
+    <div id="ai-product-content-module" className="space-y-6">
       {/* Top Module Header */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -1854,7 +1952,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                   type="text"
                   value={genBrandHint}
                   onChange={(e) => setGenBrandHint(e.target.value)}
-                  placeholder="e.g., LeafyEarth / Vio Nature Science / Wayanad Single-Origin"
+                  placeholder="e.g., LeafyMart / Vio Nature Science / Wayanad Single-Origin"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs"
                 />
               </div>
@@ -2478,29 +2576,35 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                       </div>
                     </div>
 
+                    <div className="mt-4">
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        Key Features (One per line)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={formatArrayAsLines(editedPayload.key_features)}
+                        onChange={(e) =>
+                          setEditedPayload({
+                            ...editedPayload,
+                            key_features: parseLinesToArray(e.target.value),
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                      />
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                          Key Features (One per line)
+                        <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                          Culinary Uses (One per line)
                         </label>
+                        <p className="text-[10px] text-slate-500 mb-1.5">
+                          Used only if the product is used in kitchen, cooking, or bakery.
+                        </p>
                         <textarea
+                          id="review-culinary-uses-textarea"
                           rows={4}
-                          value={formatArrayAsLines(editedPayload.key_features)}
-                          onChange={(e) =>
-                            setEditedPayload({
-                              ...editedPayload,
-                              key_features: parseLinesToArray(e.target.value),
-                            })
-                          }
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                          Culinary / Practical Uses (One per line)
-                        </label>
-                        <textarea
-                          rows={4}
+                          placeholder="e.g. Curries, spice blends, bakery items, marinades (leave empty if non-culinary)"
                           value={formatArrayAsLines(editedPayload.culinary_uses)}
                           onChange={(e) =>
                             setEditedPayload({
@@ -2508,7 +2612,28 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                               culinary_uses: parseLinesToArray(e.target.value),
                             })
                           }
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs resize-y"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-emerald-800 mb-0.5">
+                          Practical Uses (One per line)
+                        </label>
+                        <p className="text-[10px] text-slate-500 mb-1.5">
+                          For Ayurvedic products &amp; how to use (some products may use both).
+                        </p>
+                        <textarea
+                          id="review-practical-uses-textarea"
+                          rows={4}
+                          placeholder="e.g. Prepared as a decoction (Kashayam), warm water infusion, or fine churna..."
+                          value={formatArrayAsLines(editedPayload.practical_uses)}
+                          onChange={(e) =>
+                            setEditedPayload({
+                              ...editedPayload,
+                              practical_uses: parseLinesToArray(e.target.value),
+                            })
+                          }
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs resize-y"
                         />
                       </div>
                     </div>
@@ -2667,19 +2792,34 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                          Nutritional Benefits (One per line)
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-bold text-slate-600">
+                            Nutritional Benefits (Comma-separated, min 3 points)
+                          </label>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              (editedPayload.nutritional_benefits?.length || 0) >= 3
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {editedPayload.nutritional_benefits?.length || 0} / min 3
+                          </span>
+                        </div>
                         <textarea
                           rows={3}
-                          value={formatArrayAsLines(editedPayload.nutritional_benefits)}
+                          placeholder="Point 1, Point 2, Point 3"
+                          value={(editedPayload.nutritional_benefits || []).join(', ')}
                           onChange={(e) =>
                             setEditedPayload({
                               ...editedPayload,
-                              nutritional_benefits: parseLinesToArray(e.target.value),
+                              nutritional_benefits: e.target.value
+                                .split(/[,\n]+/)
+                                .map((s) => s.trim())
+                                .filter(Boolean),
                             })
                           }
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs resize-y"
                         />
                       </div>
                       <div>
@@ -2999,41 +3139,71 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                              Medicinal Uses (One per line)
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[10px] font-bold text-slate-600">
+                                Medicinal Uses (Comma-separated, min 4 points)
+                              </label>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  (editedPayload.ayurveda.medicinal_uses?.length || 0) >= 4
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {editedPayload.ayurveda.medicinal_uses?.length || 0} / min 4
+                              </span>
+                            </div>
                             <textarea
-                              rows={3}
-                              value={formatArrayAsLines(editedPayload.ayurveda.medicinal_uses)}
+                              rows={4}
+                              placeholder="Use 1, Use 2, Use 3, Use 4"
+                              value={(editedPayload.ayurveda.medicinal_uses || []).join(', ')}
                               onChange={(e) =>
                                 setEditedPayload({
                                   ...editedPayload,
                                   ayurveda: {
                                     ...editedPayload.ayurveda!,
-                                    medicinal_uses: parseLinesToArray(e.target.value),
+                                    medicinal_uses: e.target.value
+                                      .split(/[,\n]+/)
+                                      .map((s) => s.trim())
+                                      .filter(Boolean),
                                   },
                                 })
                               }
-                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white resize-y"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                              Usage Methods (One per line)
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[10px] font-bold text-slate-600">
+                                Usage Methods (Comma-separated, min 3 points)
+                              </label>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  (editedPayload.ayurveda.usage_methods?.length || 0) >= 3
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {editedPayload.ayurveda.usage_methods?.length || 0} / min 3
+                              </span>
+                            </div>
                             <textarea
-                              rows={3}
-                              value={formatArrayAsLines(editedPayload.ayurveda.usage_methods)}
+                              rows={4}
+                              placeholder="Method 1, Method 2, Method 3"
+                              value={(editedPayload.ayurveda.usage_methods || []).join(', ')}
                               onChange={(e) =>
                                 setEditedPayload({
                                   ...editedPayload,
                                   ayurveda: {
                                     ...editedPayload.ayurveda!,
-                                    usage_methods: parseLinesToArray(e.target.value),
+                                    usage_methods: e.target.value
+                                      .split(/[,\n]+/)
+                                      .map((s) => s.trim())
+                                      .filter(Boolean),
                                   },
                                 })
                               }
-                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white resize-y"
                             />
                           </div>
                         </div>
@@ -3148,7 +3318,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                             setSeoForm(nextSeo);
                             setEditedPayload({ ...editedPayload, seo: nextSeo });
                           }}
-                          placeholder="e.g., Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth"
+                          placeholder="e.g., Cumin Seeds (Jeera) | Whole Cumin | LeafyMart"
                           className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-semibold"
                         />
                       </div>
@@ -3282,7 +3452,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                           setSeoForm(nextSeo);
                           setEditedPayload({ ...editedPayload, seo: nextSeo });
                         }}
-                        placeholder="cumin seeds, jeera whole, cuminum cyminum, indian spices, leafyearth"
+                        placeholder="cumin seeds, jeera whole, cuminum cyminum, indian spices, leafymart"
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
                       />
                     </div>
@@ -3293,7 +3463,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                         Google Search & AI Snippet Preview
                       </div>
                       <div className="text-xs text-emerald-800 font-mono truncate">
-                        https://leafyearth.com/products/{seoForm.urlSlug || 'product-slug'}
+                        https://www.leafymart.com/products/{seoForm.urlSlug || 'product-slug'}
                       </div>
                       <div className="text-sm font-bold text-blue-800 truncate">
                         {seoForm.seoTitle || editedPayload.title || editedPayload.english_product_name}
@@ -3654,7 +3824,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                     <p className="text-xs text-slate-500">
                       Backend deterministically computes <code>lowestWebPrice</code> and{' '}
                       <code>highestWebPrice</code> from included in-stock INR offers matching{' '}
-                      <strong>{resSelectedPackingSize}</strong>. Never modifies LeafyEarth selling prices.
+                      <strong>{resSelectedPackingSize}</strong>. Never modifies LeafyMart selling prices.
                     </p>
                   </div>
                   <button
@@ -4965,7 +5135,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                       <div className="flex flex-wrap gap-1.5 min-h-[26px]">
                         {masterUpdationForm.categories.length === 0 ? (
                           <span className="text-[11px] text-slate-400 italic">
-                            No categories selected — choose below
+                            No categories selected — choose from product_categories below
                           </span>
                         ) : (
                           masterUpdationForm.categories.map((cat) => (
@@ -4982,7 +5152,8 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                                     categories: prev.categories.filter((c) => c !== cat),
                                   }))
                                 }
-                                className="text-emerald-700 hover:text-rose-600 font-black"
+                                className="text-emerald-700 hover:text-rose-600 font-black cursor-pointer"
+                                title="Remove category"
                               >
                                 ×
                               </button>
@@ -4990,45 +5161,35 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                           ))
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <select
-                          value=""
-                          onChange={(e) => {
-                            const val = e.target.value.trim();
-                            if (!val) return;
-                            setMasterUpdationForm((prev) => ({
-                              ...prev,
-                              categories: Array.from(new Set([...prev.categories, val])),
-                            }));
-                          }}
-                          className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-slate-50 font-semibold"
-                        >
-                          <option value="">+ Add Category from List...</option>
-                          {allCategoryOptions.map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
+                      <select
+                        id="master-update-categories-select"
+                        value=""
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          if (!val) return;
+                          setMasterUpdationForm((prev) => ({
+                            ...prev,
+                            categories: Array.from(new Set([...prev.categories, val])),
+                          }));
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-slate-50 font-semibold text-slate-800 cursor-pointer"
+                      >
+                        <option value="">
+                          + Select Category from product_categories ({allCategoryRecords.length})...
+                        </option>
+                        {allCategoryRecords.map((catDoc: any) => {
+                          const alreadySelected = masterUpdationForm.categories.some(
+                            (c) => c.toLowerCase() === String(catDoc.name).toLowerCase()
+                          );
+                          return (
+                            <option key={catDoc.id} value={catDoc.name} disabled={alreadySelected}>
+                              {catDoc.name}
+                              {catDoc.categoryId ? ` (${catDoc.categoryId})` : ''}
+                              {alreadySelected ? ' ✓ Selected' : ''}
                             </option>
-                          ))}
-                        </select>
-                        <input
-                          type="text"
-                          value={customCategoryInput}
-                          onChange={(e) => setCustomCategoryInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && customCategoryInput.trim()) {
-                              e.preventDefault();
-                              const val = customCategoryInput.trim();
-                              setMasterUpdationForm((prev) => ({
-                                ...prev,
-                                categories: Array.from(new Set([...prev.categories, val])),
-                              }));
-                              setCustomCategoryInput('');
-                            }
-                          }}
-                          placeholder="Or type & Enter..."
-                          className="w-36 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
-                        />
-                      </div>
+                          );
+                        })}
+                      </select>
                     </div>
                   </div>
 
@@ -5036,53 +5197,54 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                     <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
                       BRAND:
                     </label>
-                    <input
-                      type="text"
-                      list="ai-master-brand-options"
+                    <select
+                      id="master-update-brand-select"
                       value={masterUpdationForm.brand}
                       onChange={(e) => {
                         const val = e.target.value;
-                        const matchedBrand = (brands || []).find(
+                        const matchedBrand = allBrandRecords.find(
                           (b: any) => String(b?.name || '').toLowerCase() === val.toLowerCase()
                         );
                         setMasterUpdationForm((prev) => ({
                           ...prev,
                           brand: val,
-                          brandOwner: (matchedBrand as any)?.owner || prev.brandOwner,
+                          brandOwner: matchedBrand ? String((matchedBrand as any).owner || '') : '',
                         }));
                       }}
-                      placeholder="Brand..."
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
-                    />
-                    <datalist id="ai-master-brand-options">
-                      {allBrandOptions.map((b) => (
-                        <option key={b} value={b} />
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900 cursor-pointer"
+                    >
+                      <option value="">-- Select Brand --</option>
+                      {masterUpdationForm.brand &&
+                        !allBrandRecords.some(
+                          (b: any) =>
+                            String(b?.name || '').toLowerCase() ===
+                            masterUpdationForm.brand.toLowerCase()
+                        ) && (
+                          <option value={masterUpdationForm.brand}>
+                            {masterUpdationForm.brand}
+                          </option>
+                        )}
+                      {allBrandRecords.map((b: any) => (
+                        <option key={b.id} value={b.name}>
+                          {b.name}
+                          {b.brandId ? ` (${b.brandId})` : ''}
+                        </option>
                       ))}
-                    </datalist>
+                    </select>
                   </div>
 
                   <div className="md:col-span-3">
                     <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
-                      BRAND OWNER:
+                      BRAND OWNER (AUTO FROM BRAND):
                     </label>
                     <input
+                      id="master-update-brand-owner-input"
                       type="text"
-                      list="ai-master-brand-owner-options"
+                      readOnly
                       value={masterUpdationForm.brandOwner}
-                      onChange={(e) =>
-                        setMasterUpdationForm((prev) => ({
-                          ...prev,
-                          brandOwner: e.target.value,
-                        }))
-                      }
-                      placeholder="Brand Owner..."
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-900"
+                      placeholder="Auto-filled from selected Brand"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-100 text-xs font-bold text-slate-700 cursor-not-allowed"
                     />
-                    <datalist id="ai-master-brand-owner-options">
-                      {allBrandOwnerOptions.map((bo) => (
-                        <option key={bo} value={bo} />
-                      ))}
-                    </datalist>
                   </div>
 
                   <div className="md:col-span-2">
@@ -5241,6 +5403,99 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                         placeholder="Unique specification 3..."
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs text-slate-800"
                       />
+                    </div>
+
+                    {/* Below UNIQUE SPEC 1 & 2: Ayurvedic Product (Yes/No) & Culinary Uses (Yes/No) */}
+                    <div>
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-emerald-800 mb-1.5">
+                        AYURVEDIC PRODUCT:
+                      </label>
+                      <div className="flex items-center gap-2" role="radiogroup" aria-label="Ayurvedic Product">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={masterUpdationForm.isAyurvedicProduct}
+                          id="master-update-ayurvedic-yes"
+                          onClick={() =>
+                            setMasterUpdationForm((prev) => ({
+                              ...prev,
+                              isAyurvedicProduct: true,
+                            }))
+                          }
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold cursor-pointer transition ${
+                            masterUpdationForm.isAyurvedicProduct
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={!masterUpdationForm.isAyurvedicProduct}
+                          id="master-update-ayurvedic-no"
+                          onClick={() =>
+                            setMasterUpdationForm((prev) => ({
+                              ...prev,
+                              isAyurvedicProduct: false,
+                            }))
+                          }
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold cursor-pointer transition ${
+                            !masterUpdationForm.isAyurvedicProduct
+                              ? 'bg-slate-700 text-white shadow-xs'
+                              : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          No
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-emerald-800 mb-1.5">
+                        CULINARY USES:
+                      </label>
+                      <div className="flex items-center gap-2" role="radiogroup" aria-label="Culinary Uses">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={masterUpdationForm.culinarydetails}
+                          id="master-update-culinary-yes"
+                          onClick={() =>
+                            setMasterUpdationForm((prev) => ({
+                              ...prev,
+                              culinarydetails: true,
+                            }))
+                          }
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold cursor-pointer transition ${
+                            masterUpdationForm.culinarydetails
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={!masterUpdationForm.culinarydetails}
+                          id="master-update-culinary-no"
+                          onClick={() =>
+                            setMasterUpdationForm((prev) => ({
+                              ...prev,
+                              culinarydetails: false,
+                            }))
+                          }
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold cursor-pointer transition ${
+                            !masterUpdationForm.culinarydetails
+                              ? 'bg-slate-700 text-white shadow-xs'
+                              : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          No
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

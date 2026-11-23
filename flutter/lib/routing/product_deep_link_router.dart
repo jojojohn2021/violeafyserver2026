@@ -27,7 +27,7 @@ class LeafyEarthProductDeepLinkRouter {
 
   const LeafyEarthProductDeepLinkRouter({
     required this.fetchDoc,
-    this.verifiedDomain = 'https://vionaturescience.in',
+    this.verifiedDomain = 'https://www.leafymart.com',
   });
 
   /// Parses incoming Android App Link, iOS Universal Link, or Web path (`/products/:slug` or `/p/:productId`).

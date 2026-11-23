@@ -8,7 +8,7 @@ import { fetchProductDetails } from '../utils/productDetailsApi';
  * Only populated sections and active certifications/pictures are shown.
  */
 const SECTIONS: Array<[keyof ProductDetails, string]> = [
-  ['whyShopFromLeafyearth', 'Why shop from Leafyearth?'],
+  ['whyShopFromLeafyearth', 'Why shop from LeafyMart?'],
   ['idealForMaking', 'Ideal for making'],
   ['shelfLife', 'Shelf Life'],
   ['fssaiNumber', 'FSSAI Number'],

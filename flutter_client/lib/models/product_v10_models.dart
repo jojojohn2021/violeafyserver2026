@@ -1,4 +1,4 @@
-// LeafyEarth | V10 AI Commerce & Product Discoverability (with V9 SEO Override)
+// LeafyMart | V10 AI Commerce & Product Discoverability (with V9 SEO Override)
 // Cross-platform Flutter Models (Android, iOS, Web)
 
 class ProductSEOContent {
@@ -167,7 +167,7 @@ class PublicProductProjection {
       sku: (json['sku'] ?? '').toString(),
       title: (json['title'] ?? '').toString(),
       description: (json['description'] ?? '').toString(),
-      brand: (json['brand'] ?? 'LeafyEarth').toString(),
+      brand: (json['brand'] ?? 'LeafyMart').toString(),
       category: (json['category'] ?? '').toString(),
       googleProductCategory: (json['googleProductCategory'] ?? '').toString(),
       productType: (json['productType'] ?? '').toString(),

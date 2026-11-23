@@ -326,6 +326,63 @@ button.btn-secondary {
   color: var(--secondary-hex) !important;
 }
 
+/* AI Product Content & Market Intelligence — Button Background & White Text Contrast */
+#ai-product-content-module button[class*="bg-white"],
+#ai-product-content-module button[class*="bg-slate-50"],
+#ai-product-content-module button[class*="bg-slate-100"],
+#ai-product-content-module button[class*="bg-indigo-50"],
+#ai-product-content-module button[class*="bg-emerald-50"],
+#ai-product-content-module button[class*="bg-amber-50"],
+#ai-product-content-module button[class*="bg-cyan-50"],
+#ai-product-content-module button[class*="bg-rose-50"] {
+  background-color: #E5E7EB !important;
+  color: #1F2933 !important;
+  border-color: #CBD5E1 !important;
+}
+
+#ai-product-content-module button[class*="bg-white"]:hover,
+#ai-product-content-module button[class*="bg-slate-50"]:hover,
+#ai-product-content-module button[class*="bg-slate-100"]:hover,
+#ai-product-content-module button[class*="bg-indigo-50"]:hover,
+#ai-product-content-module button[class*="bg-emerald-50"]:hover,
+#ai-product-content-module button[class*="bg-amber-50"]:hover,
+#ai-product-content-module button[class*="bg-cyan-50"]:hover,
+#ai-product-content-module button[class*="bg-rose-50"]:hover {
+  background-color: #D1D5DB !important;
+}
+
+/* Any contrast / colored button with text-white MUST render crisp pure white text & icons */
+#ai-product-content-module button[class*="text-white"],
+#ai-product-content-module a[class*="text-white"],
+button[class*="text-white"][class*="bg-indigo-"],
+button[class*="text-white"][class*="bg-emerald-"],
+button[class*="text-white"][class*="bg-blue-"],
+button[class*="text-white"][class*="bg-rose-"],
+button[class*="text-white"][class*="bg-red-"],
+button[class*="text-white"][class*="bg-green-"],
+button[class*="text-white"][class*="bg-cyan-"],
+button[class*="text-white"][class*="bg-amber-"],
+button[class*="text-white"][class*="bg-violet-"],
+button[class*="text-white"][class*="bg-purple-"],
+button[class*="text-white"][class*="bg-teal-"],
+button[class*="text-white"][class*="bg-slate-700"],
+button[class*="text-white"][class*="bg-slate-800"],
+button[class*="text-white"][class*="bg-slate-900"],
+button[class*="text-white"][class*="bg-[#2E7D32]"],
+button[class*="text-white"][class*="bg-[#1B5E20]"] {
+  color: #FFFFFF !important;
+}
+
+#ai-product-content-module button[class*="text-white"] *,
+#ai-product-content-module a[class*="text-white"] *,
+button[class*="text-white"][class*="bg-indigo-"] *,
+button[class*="text-white"][class*="bg-emerald-"] *,
+button[class*="text-white"][class*="bg-blue-"] *,
+button[class*="text-white"][class*="bg-rose-"] *,
+button[class*="text-white"][class*="bg-[#2E7D32]"] * {
+  color: #FFFFFF !important;
+}
+
 /* Hover overrides for interactive list items */
 [class*="hover:bg-[#141418]"]:hover,
 [class*="hover:bg-[#1b1b22]"]:hover,

@@ -260,13 +260,13 @@ export default function ShoppingPlatformView() {
     if (typeof document === 'undefined' || !selectedProduct) return;
     const prevTitle = document.title;
     const seoTitle = String(
-      selectedProduct.seoTitle || selectedProduct.title || `${selectedProduct.name} | LeafyEarth`
+      selectedProduct.seoTitle || selectedProduct.title || `${selectedProduct.name} | LeafyMart`
     ).trim();
     const metaDesc = String(
       selectedProduct.metaDescription ||
         selectedProduct.description ||
         selectedProduct.notes ||
-        `Buy ${selectedProduct.name} online from LeafyEarth.`
+        `Buy ${selectedProduct.name} online from LeafyMart.`
     )
       .slice(0, 320)
       .trim();
@@ -328,7 +328,7 @@ export default function ShoppingPlatformView() {
         image: imageUrl ? [imageUrl] : [],
         brand: {
           '@type': 'Brand',
-          name: selectedProduct.brand || 'LeafyEarth',
+          name: selectedProduct.brand || 'LeafyMart',
         },
         offers: {
           '@type': 'Offer',

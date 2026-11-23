@@ -2,7 +2,7 @@
     package="com.leafyearth.app">
 
     <application
-        android:label="LeafyEarth"
+        android:label="LeafyMart"
         android:name="${applicationName}">
         <activity
             android:name=".MainActivity"
@@ -19,8 +19,8 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="leafyearth.com" android:pathPrefix="/products/" />
-                <data android:scheme="https" android:host="www.leafyearth.com" android:pathPrefix="/products/" />
+                <data android:scheme="https" android:host="leafymart.com" android:pathPrefix="/products/" />
+                <data android:scheme="https" android:host="www.leafymart.com" android:pathPrefix="/products/" />
             </intent-filter>
         </activity>
     </application>

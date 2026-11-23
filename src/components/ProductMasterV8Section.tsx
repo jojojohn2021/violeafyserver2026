@@ -103,7 +103,7 @@ export function extractV8FieldsFromProduct(p?: Partial<ProductPerformance> | nul
     nutritionalBenefits: Array.isArray(p?.nutritionalBenefits) ? p!.nutritionalBenefits : [],
     generalPrecautions: Array.isArray(p?.generalPrecautions) ? p!.generalPrecautions : [],
     healthReferences: Array.isArray(p?.healthReferences) ? p!.healthReferences : [],
-    isAyurvedicProduct: Boolean(p?.isAyurvedicProduct),
+    isAyurvedicProduct: Boolean(p?.ayurvedicproduct ?? p?.isAyurvedicProduct),
     sanskritName: p?.sanskritName || '',
     ayurvedicClassification: p?.ayurvedicClassification || '',
     ayurvedicDescription: p?.ayurvedicDescription || '',
@@ -703,7 +703,7 @@ export const ProductV9SeoMetaDataSection: React.FC<ProductMasterV8SectionProps> 
             maxLength={120}
             value={value.seoTitle || ''}
             onChange={(e) => update({ seoTitle: e.target.value })}
-            placeholder="e.g. Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth"
+            placeholder="e.g. Cumin Seeds (Jeera) | Whole Cumin | LeafyMart"
             className="w-full text-xs p-2 bg-white border border-gray-300 text-slate-900 rounded-lg"
             id={`${idPrefix}-seo-title-input`}
           />
@@ -881,21 +881,6 @@ export const ProductV10AICommerceSection: React.FC<ProductMasterV8SectionProps> 
             value={value.productType || ''}
             onChange={(e) => update({ productType: e.target.value })}
             placeholder="Spices & Groceries > Whole Spices"
-            className="w-full text-xs p-2 bg-white border border-gray-300 text-slate-900 rounded-lg"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3">
-        <div>
-          <label className="block text-[10px] font-bold text-slate-700 mb-1 uppercase">
-            Allergen Information (Comma-separated)
-          </label>
-          <input
-            type="text"
-            value={joinCsv(value.allergenInformation)}
-            onChange={(e) => update({ allergenInformation: splitCsv(e.target.value) })}
-            placeholder="Packed in a facility handling tree nuts"
             className="w-full text-xs p-2 bg-white border border-gray-300 text-slate-900 rounded-lg"
           />
         </div>

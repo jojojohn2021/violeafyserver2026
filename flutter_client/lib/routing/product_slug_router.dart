@@ -1,4 +1,4 @@
-// LeafyEarth | V9 & V10 Canonical Product Slug Router & Deep Link Handler
+// LeafyMart | V9 & V10 Canonical Product Slug Router & Deep Link Handler
 // Supports `/products/<urlSlug>` and legacy `/products/<productId>` across Flutter Web, Android App Links, and iOS Universal Links.
 
 import '../models/product_v10_models.dart';
@@ -33,7 +33,7 @@ class ProductSlugRouter {
     this.onUpdateDocumentTitle,
   });
 
-  /// Parses an incoming path or full deep-link URI (`https://leafyearth.com/products/cumin-seeds-jeera-whole`)
+  /// Parses an incoming path or full deep-link URI (`https://www.leafymart.com/products/cumin-seeds-jeera-whole`)
   static String? extractSlugOrId(String uriOrPath) {
     final uri = Uri.tryParse(uriOrPath.trim());
     if (uri == null) return null;
@@ -42,10 +42,10 @@ class ProductSlugRouter {
     return Uri.decodeComponent(match.group(1)!);
   }
 
-  /// Builds the canonical share URL for a product (`https://leafyearth.com/products/<urlSlug>`)
+  /// Builds the canonical share URL for a product (`https://www.leafymart.com/products/<urlSlug>`)
   static String buildCanonicalProductUrl(
     PublicProductProjection product, {
-    String baseOrigin = 'https://leafyearth.com',
+    String baseOrigin = 'https://www.leafymart.com',
   }) {
     final cleanOrigin = baseOrigin.replaceAll(RegExp(r'/+$'), '');
     final slug = product.urlSlug.isNotEmpty ? product.urlSlug : product.productId;
@@ -66,7 +66,7 @@ class ProductSlugRouter {
 
     final res = await apiService.resolveProductBySlugOrId(slugOrId);
     if (res.statusCode == 404 || res.product == null) {
-      onUpdateDocumentTitle?.call('Product Not Found | LeafyEarth');
+      onUpdateDocumentTitle?.call('Product Not Found | LeafyMart');
       return ProductRouteMatch(
         requestedSlugOrId: slugOrId,
         canonicalPath: '/products/$slugOrId',
@@ -87,7 +87,7 @@ class ProductSlugRouter {
       onReplaceBrowserUrl?.call(canonicalPath);
     }
     onUpdateDocumentTitle?.call(
-      product.seoTitle.isNotEmpty ? product.seoTitle : '${product.title} | LeafyEarth',
+      product.seoTitle.isNotEmpty ? product.seoTitle : '${product.title} | LeafyMart',
     );
 
     return ProductRouteMatch(

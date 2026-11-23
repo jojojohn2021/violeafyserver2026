@@ -175,7 +175,7 @@ test('Section 18.8 & 12: Selective Master Sync maps V5 General + 21 Ayurvedic fi
       gstReference: 'GST Schedule I',
       confidence: 'high',
       needsManualVerification: false,
-      verifiedBy: 'admin@leafyearth.com',
+      verifiedBy: 'admin@leafymart.com',
       verifiedAt: '2026-11-14T00:00:00.000Z',
     },
     packing: {
@@ -445,7 +445,7 @@ test('Product Master Updation: AI category maps to leafycategory, auto-links by 
       gstPercentage: 5,
       categories: ['Spices', 'Ayurvedic Herbs'],
       leafycategory: 'Ayurvedic Raw Herbs & Single Dravyas',
-      brand: 'LeafyEarth',
+      brand: 'LeafyMart',
       brandOwner: 'Vio Nature Science',
       stockIn: 50,
       imageUrl: 'data:image/jpeg;base64,/9j/4AAQ',

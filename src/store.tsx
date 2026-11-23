@@ -1564,8 +1564,48 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Sales Orders CRUD
   const addSalesOrder = useCallback(async (orderData: Omit<SalesOrder, 'id' | 'orderNumber' | 'createdAt'>) => {
     try {
+      const catIdByName = new Map<string, string>();
+      categories.forEach((c) => {
+        if (c.name && c.categoryId) {
+          catIdByName.set(c.name.trim().toLowerCase(), c.categoryId);
+        }
+      });
+      const brandIdByName = new Map<string, string>();
+      brands.forEach((b) => {
+        if (b.name && b.brandId) {
+          brandIdByName.set(b.name.trim().toLowerCase(), b.brandId);
+        }
+      });
+      const enrichedProducts = (orderData.products || []).map((item) => {
+        const matchedProd = products.find((p) => p.id === item.productId);
+        const catName = item.category || matchedProd?.category || '';
+        const resolvedCatId =
+          item.categoryId ||
+          matchedProd?.categoryId ||
+          (catName ? catIdByName.get(catName.trim().toLowerCase()) : undefined);
+        const brdName = item.brand || matchedProd?.brand || '';
+        const resolvedBrdId =
+          item.brandId ||
+          matchedProd?.brandId ||
+          (brdName ? brandIdByName.get(brdName.trim().toLowerCase()) : undefined);
+        return {
+          ...item,
+          ...(resolvedCatId ? { categoryId: resolvedCatId } : {}),
+          ...(resolvedBrdId ? { brandId: resolvedBrdId } : {}),
+        };
+      });
+      const orderCategoryIds = Array.from(
+        new Set(enrichedProducts.map((i) => i.categoryId).filter(Boolean) as string[])
+      );
+      const orderBrandIds = Array.from(
+        new Set(enrichedProducts.map((i) => i.brandId).filter(Boolean) as string[])
+      );
+
       const fullOrder = {
         ...orderData,
+        products: enrichedProducts,
+        ...(orderCategoryIds.length > 0 ? { categoryIds: orderCategoryIds } : {}),
+        ...(orderBrandIds.length > 0 ? { brandIds: orderBrandIds } : {}),
         salesPlatform: orderData.salesPlatform || 'webleafyearth',
         orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
         createdAt: new Date().toISOString()
@@ -1581,7 +1621,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: new Date().toISOString()
       });
     }
-  }, []);
+  }, [brands, categories, products]);
 
   const updateSalesOrder = useCallback(async (id: string, updates: Partial<SalesOrder>) => {
     try {
@@ -1957,12 +1997,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     try {
-      await categoryRepository.create(newCatDoc);
-      setCategories(prev => [...prev, newCatDoc]);
-      if (!customCategories.some(c => c.toLowerCase() === newCatDoc.name.toLowerCase())) {
-        setCustomCategories(prev => [...prev, newCatDoc.name]);
+      const created = await categoryRepository.create(newCatDoc);
+      setCategories(prev => [...prev, created]);
+      if (!customCategories.some(c => c.toLowerCase() === created.name.toLowerCase())) {
+        setCustomCategories(prev => [...prev, created.name]);
       }
-      return newCatDoc;
+      return created;
     } catch (err: any) {
       setFirestoreError({
         hasError: true,
@@ -2023,12 +2063,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     try {
-      await brandRepository.create(newBrandDoc);
-      setBrands(prev => [...prev, newBrandDoc]);
-      if (!customBrands.some(b => b.name.toLowerCase() === newBrandDoc.name.toLowerCase())) {
-        setCustomBrands(prev => [...prev, { name: newBrandDoc.name, owner: newBrandDoc.owner || 'Generic Owner' }]);
+      const created = await brandRepository.create(newBrandDoc);
+      setBrands(prev => [...prev, created]);
+      if (!customBrands.some(b => b.name.toLowerCase() === created.name.toLowerCase())) {
+        setCustomBrands(prev => [...prev, { name: created.name, owner: created.owner || 'Generic Owner' }]);
       }
-      return newBrandDoc;
+      return created;
     } catch (err: any) {
       setFirestoreError({
         hasError: true,

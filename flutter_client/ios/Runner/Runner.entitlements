@@ -5,8 +5,8 @@
     <!-- V9/V10 iOS Universal Links for Canonical Product URLs (/products/<slug>) -->
     <key>com.apple.developer.associated-domains</key>
     <array>
-        <string>applinks:leafyearth.com</string>
-        <string>applinks:www.leafyearth.com</string>
+        <string>applinks:leafymart.com</string>
+        <string>applinks:www.leafymart.com</string>
     </array>
 </dict>
 </plist>

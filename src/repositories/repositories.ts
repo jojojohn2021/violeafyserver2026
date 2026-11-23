@@ -103,6 +103,146 @@ export async function allocateClientEightDigitSku(): Promise<string> {
   });
 }
 
+const CATEGORY_ID_REGEX = /^CAT-[0-9]{4,}$/;
+const MIN_CATEGORY_ID_NUM = 1001;
+
+export async function allocateClientCategoryId(): Promise<string> {
+  try {
+    const res = await fetch('/api/admin/categories/allocate-id', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.categoryId && CATEGORY_ID_REGEX.test(String(data.categoryId))) {
+        return String(data.categoryId);
+      }
+    }
+  } catch {
+    // Fall back to direct Firestore transaction
+  }
+
+  const catsSnap = await getDocs(collection(db, 'product_categories'));
+  let highest = MIN_CATEGORY_ID_NUM - 1;
+  const used = new Set<string>();
+  catsSnap.forEach((docSnap) => {
+    const raw = String(docSnap.data()?.categoryId ?? '').trim().toUpperCase();
+    if (CATEGORY_ID_REGEX.test(raw)) {
+      used.add(raw);
+      const n = Number.parseInt(raw.slice(4), 10);
+      if (Number.isFinite(n) && n > highest) highest = n;
+    }
+  });
+
+  const seqRef = doc(db, 'category_id_sequences', 'global');
+  return runTransaction(db, async (tx) => {
+    const seqSnap = await tx.get(seqRef);
+    const storedCurrent = seqSnap.exists() ? Number(seqSnap.data()?.currentNumber ?? 0) : 0;
+    let candidate = Math.max(highest, storedCurrent, MIN_CATEGORY_ID_NUM - 1) + 1;
+    for (let i = 0; i < 1000; i++) {
+      const candStr = `CAT-${String(candidate).padStart(4, '0')}`;
+      if (!used.has(candStr)) {
+        tx.set(
+          seqRef,
+          {
+            currentNumber: candidate,
+            lastAllocatedCategoryId: candStr,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        return candStr;
+      }
+      candidate += 1;
+    }
+    return `CAT-${Date.now().toString().slice(-6)}`;
+  });
+}
+
+async function resolveClientCategoryIdsByNames(names: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!names.length) return map;
+  try {
+    const snap = await getDocs(collection(db, 'product_categories'));
+    snap.forEach((d) => {
+      const data = d.data();
+      const nm = String(data?.name ?? '').trim().toLowerCase();
+      const cid = String(data?.categoryId ?? '').trim();
+      if (nm && cid) map.set(nm, cid);
+    });
+  } catch {
+    // Best-effort lookup
+  }
+  return map;
+}
+
+const BRAND_ID_REGEX = /^BRD-[0-9]{4,}$/;
+const MIN_BRAND_ID_NUM = 1001;
+
+export async function allocateClientBrandId(): Promise<string> {
+  try {
+    const res = await fetch('/api/admin/brands/allocate-id', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.brandId && BRAND_ID_REGEX.test(String(data.brandId))) {
+        return String(data.brandId);
+      }
+    }
+  } catch {
+    // Fall back to direct Firestore transaction
+  }
+
+  const brandsSnap = await getDocs(collection(db, 'product_brands'));
+  let highest = MIN_BRAND_ID_NUM - 1;
+  const used = new Set<string>();
+  brandsSnap.forEach((docSnap) => {
+    const raw = String(docSnap.data()?.brandId ?? '').trim().toUpperCase();
+    if (BRAND_ID_REGEX.test(raw)) {
+      used.add(raw);
+      const n = Number.parseInt(raw.slice(4), 10);
+      if (Number.isFinite(n) && n > highest) highest = n;
+    }
+  });
+
+  const seqRef = doc(db, 'brand_id_sequences', 'global');
+  return runTransaction(db, async (tx) => {
+    const seqSnap = await tx.get(seqRef);
+    const storedCurrent = seqSnap.exists() ? Number(seqSnap.data()?.currentNumber ?? 0) : 0;
+    let candidate = Math.max(highest, storedCurrent, MIN_BRAND_ID_NUM - 1) + 1;
+    for (let i = 0; i < 1000; i++) {
+      const candStr = `BRD-${String(candidate).padStart(4, '0')}`;
+      if (!used.has(candStr)) {
+        tx.set(
+          seqRef,
+          {
+            currentNumber: candidate,
+            lastAllocatedBrandId: candStr,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        return candStr;
+      }
+      candidate += 1;
+    }
+    return `BRD-${Date.now().toString().slice(-6)}`;
+  });
+}
+
+async function resolveClientBrandIdByName(name?: string): Promise<string | undefined> {
+  const clean = String(name || '').trim().toLowerCase();
+  if (!clean) return undefined;
+  try {
+    const snap = await getDocs(collection(db, 'product_brands'));
+    for (const d of snap.docs) {
+      const data = d.data();
+      if (String(data?.name ?? '').trim().toLowerCase() === clean && data?.brandId) {
+        return String(data.brandId).trim();
+      }
+    }
+  } catch {
+    // Best-effort lookup
+  }
+  return undefined;
+}
+
 export class ProductRepository extends BaseRepository<ProductPerformance> {
   constructor() {
     super('products');
@@ -113,10 +253,40 @@ export class ProductRepository extends BaseRepository<ProductPerformance> {
     const finalSku = EIGHT_DIGIT_SKU_REGEX.test(incomingSku)
       ? incomingSku
       : await allocateClientEightDigitSku();
+    const isAyur = Boolean(data.ayurvedicproduct ?? data.isAyurvedicProduct ?? false);
+
+    // Resolve unique categoryId / categoryIds from product_categories
+    const catNames = Array.from(
+      new Set([
+        ...(Array.isArray(data.categories) ? data.categories : []),
+        ...(data.category ? [data.category] : []),
+      ].map((c) => String(c || '').trim()).filter(Boolean))
+    );
+    let resolvedCategoryId = data.categoryId;
+    let resolvedCategoryIds = Array.isArray(data.categoryIds) ? data.categoryIds : [];
+    if (catNames.length > 0 && (!resolvedCategoryId || resolvedCategoryIds.length === 0)) {
+      const lookup = await resolveClientCategoryIdsByNames(catNames);
+      const ids = catNames.map((n) => lookup.get(n.toLowerCase())).filter(Boolean) as string[];
+      if (ids.length > 0) {
+        resolvedCategoryIds = Array.from(new Set(ids));
+        if (!resolvedCategoryId) resolvedCategoryId = resolvedCategoryIds[0];
+      }
+    }
+
+    let resolvedBrandId = data.brandId;
+    if (!resolvedBrandId && data.brand) {
+      resolvedBrandId = await resolveClientBrandIdByName(data.brand);
+    }
+
     return super.create({
       ...data,
       sku: finalSku,
       culinarydetails: data.culinarydetails === true,
+      ayurvedicproduct: isAyur,
+      isAyurvedicProduct: isAyur,
+      ...(resolvedCategoryId ? { categoryId: resolvedCategoryId } : {}),
+      ...(resolvedCategoryIds.length > 0 ? { categoryIds: resolvedCategoryIds } : {}),
+      ...(resolvedBrandId ? { brandId: resolvedBrandId } : {}),
     });
   }
 
@@ -124,6 +294,31 @@ export class ProductRepository extends BaseRepository<ProductPerformance> {
     const sanitized = { ...updates };
     if (sanitized.culinarydetails !== undefined) {
       sanitized.culinarydetails = Boolean(sanitized.culinarydetails);
+    }
+    if (sanitized.ayurvedicproduct !== undefined || sanitized.isAyurvedicProduct !== undefined) {
+      const isAyur = Boolean(sanitized.ayurvedicproduct ?? sanitized.isAyurvedicProduct);
+      sanitized.ayurvedicproduct = isAyur;
+      sanitized.isAyurvedicProduct = isAyur;
+    }
+    if (sanitized.category !== undefined || sanitized.categories !== undefined) {
+      const catNames = Array.from(
+        new Set([
+          ...(Array.isArray(sanitized.categories) ? sanitized.categories : []),
+          ...(sanitized.category ? [sanitized.category] : []),
+        ].map((c) => String(c || '').trim()).filter(Boolean))
+      );
+      if (catNames.length > 0) {
+        const lookup = await resolveClientCategoryIdsByNames(catNames);
+        const ids = catNames.map((n) => lookup.get(n.toLowerCase())).filter(Boolean) as string[];
+        if (ids.length > 0) {
+          sanitized.categoryIds = Array.from(new Set(ids));
+          sanitized.categoryId = sanitized.categoryIds[0];
+        }
+      }
+    }
+    if (sanitized.brand !== undefined && !sanitized.brandId) {
+      const resolvedBid = await resolveClientBrandIdByName(sanitized.brand);
+      if (resolvedBid) sanitized.brandId = resolvedBid;
     }
     if (sanitized.sku !== undefined) {
       try {
@@ -336,6 +531,35 @@ export class CategoryRepository extends BaseRepository<Category> {
     super('product_categories');
   }
 
+  override async create(data: Omit<Category, 'id'> & { id?: string }): Promise<Category> {
+    const incomingCatId = String(data.categoryId ?? '').trim().toUpperCase();
+    const finalCategoryId = CATEGORY_ID_REGEX.test(incomingCatId)
+      ? incomingCatId
+      : await allocateClientCategoryId();
+    return super.create({
+      ...data,
+      categoryId: finalCategoryId,
+    });
+  }
+
+  override async update(id: string, updates: Partial<Category>): Promise<void> {
+    const sanitized = { ...updates };
+    try {
+      const existingSnap = await getDoc(doc(db, 'product_categories', id));
+      if (existingSnap.exists()) {
+        const existingCatId = String(existingSnap.data()?.categoryId ?? '').trim();
+        if (existingCatId) {
+          sanitized.categoryId = existingCatId;
+        } else if (!sanitized.categoryId) {
+          sanitized.categoryId = await allocateClientCategoryId();
+        }
+      }
+    } catch {
+      // Best-effort immutability check
+    }
+    return super.update(id, sanitized);
+  }
+
   async uploadCategoryImage(name: string, file: File, existingId?: string): Promise<Category> {
     const id = existingId || `cat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const uploaded = await uploadCategoryImage(file, id);
@@ -349,16 +573,45 @@ export class CategoryRepository extends BaseRepository<Category> {
     };
     if (existingId) {
       await this.update(id, data);
+      return data;
     } else {
-      await this.create(data);
+      return await this.create(data);
     }
-    return data;
   }
 }
 
 export class BrandRepository extends BaseRepository<Brand> {
   constructor() {
     super('product_brands');
+  }
+
+  override async create(data: Omit<Brand, 'id'> & { id?: string }): Promise<Brand> {
+    const incomingBrandId = String(data.brandId ?? '').trim().toUpperCase();
+    const finalBrandId = BRAND_ID_REGEX.test(incomingBrandId)
+      ? incomingBrandId
+      : await allocateClientBrandId();
+    return super.create({
+      ...data,
+      brandId: finalBrandId,
+    });
+  }
+
+  override async update(id: string, updates: Partial<Brand>): Promise<void> {
+    const sanitized = { ...updates };
+    try {
+      const existingSnap = await getDoc(doc(db, 'product_brands', id));
+      if (existingSnap.exists()) {
+        const existingBid = String(existingSnap.data()?.brandId ?? '').trim();
+        if (existingBid) {
+          sanitized.brandId = existingBid;
+        } else if (!sanitized.brandId) {
+          sanitized.brandId = await allocateClientBrandId();
+        }
+      }
+    } catch {
+      // Best-effort immutability check
+    }
+    return super.update(id, sanitized);
   }
 
   async uploadBrandImage(name: string, owner: string, file: File, existingId?: string): Promise<Brand> {
@@ -375,10 +628,10 @@ export class BrandRepository extends BaseRepository<Brand> {
     };
     if (existingId) {
       await this.update(id, data);
+      return data;
     } else {
-      await this.create(data);
+      return await this.create(data);
     }
-    return data;
   }
 }
 

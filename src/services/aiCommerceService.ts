@@ -280,21 +280,21 @@ export function validateSEOPayload(
 
 /**
  * Generates structured V9 SEO content (including the exact Section 4.1 Cumin Seeds
- * reference profile and deterministic fallbacks for all LeafyEarth products).
+ * reference profile and deterministic fallbacks for all LeafyMart products).
  */
 export function buildStructuredFallbackSEO(
   productName: string,
   options?: { categoryHint?: string; brandHint?: string; formHint?: string }
 ): AIProductSEOPayload {
-  const cleanName = String(productName || 'LeafyEarth Product').trim();
+  const cleanName = String(productName || 'LeafyMart Product').trim();
   const lower = cleanName.toLowerCase();
-  const brand = (options?.brandHint || 'LeafyEarth').trim();
+  const brand = (options?.brandHint || 'LeafyMart').trim();
   const category = (options?.categoryHint || 'Indian Spices & Natural Foods').trim();
 
   // Section 4.1 Cumin Seeds canonical example
   if (lower.includes('cumin') || lower.includes('jeera') || lower.includes('jeerakam')) {
     return {
-      seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyEarth',
+      seoTitle: 'Cumin Seeds (Jeera) | Whole Cumin | LeafyMart',
       metaDescription:
         'Discover aromatic whole cumin seeds (Jeera) for curries, dals, rice and spice blends. Add warm, earthy flavour to your everyday cooking.',
       seoKeywords: [
@@ -360,7 +360,7 @@ export function buildStructuredFallbackSEO(
     baseDesc = `${baseDesc.slice(0, 157).trim()}...`;
   }
 
-  const baseSlug = normalizeUrlSlug(cleanName) || 'leafyearth-product';
+  const baseSlug = normalizeUrlSlug(cleanName) || 'leafymart-product';
 
   const keywords = deduplicateAndCleanKeywords([
     cleanName.toLowerCase(),
@@ -635,7 +635,7 @@ export function buildStructuredFallbackCommerce(
   productName: string,
   options?: { categoryHint?: string; packingSize?: string; formHint?: string }
 ): AICommerceContentPayload {
-  const cleanName = String(productName || 'LeafyEarth Product').trim();
+  const cleanName = String(productName || 'LeafyMart Product').trim();
   const category = String(options?.categoryHint || 'Spices & Natural Foods').trim();
   const pack = String(options?.packingSize || '100 g').trim();
   const isLiquid = /\b(\d+(?:\.\d+)?)\s*(ml|l|ltr)\b/i.test(pack) || /oil|liquid|syrup/i.test(cleanName);
@@ -678,7 +678,7 @@ export function buildStructuredFallbackCommerce(
       : isLiquid
       ? 'Food, Beverages & Tobacco > Food Items > Cooking & Baking Ingredients > Cooking Oils'
       : 'Food, Beverages & Tobacco > Food Items > Seasonings & Spices > Herbs & Spices',
-    productType: `LeafyEarth > ${category} > ${cleanName}`,
+    productType: `LeafyMart > ${category} > ${cleanName}`,
     factualAttributeSuggestions: {
       netWeight: isLiquid ? null : packNum,
       netWeightUnit: isLiquid ? null : packUnitRaw === 'kg' ? 'kg' : 'g',
@@ -768,13 +768,13 @@ export function getDefaultVerifiedDomain(): string {
   return (
     process.env.PUBLIC_CANONICAL_ORIGIN ||
     process.env.VERIFIED_MERCHANT_DOMAIN ||
-    'https://violeafybasket.web.app'
+    'https://www.leafymart.com'
   ).replace(/\/+$/, '');
 }
 
 /**
  * Builds the allowlisted `PublicProductOfferProjection` for `public_products/{offerId}`.
- * - Uses genuine LeafyEarth selling price (`offerPrice` or `onlinePrice`) and `mrp`.
+ * - Uses genuine LeafyMart selling price (`offerPrice` or `onlinePrice`) and `mrp`.
  * - NEVER uses competitor `lowestWebPrice` or `highestWebPrice`.
  * - NEVER exposes internal `stock` count, cost data, supplier data, or `aiContentMetadata`.
  */
@@ -797,7 +797,7 @@ export function buildPublicProductOfferProjection(
 
   const canonicalUrl = `${domain}/products/${urlSlug}`;
 
-  // Genuine LeafyEarth selling price in INR (never competitor web price!)
+  // Genuine LeafyMart selling price in INR (never competitor web price!)
   const onlinePrice = Number(product.onlinePrice || product.shopPrice || 0);
   const mrp =
     product.mrp !== undefined && product.mrp !== null && Number(product.mrp) > 0
@@ -829,13 +829,13 @@ export function buildPublicProductOfferProjection(
   const verifiedMpn = product.mpn ? String(product.mpn).trim() : null;
   const identifierExists = Boolean(verifiedGtin || verifiedMpn);
 
-  const title = String(product.title || product.name || 'LeafyEarth Product').trim();
+  const title = String(product.title || product.name || 'LeafyMart Product').trim();
   const description = String(
-    product.description || `${title} (${packSize}) from LeafyEarth.`
+    product.description || `${title} (${packSize}) from LeafyMart.`
   ).trim();
 
   const seoTitle = String(
-    product.seoTitle || `${product.name || title} | LeafyEarth`
+    product.seoTitle || `${product.name || title} | LeafyMart`
   ).trim();
   const metaDescription = String(
     product.metaDescription || description.slice(0, 160)
@@ -874,14 +874,14 @@ export function buildPublicProductOfferProjection(
     canonicalUrl,
     imageUrl: String(product.imageUrl || '').trim(),
     additionalImageUrls: additionalImages,
-    brand: String(product.brand || 'LeafyEarth').trim(),
+    brand: String(product.brand || 'LeafyMart').trim(),
     category: String(product.category || 'Natural Products').trim(),
     googleProductCategory: String(
       product.googleProductCategory ||
         'Food, Beverages & Tobacco > Food Items > Seasonings & Spices'
     ).trim(),
     productType: String(
-      product.productType || `LeafyEarth > ${product.category || 'Natural Products'}`
+      product.productType || `LeafyMart > ${product.category || 'Natural Products'}`
     ).trim(),
     price: basePrice > 0 ? basePrice : effectivePrice,
     salePrice,
@@ -1138,7 +1138,7 @@ export function validateProductForPlatform(
       code: 'INVALID_PRICE',
       field: 'onlinePrice',
       severity: 'error',
-      message: 'Genuine LeafyEarth selling price (onlinePrice / offerPrice) must be greater than ₹0.',
+      message: 'Genuine LeafyMart selling price (onlinePrice / offerPrice) must be greater than ₹0.',
       remediation: 'Set a valid INR onlinePrice in Product Master.',
     });
   }
@@ -1343,9 +1343,9 @@ export function generateGoogleMerchantXmlFeed(
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
   <channel>
-    <title>LeafyEarth Product Catalog (India - INR)</title>
+    <title>LeafyMart Product Catalog (India - INR)</title>
     <link>${escapeXml(domain)}</link>
-    <description>Official LeafyEarth approved merchant product feed for India (INR).</description>
+    <description>Official LeafyMart approved merchant product feed for India (INR).</description>
 ${itemsXml}
   </channel>
 </rss>`;
@@ -1357,8 +1357,8 @@ export function generateBingMerchantXmlFeed(
 ): string {
   // Microsoft Merchant Center accepts Google Merchant RSS 2.0 XML schema with g: namespace
   return generateGoogleMerchantXmlFeed(projections, settings).replace(
-    '<title>LeafyEarth Product Catalog (India - INR)</title>',
-    '<title>LeafyEarth Microsoft Merchant Catalog (India - INR)</title>'
+    '<title>LeafyMart Product Catalog (India - INR)</title>',
+    '<title>LeafyMart Microsoft Merchant Catalog (India - INR)</title>'
   );
 }
 
@@ -1432,7 +1432,7 @@ export function buildProductJsonLdObject(projection: PublicProductOfferProjectio
     ].filter(Boolean),
     brand: {
       '@type': 'Brand',
-      name: projection.brand || 'LeafyEarth',
+      name: projection.brand || 'LeafyMart',
     },
     category: projection.category,
     offers: {
@@ -1472,7 +1472,7 @@ export function renderServerProductLandingHtml(
   projection: PublicProductOfferProjection,
   baseTemplateHtml?: string
 ): string {
-  const escapedTitle = escapeHtml(projection.seoTitle || `${projection.title} | LeafyEarth`);
+  const escapedTitle = escapeHtml(projection.seoTitle || `${projection.title} | LeafyMart`);
   const escapedDesc = escapeHtml(projection.metaDescription || projection.description);
   const escapedCanonical = escapeHtml(projection.canonicalUrl);
   const escapedImage = escapeHtml(projection.imageUrl || '');
@@ -1489,7 +1489,7 @@ export function renderServerProductLandingHtml(
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="${escapedCanonical}" />
     <meta property="og:type" content="product" />
-    <meta property="og:site_name" content="LeafyEarth" />
+    <meta property="og:site_name" content="LeafyMart" />
     <meta property="og:title" content="${escapedTitle}" />
     <meta property="og:description" content="${escapedDesc}" />
     <meta property="og:url" content="${escapedCanonical}" />
@@ -1613,7 +1613,7 @@ export function generateRobotsTxt(
   const domain = verifiedDomain.replace(/\/+$/, '');
   const trainingRule = options?.allowTrainingBots ? 'Allow: /products/' : 'Disallow: /';
 
-  return `# LeafyEarth Public Search & AI Discovery Robots Configuration (V10)
+  return `# LeafyMart Public Search & AI Discovery Robots Configuration (V10)
 User-agent: Googlebot
 Allow: /products/
 Allow: /feeds/
@@ -1676,8 +1676,8 @@ export function generateLlmsTxt(
     )
     .join('\n');
 
-  return `# LeafyEarth Official Product Catalog (India - INR)
-> Informational summary for AI search and answer engines. Prices and availability are derived from live LeafyEarth product projections.
+  return `# LeafyMart Official Product Catalog (India - INR)
+> Informational summary for AI search and answer engines. Prices and availability are derived from live LeafyMart product projections.
 
 ## Public Discovery Endpoints
 - XML Sitemap: ${domain}/sitemap.xml
@@ -2275,7 +2275,7 @@ export function registerAICommerceAndDiscoveryRoutes(
         const decoded = await deps.auth.verifyIdToken(authHeader.slice(7));
         return {
           uid: decoded.uid,
-          email: decoded.email || 'admin@leafyearth.com',
+          email: decoded.email || 'admin@leafymart.com',
           role: 'Admin',
         };
       } catch {
@@ -2284,7 +2284,7 @@ export function registerAICommerceAndDiscoveryRoutes(
     }
     return {
       uid: String(req.body?.actorId || req.headers['x-actor-id'] || 'admin-user'),
-      email: String(req.body?.actorEmail || req.headers['x-actor-email'] || 'admin@leafyearth.com'),
+      email: String(req.body?.actorEmail || req.headers['x-actor-email'] || 'admin@leafymart.com'),
       role: String(req.body?.actorRole || 'Admin'),
     };
   };
@@ -2332,7 +2332,7 @@ export function registerAICommerceAndDiscoveryRoutes(
 
       const generatedSeo = buildStructuredFallbackSEO(draft.source_product_name, {
         categoryHint: draft.category_hint || currentPayload?.category,
-        brandHint: draft.brand_hint || 'LeafyEarth',
+        brandHint: draft.brand_hint || 'LeafyMart',
         formHint: currentPayload?.form,
       });
 
@@ -2623,7 +2623,7 @@ export function registerAICommerceAndDiscoveryRoutes(
       }
 
       const sourceName = String(
-        productName || masterProduct?.name || masterProduct?.title || 'LeafyEarth Product'
+        productName || masterProduct?.name || masterProduct?.title || 'LeafyMart Product'
       ).trim();
 
       const commerceContent = buildStructuredFallbackCommerce(sourceName, {
@@ -2632,7 +2632,7 @@ export function registerAICommerceAndDiscoveryRoutes(
       });
       const seoContent = buildStructuredFallbackSEO(sourceName, {
         categoryHint: categoryHint || masterProduct?.category,
-        brandHint: masterProduct?.brand || 'LeafyEarth',
+        brandHint: masterProduct?.brand || 'LeafyMart',
       });
 
       // Check existing staging drafts for this product to increment version
@@ -3498,7 +3498,7 @@ export function registerAICommerceAndDiscoveryRoutes(
         })
         .send(generateLlmsTxt(projections));
     } catch {
-      res.status(200).type('text/plain').send('# LeafyEarth Catalog');
+      res.status(200).type('text/plain').send('# LeafyMart Catalog');
     }
   });
 
@@ -3534,7 +3534,7 @@ export function registerAICommerceAndDiscoveryRoutes(
             components: [
               {
                 '/': '/products/*',
-                comment: 'Matches all canonical LeafyEarth product URLs',
+                comment: 'Matches all canonical LeafyMart product URLs',
               },
             ],
           },
@@ -3566,12 +3566,12 @@ export function registerAICommerceAndDiscoveryRoutes(
   <head>
     <meta charset="UTF-8" />
     <meta name="robots" content="noindex, nofollow" />
-    <title>Product Not Found | LeafyEarth</title>
+    <title>Product Not Found | LeafyMart</title>
   </head>
   <body style="font-family:system-ui,sans-serif;padding:3rem;text-align:center;">
     <h1>404 – Product Not Found</h1>
     <p>The requested product is unavailable or has been withdrawn.</p>
-    <a href="/">Return to LeafyEarth Store</a>
+    <a href="/">Return to LeafyMart Store</a>
   </body>
 </html>`);
       }

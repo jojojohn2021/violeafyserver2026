@@ -6,6 +6,12 @@ import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import { resolveRegionalProductNames } from '../utils/botanicalRegionalNames';
+import {
+  buildStructuredHealthBenefits,
+  buildStructuredNutritionalInformation,
+  buildStructuredSafetyPrecautionsText,
+  safetyPrecautionsTextToLines,
+} from '../utils/healthNutritionTemplates';
 import type {
   AIProductContentPayload,
   AIProductDraft,
@@ -263,7 +269,21 @@ export function validateAIProductContentPayload(
     : [];
 
   const nutritional_benefits = cleanArr(raw.nutritional_benefits);
-  const safety_precautions = cleanArr(raw.safety_precautions);
+  const nutritional_information =
+    typeof raw.nutritional_information === 'string' && raw.nutritional_information.trim()
+      ? raw.nutritional_information.trim()
+      : undefined;
+  const safety_precautions_text =
+    typeof raw.safety_precautions_text === 'string' && raw.safety_precautions_text.trim()
+      ? raw.safety_precautions_text.trim()
+      : undefined;
+  const rawSafetyLines = cleanArr(raw.safety_precautions);
+  const safety_precautions =
+    rawSafetyLines.length > 0
+      ? rawSafetyLines
+      : safety_precautions_text
+      ? safetyPrecautionsTextToLines(safety_precautions_text)
+      : [];
   const references = Array.isArray(raw.references)
     ? raw.references
         .map((r: any, idx: number) => ({
@@ -316,7 +336,9 @@ export function validateAIProductContentPayload(
       translations,
       health_benefits,
       nutritional_benefits,
+      ...(nutritional_information !== undefined ? { nutritional_information } : {}),
       safety_precautions,
+      ...(safety_precautions_text !== undefined ? { safety_precautions_text } : {}),
       ayurveda_applicability,
       is_ayurvedic_product,
       ayurveda,
@@ -736,33 +758,19 @@ export function buildStructuredFallbackContent(
     storage_instructions:
       'Store in a cool, dry, and hygienic place away from direct sunlight and moisture. Transfer to an airtight container after opening.',
     translations,
-    health_benefits: isHousehold
-      ? []
-      : [
-          {
-            claim: 'Supports everyday digestive comfort and antioxidant intake as part of a balanced diet',
-            evidence_level: 'traditional_use',
-            reference_ids: ['REF-1', 'REF-2'],
-            review_status: 'pending_review',
-          },
-          {
-            claim: 'Provides natural phytonutrients and aromatic compounds that complement wholesome nutrition',
-            evidence_level: 'nutritional',
-            reference_ids: ['REF-1'],
-            review_status: 'pending_review',
-          },
-        ],
+    health_benefits: isHousehold ? [] : buildStructuredHealthBenefits(cleanName),
     nutritional_benefits: isHousehold
       ? ['Formulated for effective household hygiene']
       : [
           'Naturally rich in botanical polyphenols and essential volatile oils',
           'Source of plant-based dietary fiber and trace phytonutrients',
-          'Zero trans fat, zero cholesterol, and free from refined sugars or synthetic additives',
+          'Zero trans fat, zero cholesterol, and free from synthetic additives',
         ],
-    safety_precautions: [
-      'Check ingredient label for potential allergens before use.',
-      'For informational and culinary purposes only; not intended to diagnose, treat, cure, or prevent any disease.',
-    ],
+    nutritional_information: buildStructuredNutritionalInformation(cleanName),
+    safety_precautions: safetyPrecautionsTextToLines(
+      buildStructuredSafetyPrecautionsText(cleanName)
+    ),
+    safety_precautions_text: buildStructuredSafetyPrecautionsText(cleanName),
     ayurveda_applicability,
     is_ayurvedic_product: isAyurvedicSelected,
     ayurveda,
@@ -888,9 +896,11 @@ Required JSON keys:
 - practical_uses (string[] — Ayurvedic / traditional practical uses and how to use; some products may have both culinary_uses and practical_uses)
 - storage_instructions (string)
 ${ayurvedicPromptInstruction}
-- health_benefits: Array<{ claim, evidence_level: "traditional_use"|"nutritional"|"preliminary_study"|"human_study"|"insufficient_evidence", reference_ids: string[], review_status: "pending_review" }>
+- health_benefits: Array<{ claim, evidence_level: "traditional_use"|"nutritional"|"preliminary_study"|"human_study"|"insufficient_evidence", reference_ids: string[], review_status: "pending_review" }> — provide 6 numbered-style titled wellness points formatted as "Title: Description" (e.g., "Rich in antioxidants: ...", "Supports immunity: ...", "Digestive health: ...", "Heart health: ...", "Skin and hair health: ...", "Traditional Ayurvedic use: ..."), tailored to the product with responsible non-miraculous wording.
 - nutritional_benefits (string[] — MINIMUM 3 distinct points)
-- safety_precautions (string[])
+- nutritional_information (multi-line string structured with: an intro note about drying/processing/recipe, a header line "Nutrient\\tNutritional contribution", tab-separated nutrient rows such as Carbohydrates, Dietary fibre, Vitamin C, Polyphenols, Calcium, Iron, Potassium with concise product-specific contributions, a blank line, and a closing "Important: ..." note)
+- safety_precautions_text (multi-line string structured with: heading "Important", followed by bullet lines "- Topic: Explanation" covering Diabetes, Excessive consumption, Blood-thinning medicines, Blood sugar medication, Dental health or Allergies, and Pregnancy and breastfeeding, ending with "These precautions are particularly relevant to concentrated extracts and supplements, not necessarily occasional food consumption")
+- safety_precautions (string[] — array of the non-empty lines from safety_precautions_text)
 - references: Array<{ id, source_type, title, author_or_body, section_or_citation, url, verification_note }>
 - review_flags (string[])
 Never make miraculous or disease-cure claims.`;
@@ -1734,12 +1744,34 @@ export function buildMasterComparisonDiff(params: {
       }
     }
 
-    // Health & Safety (only non-rejected claims)
-    const approvedClaims = (payload.health_benefits || []).filter((hb) => hb.review_status !== 'rejected');
+    // Health & Safety (only non-rejected claims; strip evidence_level & reference_ids, force review_status = 'approved')
+    const approvedClaims = (payload.health_benefits || [])
+      .filter((hb) => hb.review_status !== 'rejected')
+      .map((hb) => ({
+        claim: hb.claim,
+        review_status: 'approved' as const,
+      }));
     pushItem('healthBenefits', 'Health Benefits', 'health', 'healthBenefits', approvedClaims);
     pushItem('nutritionalBenefits', 'Nutritional Benefits', 'health', 'nutritionalBenefits', payload.nutritional_benefits);
+    pushItem(
+      'nutritionalInformation',
+      'Nutritional Information (Structured Table)',
+      'health',
+      'nutritionalInformation',
+      payload.nutritional_information ||
+        buildStructuredNutritionalInformation(payload.english_product_name)
+    );
     pushItem('generalPrecautions', 'General Safety Precautions', 'health', 'generalPrecautions', payload.safety_precautions);
-    pushItem('healthReferences', 'Health & Scientific References', 'health', 'healthReferences', payload.references);
+    pushItem(
+      'safetyPrecautions',
+      'Safety Precautions (Structured)',
+      'health',
+      'safetyPrecautions',
+      payload.safety_precautions_text ||
+        (Array.isArray(payload.safety_precautions) && payload.safety_precautions.length > 0
+          ? payload.safety_precautions.join('\n')
+          : buildStructuredSafetyPrecautionsText(payload.english_product_name))
+    );
 
     const isAyurvedic = isAyurvedicEnabled && Boolean(payload.ayurveda);
     if (isAyurvedicEnabled) {
@@ -1914,6 +1946,7 @@ export const ALWAYS_EXCLUDED_MASTER_EXPORT_FIELDS = [
   'gstVerifiedAt',
   'gtin',
   'availablePackingSizes',
+  'healthReferences',
 ] as const;
 
 export const NON_AYURVEDIC_EXCLUDED_MASTER_FIELDS = [
@@ -2235,6 +2268,20 @@ export function mergeMasterProductUpdationOverrides(params: {
 
   const finalPatch = isNew ? { ...baseDefaults, ...patch } : patch;
   delete finalPatch.aiContentMetadata;
+
+  // Always sanitize healthBenefits export: remove evidence_level & reference_ids, force review_status = "approved"
+  if (Array.isArray(finalPatch.healthBenefits)) {
+    const cleanedHealthBenefits = finalPatch.healthBenefits
+      .filter((hb: any) => hb && hb.review_status !== 'rejected')
+      .map((hb: any) =>
+        typeof hb === 'string'
+          ? { claim: hb, review_status: 'approved' as const }
+          : { claim: String(hb.claim || '').trim(), review_status: 'approved' as const }
+      )
+      .filter((hb: any) => Boolean(hb.claim));
+    finalPatch.healthBenefits = cleanedHealthBenefits;
+    params.afterSnapshot.healthBenefits = cleanedHealthBenefits;
+  }
 
   // Always avoid exporting excluded fields to `products` during Update Product Master execution
   for (const excludedKey of ALWAYS_EXCLUDED_MASTER_EXPORT_FIELDS) {

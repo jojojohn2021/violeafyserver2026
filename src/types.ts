@@ -172,9 +172,11 @@ export interface ProductPerformance {
   culinaryUses?: string[];
   practicalUses?: string[];
   storageInstructions?: string;
-  healthBenefits?: AIHealthBenefit[] | string[];
+  healthBenefits?: (AIHealthBenefit | { claim: string; review_status?: AIReviewStatus })[] | string[];
   nutritionalBenefits?: string[];
+  nutritionalInformation?: string;
   generalPrecautions?: string[];
+  safetyPrecautions?: string;
   healthReferences?: AIContentReference[] | string[];
   isAyurvedicProduct?: boolean;
 
@@ -978,7 +980,9 @@ export interface AIProductContentPayload {
   translations: AIProductTranslations;
   health_benefits: AIHealthBenefit[];
   nutritional_benefits: string[];
+  nutritional_information?: string;
   safety_precautions: string[];
+  safety_precautions_text?: string;
   ayurveda_applicability: AIAyurvedaApplicability;
   is_ayurvedic_product?: boolean;
   ayurveda: AIAyurvedaContent | null;

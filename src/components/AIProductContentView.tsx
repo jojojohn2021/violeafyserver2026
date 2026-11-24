@@ -28,6 +28,13 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useCRM } from '../store';
+import {
+  buildStructuredHealthBenefits,
+  buildStructuredNutritionalInformation,
+  buildStructuredSafetyPrecautionsText,
+  formatSafetyPrecautionsArrayToText,
+  safetyPrecautionsTextToLines,
+} from '../utils/healthNutritionTemplates';
 import type {
   AIAyurvedaApplicability,
   AICommerceFeedRecord,
@@ -2683,118 +2690,195 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                       </div>
                     )}
 
-                  {/* Section C: Health Benefits, Nutritional Benefits & Safety Precautions */}
-                  <div>
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-4">
+                  {/* Section C: Health Benefits, Nutritional Information & Safety Precautions */}
+                  <div className="space-y-5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
                       <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
                         3. Health Benefits, Nutrition & Safety Precautions (Section 16)
                       </h3>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const nextItem: AIHealthBenefit = {
-                            claim: 'Traditionally used to support everyday digestive wellness.',
-                            evidence_level: 'traditional_use',
-                            reference_ids: ['REF-1'],
-                            review_status: 'approved',
-                          };
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const prodName =
+                              editedPayload.english_product_name ||
+                              draftDetail?.draft.source_product_name ||
+                              'Product';
+                            const safetyText = buildStructuredSafetyPrecautionsText(prodName);
+                            setEditedPayload({
+                              ...editedPayload,
+                              health_benefits: buildStructuredHealthBenefits(prodName),
+                              nutritional_information:
+                                buildStructuredNutritionalInformation(prodName),
+                              safety_precautions_text: safetyText,
+                              safety_precautions: safetyPrecautionsTextToLines(safetyText),
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                          title="Populate structured 6-point Health Benefits, Nutritional Information table, and Safety Precautions template"
+                        >
+                          <Sparkles className="w-3 h-3" /> Apply Structured Template
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextItem: AIHealthBenefit = {
+                              claim:
+                                'Traditional wellness use: Traditionally used to support everyday digestive comfort and general vitality.',
+                              evidence_level: 'traditional_use',
+                              reference_ids: ['REF-1'],
+                              review_status: 'approved',
+                            };
+                            setEditedPayload({
+                              ...editedPayload,
+                              health_benefits: [...(editedPayload.health_benefits || []), nextItem],
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" /> Add Health Benefit Claim
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 1. Health Benefits (Numbered Structured Points: Title: Description) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                          1. Health Benefits
+                        </h4>
+                        <span className="text-[10px] font-semibold text-slate-500">
+                          Format: <code className="text-slate-700">Title: Description</code> (numbered automatically)
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {(editedPayload.health_benefits || []).map((hb, idx) => (
+                          <div
+                            key={idx}
+                            className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/60 grid grid-cols-1 md:grid-cols-12 gap-3 items-start"
+                          >
+                            <div className="md:col-span-7">
+                              <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-black mr-1.5">
+                                  {idx + 1}
+                                </span>
+                                Responsible Non-Deceptive Wellness Claim (Title: Description)
+                              </label>
+                              <textarea
+                                rows={2}
+                                value={hb.claim}
+                                onChange={(e) => {
+                                  const list = [...editedPayload.health_benefits];
+                                  list[idx] = { ...list[idx], claim: e.target.value };
+                                  setEditedPayload({ ...editedPayload, health_benefits: list });
+                                }}
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white leading-relaxed resize-y"
+                              />
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="block text-[10px] font-bold text-slate-500">
+                                Evidence Level
+                              </label>
+                              <select
+                                value={hb.evidence_level}
+                                onChange={(e) => {
+                                  const list = [...editedPayload.health_benefits];
+                                  list[idx] = {
+                                    ...list[idx],
+                                    evidence_level: e.target.value as AIEvidenceLevel,
+                                  };
+                                  setEditedPayload({ ...editedPayload, health_benefits: list });
+                                }}
+                                className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs bg-white mt-0.5"
+                              >
+                                <option value="traditional_use">traditional_use</option>
+                                <option value="nutritional">nutritional</option>
+                                <option value="preliminary_study">preliminary_study</option>
+                                <option value="human_study">human_study</option>
+                                <option value="insufficient_evidence">insufficient_evidence</option>
+                              </select>
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="block text-[10px] font-bold text-slate-500">
+                                Claim Approval
+                              </label>
+                              <select
+                                value={hb.review_status || 'pending_review'}
+                                onChange={(e) => {
+                                  const list = [...editedPayload.health_benefits];
+                                  list[idx] = {
+                                    ...list[idx],
+                                    review_status: e.target.value as AIReviewStatus,
+                                  };
+                                  setEditedPayload({ ...editedPayload, health_benefits: list });
+                                }}
+                                className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs bg-white mt-0.5 font-bold"
+                              >
+                                <option value="approved">Approved</option>
+                                <option value="pending_review">Pending Review</option>
+                                <option value="rejected">Rejected</option>
+                              </select>
+                            </div>
+                            <div className="md:col-span-1 pt-5 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const list = editedPayload.health_benefits.filter(
+                                    (_, i) => i !== idx
+                                  );
+                                  setEditedPayload({ ...editedPayload, health_benefits: list });
+                                }}
+                                className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 2. Nutritional Information (Dedicated Multi-Line Box) */}
+                    <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <label className="block text-xs font-black text-slate-900 uppercase tracking-wide">
+                            Nutritional Information
+                          </label>
+                          <p className="text-[11px] text-slate-500">
+                            Intro note, tab-separated <code>Nutrient</code> &amp;{' '}
+                            <code>Nutritional contribution</code> rows, and closing{' '}
+                            <code>Important:</code> note (exported to{' '}
+                            <code>products.nutritionalInformation</code>).
+                          </p>
+                        </div>
+                      </div>
+                      <textarea
+                        rows={11}
+                        value={
+                          editedPayload.nutritional_information ??
+                          buildStructuredNutritionalInformation(
+                            editedPayload.english_product_name ||
+                              draftDetail?.draft.source_product_name ||
+                              'Product'
+                          )
+                        }
+                        onChange={(e) =>
                           setEditedPayload({
                             ...editedPayload,
-                            health_benefits: [...(editedPayload.health_benefits || []), nextItem],
-                          });
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 text-[11px] font-bold flex items-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" /> Add Health Benefit Claim
-                      </button>
-                    </div>
+                            nutritional_information: e.target.value,
+                          })
+                        }
+                        placeholder={
+                          'The exact nutritional composition depends on the drying method, sugar coating and recipe.\nNutrient\tNutritional contribution\nCarbohydrates\tNaturally present sugars and added sugar\nDietary fibre\tSupports digestive health\nVitamin C\tMay be present, but reduced by processing\nPolyphenols\tAntioxidant compounds\nCalcium\tSmall amounts\nIron\tSmall amounts\nPotassium\tNaturally present\n\nImportant: ...'
+                        }
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-mono leading-relaxed resize-y"
+                      />
 
-                    <div className="space-y-3">
-                      {(editedPayload.health_benefits || []).map((hb, idx) => (
-                        <div
-                          key={idx}
-                          className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/60 grid grid-cols-1 md:grid-cols-12 gap-3 items-start"
-                        >
-                          <div className="md:col-span-7">
-                            <label className="block text-[10px] font-bold text-slate-500">
-                              Responsible Non-Deceptive Wellness Claim
-                            </label>
-                            <input
-                              type="text"
-                              value={hb.claim}
-                              onChange={(e) => {
-                                const list = [...editedPayload.health_benefits];
-                                list[idx] = { ...list[idx], claim: e.target.value };
-                                setEditedPayload({ ...editedPayload, health_benefits: list });
-                              }}
-                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white mt-0.5"
-                            />
-                          </div>
-                          <div className="md:col-span-2">
-                            <label className="block text-[10px] font-bold text-slate-500">
-                              Evidence Level
-                            </label>
-                            <select
-                              value={hb.evidence_level}
-                              onChange={(e) => {
-                                const list = [...editedPayload.health_benefits];
-                                list[idx] = {
-                                  ...list[idx],
-                                  evidence_level: e.target.value as AIEvidenceLevel,
-                                };
-                                setEditedPayload({ ...editedPayload, health_benefits: list });
-                              }}
-                              className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs bg-white mt-0.5"
-                            >
-                              <option value="traditional_use">traditional_use</option>
-                              <option value="nutritional">nutritional</option>
-                              <option value="preliminary_study">preliminary_study</option>
-                              <option value="human_study">human_study</option>
-                              <option value="insufficient_evidence">insufficient_evidence</option>
-                            </select>
-                          </div>
-                          <div className="md:col-span-2">
-                            <label className="block text-[10px] font-bold text-slate-500">
-                              Claim Approval
-                            </label>
-                            <select
-                              value={hb.review_status || 'pending_review'}
-                              onChange={(e) => {
-                                const list = [...editedPayload.health_benefits];
-                                list[idx] = {
-                                  ...list[idx],
-                                  review_status: e.target.value as AIReviewStatus,
-                                };
-                                setEditedPayload({ ...editedPayload, health_benefits: list });
-                              }}
-                              className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs bg-white mt-0.5 font-bold"
-                            >
-                              <option value="approved">Approved</option>
-                              <option value="pending_review">Pending Review</option>
-                              <option value="rejected">Rejected</option>
-                            </select>
-                          </div>
-                          <div className="md:col-span-1 pt-4 text-right">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const list = editedPayload.health_benefits.filter((_, i) => i !== idx);
-                                setEditedPayload({ ...editedPayload, health_benefits: list });
-                              }}
-                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                      <div>
+                      <div className="pt-2">
                         <div className="flex items-center justify-between mb-1">
                           <label className="block text-[11px] font-bold text-slate-600">
-                            Nutritional Benefits (Comma-separated, min 3 points)
+                            Nutritional Benefits Summary Tags (Comma-separated, min 3 points)
                           </label>
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -2807,7 +2891,7 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                           </span>
                         </div>
                         <textarea
-                          rows={3}
+                          rows={2}
                           placeholder="Point 1, Point 2, Point 3"
                           value={(editedPayload.nutritional_benefits || []).join(', ')}
                           onChange={(e) =>
@@ -2819,25 +2903,47 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                                 .filter(Boolean),
                             })
                           }
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs resize-y"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs resize-y"
                         />
                       </div>
+                    </div>
+
+                    {/* 3. Safety Precautions (Dedicated Multi-Line Box) */}
+                    <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50/30 space-y-2">
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                          General Safety Precautions (One per line)
+                        <label className="block text-xs font-black text-slate-900 uppercase tracking-wide">
+                          Safety Precautions
                         </label>
-                        <textarea
-                          rows={3}
-                          value={formatArrayAsLines(editedPayload.safety_precautions)}
-                          onChange={(e) =>
-                            setEditedPayload({
-                              ...editedPayload,
-                              safety_precautions: parseLinesToArray(e.target.value),
-                            })
-                          }
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
-                        />
+                        <p className="text-[11px] text-slate-500">
+                          <code>Important</code> heading, bulleted <code>- Topic: Detail</code>{' '}
+                          precautions, and closing note (exported to{' '}
+                          <code>products.safetyPrecautions</code> &amp;{' '}
+                          <code>products.generalPrecautions</code>).
+                        </p>
                       </div>
+                      <textarea
+                        rows={11}
+                        value={
+                          editedPayload.safety_precautions_text ??
+                          formatSafetyPrecautionsArrayToText(
+                            editedPayload.safety_precautions,
+                            editedPayload.english_product_name ||
+                              draftDetail?.draft.source_product_name ||
+                              'Product'
+                          )
+                        }
+                        onChange={(e) =>
+                          setEditedPayload({
+                            ...editedPayload,
+                            safety_precautions_text: e.target.value,
+                            safety_precautions: safetyPrecautionsTextToLines(e.target.value),
+                          })
+                        }
+                        placeholder={
+                          'Important\n- Diabetes: ...\n- Excessive consumption: ...\n- Blood-thinning medicines: ...\n- Blood sugar medication: ...\n- Dental health: ...\n- Pregnancy and breastfeeding: ...\nThese precautions are particularly relevant to concentrated extracts and supplements, not necessarily occasional food consumption'
+                        }
+                        className="w-full px-3 py-2.5 rounded-xl border border-amber-200 bg-white text-xs leading-relaxed resize-y"
+                      />
                     </div>
                   </div>
 
@@ -5614,14 +5720,32 @@ export const AIProductContentView: React.FC<AIProductContentViewProps> = ({
                               products.{item.masterField}
                             </div>
                           </td>
-                          <td className="py-3 px-3 max-w-[260px] truncate text-slate-500 font-mono text-[11px]">
+                          <td
+                            className="py-3 px-3 max-w-[260px] truncate text-slate-500 font-mono text-[11px]"
+                            title={
+                              item.currentMasterValue === null || item.currentMasterValue === undefined
+                                ? ''
+                                : typeof item.currentMasterValue === 'object'
+                                ? JSON.stringify(item.currentMasterValue, null, 2)
+                                : String(item.currentMasterValue)
+                            }
+                          >
                             {item.currentMasterValue === null || item.currentMasterValue === undefined
                               ? '—'
                               : typeof item.currentMasterValue === 'object'
                               ? JSON.stringify(item.currentMasterValue)
                               : String(item.currentMasterValue)}
                           </td>
-                          <td className="py-3 px-3 max-w-[300px] truncate text-slate-900 font-semibold text-[11px]">
+                          <td
+                            className="py-3 px-3 max-w-[300px] truncate text-slate-900 font-semibold text-[11px]"
+                            title={
+                              item.proposedAiValue === null || item.proposedAiValue === undefined
+                                ? ''
+                                : typeof item.proposedAiValue === 'object'
+                                ? JSON.stringify(item.proposedAiValue, null, 2)
+                                : String(item.proposedAiValue)
+                            }
+                          >
                             {item.proposedAiValue === null || item.proposedAiValue === undefined
                               ? '—'
                               : typeof item.proposedAiValue === 'object'

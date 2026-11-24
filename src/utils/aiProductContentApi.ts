@@ -12,6 +12,12 @@ import {
 } from 'firebase/firestore';
 import { auth, db, storage } from '../firebase';
 import { resolveRegionalProductNames } from './botanicalRegionalNames';
+import {
+  buildStructuredHealthBenefits,
+  buildStructuredNutritionalInformation,
+  buildStructuredSafetyPrecautionsText,
+  safetyPrecautionsTextToLines,
+} from './healthNutritionTemplates';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import type {
   AICommerceContentPayload,
@@ -428,16 +434,7 @@ export function buildClientFallbackContent(
     storage_instructions:
       'Store in a cool, dry, and hygienic place away from direct sunlight and moisture. Keep in an airtight container after opening.',
     translations,
-    health_benefits: isHousehold
-      ? []
-      : [
-          {
-            claim: 'Supports everyday digestive comfort and antioxidant intake as part of a balanced diet',
-            evidence_level: 'traditional_use',
-            reference_ids: ['REF-1'],
-            review_status: 'pending_review',
-          },
-        ],
+    health_benefits: isHousehold ? [] : buildStructuredHealthBenefits(cleanName),
     nutritional_benefits: isHousehold
       ? ['Formulated for household care']
       : [
@@ -445,10 +442,11 @@ export function buildClientFallbackContent(
           'Source of plant-based dietary fiber and trace phytonutrients',
           'Zero trans fat, zero cholesterol, and free from synthetic additives',
         ],
-    safety_precautions: [
-      'Check ingredient label for potential allergens before use.',
-      'For informational and culinary purposes only; not intended to diagnose, treat, cure, or prevent any disease.',
-    ],
+    nutritional_information: buildStructuredNutritionalInformation(cleanName),
+    safety_precautions: safetyPrecautionsTextToLines(
+      buildStructuredSafetyPrecautionsText(cleanName)
+    ),
+    safety_precautions_text: buildStructuredSafetyPrecautionsText(cleanName),
     ayurveda_applicability,
     is_ayurvedic_product: isAyurvedicSelected,
     ayurveda:
@@ -633,11 +631,33 @@ export function buildMasterComparisonDiffClient(params: {
       }
     }
 
-    const approvedClaims = (payload.health_benefits || []).filter((hb) => hb.review_status !== 'rejected');
+    const approvedClaims = (payload.health_benefits || [])
+      .filter((hb) => hb.review_status !== 'rejected')
+      .map((hb) => ({
+        claim: hb.claim,
+        review_status: 'approved' as const,
+      }));
     pushItem('healthBenefits', 'Health Benefits', 'health', 'healthBenefits', approvedClaims);
     pushItem('nutritionalBenefits', 'Nutritional Benefits', 'health', 'nutritionalBenefits', payload.nutritional_benefits);
+    pushItem(
+      'nutritionalInformation',
+      'Nutritional Information (Structured Table)',
+      'health',
+      'nutritionalInformation',
+      payload.nutritional_information ||
+        buildStructuredNutritionalInformation(payload.english_product_name)
+    );
     pushItem('generalPrecautions', 'General Safety Precautions', 'health', 'generalPrecautions', payload.safety_precautions);
-    pushItem('healthReferences', 'Health & Scientific References', 'health', 'healthReferences', payload.references);
+    pushItem(
+      'safetyPrecautions',
+      'Safety Precautions (Structured)',
+      'health',
+      'safetyPrecautions',
+      payload.safety_precautions_text ||
+        (Array.isArray(payload.safety_precautions) && payload.safety_precautions.length > 0
+          ? payload.safety_precautions.join('\n')
+          : buildStructuredSafetyPrecautionsText(payload.english_product_name))
+    );
 
     const isAyurvedic = isAyurvedicEnabled && Boolean(payload.ayurveda);
     if (isAyurvedicEnabled) {
@@ -2417,6 +2437,20 @@ export async function applyAIDraftToMaster(params: {
       }
     }
 
+    // Always sanitize healthBenefits export: remove evidence_level & reference_ids, force review_status = "approved"
+    if (Array.isArray(updatePatch.healthBenefits)) {
+      const cleanedHealthBenefits = updatePatch.healthBenefits
+        .filter((hb: any) => hb && hb.review_status !== 'rejected')
+        .map((hb: any) =>
+          typeof hb === 'string'
+            ? { claim: hb, review_status: 'approved' as const }
+            : { claim: String(hb.claim || '').trim(), review_status: 'approved' as const }
+        )
+        .filter((hb: any) => Boolean(hb.claim));
+      updatePatch.healthBenefits = cleanedHealthBenefits;
+      afterSnapshot.healthBenefits = cleanedHealthBenefits;
+    }
+
     // Always avoid exporting excluded fields to `products` during Update Product Master execution
     const ALWAYS_EXCLUDED_MASTER_FIELDS = [
       'meeshoSales',
@@ -2426,6 +2460,7 @@ export async function applyAIDraftToMaster(params: {
       'gstVerifiedAt',
       'gtin',
       'availablePackingSizes',
+      'healthReferences',
     ];
     for (const excludedKey of ALWAYS_EXCLUDED_MASTER_FIELDS) {
       delete updatePatch[excludedKey];

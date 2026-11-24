@@ -245,12 +245,17 @@ test('Section 18.8 & 12: Selective Master Sync maps V5 General + 21 Ayurvedic fi
   assert.equal(updatePatch.sanskritName, 'Haridra (हरिद्रा)');
   assert.equal(updatePatch.lowestWebPrice, 145);
   assert.equal(updatePatch.highestWebPrice, 185);
-  // Only the approved health benefit claim must be included
+  // Only the non-rejected health benefit claim must be included, with review_status = 'approved'
+  // and without evidence_level or reference_ids; healthReferences must never be exported
   assert.equal(updatePatch.healthBenefits.length, 1);
   assert.equal(
     updatePatch.healthBenefits[0].claim,
     'Traditionally supports balanced digestion and antioxidant intake.'
   );
+  assert.equal(updatePatch.healthBenefits[0].review_status, 'approved');
+  assert.equal('evidence_level' in updatePatch.healthBenefits[0], false);
+  assert.equal('reference_ids' in updatePatch.healthBenefits[0], false);
+  assert.equal('healthReferences' in updatePatch, false);
   // Unselected field (category) must not be in updatePatch
   assert.equal('category' in updatePatch, false);
   // Protected selling price & SKU fields must never be in updatePatch
